@@ -1,0 +1,33 @@
+# B3 Market Configuration – Modal (June 2025)
+market:
+  trading_hours:
+    open: "10:00"          # continuous session starts
+    close: "16:55"         # continuous session ends; closing auction 16:55-17:00
+    timezone: "America/Sao_Paulo"
+
+  # Transaction costs
+  costs:
+    # --- mandatory B3 fees ---
+    emolument: 0.00005                 # 0.005 % negotiation fee
+    settlement_day_trade: 0.00018      # 0.018 % settlement fee (day-trade)
+    settlement_swing_trade: 0.00025    # 0.025 % settlement fee (overnight)
+
+    # --- Modal brokerage ---
+    brokerage_fee: 0.0                 # zero brokerage via web/app
+    min_brokerage: 0.0                 # no minimum charge
+    iss_rate: 0.05                     # up to 5 % ISS on brokerage (currently 0 because brokerage = 0)
+
+    # --- exceptional desk charges ---
+    dealing_desk_fee: "25.21 + 0.5% (min 50.00)"   # automatic close-out / phone desk
+
+# Tax Configuration
+taxes:
+  swing_trade: 0.15        # 15 % capital-gains tax
+  day_trade: 0.20          # 20 % capital-gains tax
+  exemption_limit: 20000   # tax-free sales ceiling for non-day-trade (BRL/month)
+
+# Portfolio Settings
+portfolio:
+  initial_cash: 100000     # starting capital in BRL
+  max_positions: 10
+  position_sizing: "equal_weight"
