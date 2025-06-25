@@ -7,6 +7,7 @@ Advanced portfolio management with comprehensive Brazilian market compliance:
 - Comprehensive error handling and defensive programming
 - Performance optimization and regulatory compliance
 - Detailed logging and audit trail generation
+- Transaction Cost Analysis (TCA) integration
 
 Compliance: Receita Federal IN RFB 1.585/2015, CVM Resolution 378/2009
 
@@ -26,40 +27,10 @@ import pytz
 
 from .loss_manager import EnhancedLossCarryforwardManager
 from .settlement_manager import AdvancedSettlementManager
+from .tca import TransactionCostAnalyzer
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class FeeConfig:
-    """
-    Configuration for all Brazilian market fees and taxes.
-    
-    Attributes:
-        emolument: B3 negotiation fee (0.005%)
-        settlement_day_trade: Settlement fee for day trades (0.018%)
-        settlement_swing_trade: Settlement fee for swing trades (0.025%)
-        brokerage_fee: Brokerage fee percentage (0% for Modal web/app)
-        min_brokerage: Minimum brokerage charge (R$ 0 for Modal)
-        iss_rate: ISS tax rate on brokerage (5% statutory max)
-        swing_trade_tax: Swing trade tax rate (15%)
-        day_trade_tax: Day trade tax rate (20%)
-        exemption_limit: Monthly swing trade exemption (R$ 20,000)
-        irrf_swing_rate: IRRF withholding rate for swing trades (0.005%)
-        irrf_day_rate: IRRF withholding rate for day trades (1%)
-    """
-    emolument: float = 0.00005
-    settlement_day_trade: float = 0.00018
-    settlement_swing_trade: float = 0.00025
-    brokerage_fee: float = 0.0
-    min_brokerage: float = 0.0
-    iss_rate: float = 0.05
-    swing_trade_tax: float = 0.15
-    day_trade_tax: float = 0.20
-    exemption_limit: float = 20000.0
-    irrf_swing_rate: float = 0.00005  # 0.005% on swing-trade sale value
-    irrf_day_rate: float = 0.01       # 1% on day-trade profit
 
 
 @dataclass
@@ -102,6 +73,7 @@ class EnhancedPortfolio:
     - Comprehensive error handling and validation
     - Performance optimization and caching
     - Detailed audit trails and regulatory compliance
+    - Transaction Cost Analysis (TCA) integration
     """
     
     def __init__(self, config_path: str = "config/settings.yaml"):
@@ -125,6 +97,9 @@ class EnhancedPortfolio:
             settlement_days=self.config.get('settlement', {}).get('cycle_days', 2),
             market_timezone=self.config['market']['trading_hours']['timezone']
         )
+        
+        # Initialize Transaction Cost Analyzer
+        self.tca = TransactionCostAnalyzer(config_path)
         
         # Portfolio state
         self.positions: Dict[str, Position] = {}
@@ -186,7 +161,7 @@ class EnhancedPortfolio:
     
     def _calculate_trade_costs(self, trade_value: float, trade_type: str) -> Dict[str, float]:
         """
-        Calculate comprehensive trade costs with Brazilian market compliance.
+        Calculate comprehensive trade costs using Transaction Cost Analyzer.
         
         Args:
             trade_value: Total trade value
@@ -195,32 +170,21 @@ class EnhancedPortfolio:
         Returns:
             Dict containing all cost components
         """
-        costs = self.config['market']['costs']
-        
-        # B3 fees
-        emolument = trade_value * costs['emolument']
-        
-        # Settlement fees based on trade type
-        if trade_type == 'day_trade':
-            settlement_fee = trade_value * costs['settlement_day_trade']
-        else:
-            settlement_fee = trade_value * costs['settlement_swing_trade']
-        
-        # Modal brokerage (electronic only)
-        brokerage_fee = max(costs['min_brokerage'], 
-                           trade_value * costs['brokerage_fee'])
-        
-        # ISS on brokerage
-        iss_fee = brokerage_fee * costs['iss_rate']
-        
-        total_costs = emolument + settlement_fee + brokerage_fee + iss_fee
+        # Use TCA module for cost calculation
+        cost_breakdown = self.tca.calculate_costs(
+            order_value=trade_value,
+            is_buy=True,  # Will be adjusted in buy/sell methods
+            trade_type=trade_type
+        )
         
         return {
-            'emolument': emolument,
-            'settlement_fee': settlement_fee,
-            'brokerage_fee': brokerage_fee,
-            'iss_fee': iss_fee,
-            'total_costs': total_costs
+            'emolument': cost_breakdown.emolument,
+            'settlement_fee': cost_breakdown.settlement_fee,
+            'brokerage_fee': cost_breakdown.brokerage_fee,
+            'iss_fee': cost_breakdown.iss_fee,
+            'total_costs': cost_breakdown.total_costs,
+            'min_brokerage_applied': cost_breakdown.min_brokerage_applied,
+            'cost_percentage': cost_breakdown.cost_percentage
         }
     
     def _calculate_taxes(self, profit: float, trade_type: str) -> Dict[str, float]:
@@ -296,7 +260,23 @@ class EnhancedPortfolio:
             self._validate_trade_inputs(ticker, quantity, price, trade_date, trade_type)
             
             trade_value = quantity * price
-            costs = self._calculate_trade_costs(trade_value, trade_type)
+            
+            # Use TCA for buy order costs
+            cost_breakdown = self.tca.calculate_costs(
+                order_value=trade_value,
+                is_buy=True,
+                trade_type=trade_type
+            )
+            costs = {
+                'emolument': cost_breakdown.emolument,
+                'settlement_fee': cost_breakdown.settlement_fee,
+                'brokerage_fee': cost_breakdown.brokerage_fee,
+                'iss_fee': cost_breakdown.iss_fee,
+                'total_costs': cost_breakdown.total_costs,
+                'min_brokerage_applied': cost_breakdown.min_brokerage_applied,
+                'cost_percentage': cost_breakdown.cost_percentage
+            }
+            
             total_cost = trade_value + costs['total_costs']
             
             # Check available cash
@@ -402,7 +382,22 @@ class EnhancedPortfolio:
             
             # Calculate trade details
             trade_value = quantity * price
-            costs = self._calculate_trade_costs(trade_value, trade_type)
+            
+            # Use TCA for sell order costs
+            cost_breakdown = self.tca.calculate_costs(
+                order_value=trade_value,
+                is_buy=False,
+                trade_type=trade_type
+            )
+            costs = {
+                'emolument': cost_breakdown.emolument,
+                'settlement_fee': cost_breakdown.settlement_fee,
+                'brokerage_fee': cost_breakdown.brokerage_fee,
+                'iss_fee': cost_breakdown.iss_fee,
+                'total_costs': cost_breakdown.total_costs,
+                'min_brokerage_applied': cost_breakdown.min_brokerage_applied,
+                'cost_percentage': cost_breakdown.cost_percentage
+            }
             
             # Calculate profit/loss
             cost_basis = quantity * position.avg_price
