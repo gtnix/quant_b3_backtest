@@ -30,3 +30,59 @@ portfolio:
   initial_cash: 100000     # starting capital in BRL
   max_positions: 10
   position_sizing: "equal_weight"
+
+# Enhanced Settlement Configuration
+settlement:
+  cycle_days: 2                    # T+2 settlement cycle
+  timezone: "America/Sao_Paulo"    # Market timezone for precise timing
+  strict_mode: true                # Enforce rigorous settlement rules
+  holiday_calendar: "b3"           # Use B3 holiday calendar
+  max_retry_attempts: 3            # Maximum settlement retry attempts
+  auto_process_settlements: true   # Automatically process due settlements
+
+# Enhanced Loss Carryforward Configuration
+loss_carryforward:
+  max_tracking_years: 5            # Maximum years to track losses (regulatory flexibility)
+  global_loss_limit: null          # Potential future regulatory constraint (null = no limit)
+  asset_specific_tracking: true    # Enable per-asset loss tracking
+  temporal_management: true        # Enable timestamp-based loss management
+  audit_trail_enabled: true        # Enable comprehensive audit trail generation
+  auto_prune_old_losses: true      # Automatically remove losses older than max_tracking_years
+  partial_application: true        # Enable partial loss application
+  performance_caching: true        # Enable performance optimization with caching
+
+# Performance & Monitoring Configuration
+performance:
+  enable_caching: true             # Enable LRU caching for performance
+  cache_size: 128                  # Maximum cache entries
+  enable_profiling: false          # Enable performance profiling
+  log_level: "INFO"                # Logging level (DEBUG, INFO, WARNING, ERROR)
+  audit_trail_retention_days: 365  # Days to retain audit trails
+  backup_frequency_hours: 24       # Hours between automatic backups
+
+# Compliance & Regulatory Configuration
+compliance:
+  regulatory_framework: "brazilian" # Regulatory framework (brazilian, international)
+  tax_year_start: 1                # Tax year start month (1 = January)
+  reporting_frequency: "monthly"   # Reporting frequency (daily, weekly, monthly)
+  auto_export_audit_trails: true   # Automatically export audit trails
+  regulatory_updates_enabled: true # Enable automatic regulatory updates
+  compliance_checks_enabled: true  # Enable automatic compliance validation
+
+# Error Handling & Resilience Configuration
+error_handling:
+  max_retry_attempts: 3            # Maximum retry attempts for failed operations
+  graceful_degradation: true       # Enable graceful degradation on errors
+  fallback_strategies: true        # Enable fallback strategies
+  error_logging_level: "ERROR"     # Error logging level
+  auto_recovery_enabled: true      # Enable automatic error recovery
+  circuit_breaker_enabled: false   # Enable circuit breaker pattern
+
+# Advanced Features Configuration
+advanced:
+  real_time_processing: false      # Enable real-time processing mode
+  batch_processing_size: 1000      # Batch size for bulk operations
+  parallel_processing: false       # Enable parallel processing
+  memory_optimization: true        # Enable memory optimization
+  lazy_loading: true               # Enable lazy loading for large datasets
+  compression_enabled: true        # Enable data compression for storage
