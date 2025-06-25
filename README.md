@@ -1,14 +1,18 @@
 # Brazilian Stock Market Backtesting Engine
 
-A comprehensive backtesting engine for Brazilian stocks (B3) with support for real-time data fetching, portfolio management, and strategy testing.
+A comprehensive backtesting engine for Brazilian stocks (B3) with support for real-time data fetching, portfolio management, advanced transaction cost analysis, and strategy testing.
 
 ## Features
 
 - **Data Management**: Download and process Brazilian stock data using Alpha Vantage API
 - **Portfolio Management**: Automated Brazilian market fees, taxes, and exemptions
+- **Transaction Cost Analysis (TCA)**: Accurate, modular calculation of all trading costs (brokerage, emolument, settlement, ISS)
+- **Advanced Loss Carryforward**: Full compliance with Brazilian tax law, including indefinite and per-asset loss tracking
+- **Advanced Settlement Manager**: T+2 settlement queue, business day handling, and cash flow simulation
 - **Strategy Testing**: Framework for implementing and testing trading strategies
-- **Configuration**: Flexible settings for market hours, fees, and portfolio parameters
+- **Configuration**: Flexible settings for market hours, fees, portfolio, compliance, and performance
 - **Security**: Secure API key management for safe GitHub uploads
+- **Comprehensive Testing**: Extensive test suites for all advanced modules
 
 ## Project Structure
 
@@ -23,14 +27,25 @@ quant_backtest/
 │   └── processed/             # Processed data (NOT shared)
 ├── engine/
 │   ├── loader.py              # Data loading utilities
-│   └── portfolio.py           # Portfolio management
+│   ├── portfolio.py           # Portfolio management (uses advanced managers)
+│   ├── tca.py                 # Transaction Cost Analysis (TCA) module
+│   ├── loss_manager.py        # Enhanced Loss Carryforward Manager
+│   └── settlement_manager.py  # Advanced Settlement Manager (T+2)
 ├── scripts/
 │   └── download_data.py       # Data downloader
 ├── strategies/                # Trading strategies
 ├── reports/                   # Backtest reports (NOT shared)
+├── tests/                     # Comprehensive test suites
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```
+
+## Advanced Features
+
+- **Transaction Cost Analysis (TCA)**: Modular, accurate calculation of all trading costs, including brokerage, emolument, settlement, and ISS. Fully configurable and tested.
+- **Enhanced Loss Carryforward Manager**: Tracks losses per asset and globally, supports indefinite carryforward, and provides audit trails for compliance.
+- **Advanced Settlement Manager**: Models T+2 settlement with business day handling, cash flow simulation, and robust error handling.
+- **Comprehensive Testing**: Extensive unit and integration tests for TCA, loss carryforward, and settlement logic.
 
 ## Setup Instructions
 
@@ -95,11 +110,8 @@ This will:
 ```bash
 # Example: Run a simple backtest
 python -c "
-from engine.portfolio import Portfolio
-from config.settings import load_settings
-
-settings = load_settings()
-portfolio = Portfolio(settings)
+from engine.portfolio import EnhancedPortfolio
+portfolio = EnhancedPortfolio('config/settings.yaml')
 # Add your backtest logic here
 "
 ```
@@ -125,9 +137,9 @@ The following files and directories are automatically excluded from Git:
 
 ## Configuration
 
-### Market Settings (`config/settings.yaml`)
+### Market & Advanced Settings (`config/settings.yaml`)
 
-Configure Brazilian market parameters:
+Configure Brazilian market parameters and advanced features:
 
 ```yaml
 market:
@@ -135,23 +147,47 @@ market:
     open: "10:00"
     close: "16:55"
     timezone: "America/Sao_Paulo"
-  
   costs:
     emolument: 0.00005                 # B3 negotiation fee
     settlement_day_trade: 0.00018      # Day-trade settlement
     settlement_swing_trade: 0.00025    # Swing-trade settlement
     brokerage_fee: 0.0                 # Modal brokerage (zero)
+    min_brokerage: 0.0                 # Minimum brokerage
+    iss_rate: 0.05                     # ISS tax rate
 
 taxes:
   swing_trade: 0.15        # 15% capital gains
   day_trade: 0.20          # 20% capital gains
   exemption_limit: 20000   # Monthly tax-free limit
+  irrf_swing_rate: 0.00005 # IRRF withholding (swing)
+  irrf_day_rate: 0.01      # IRRF withholding (day trade)
 
 portfolio:
   initial_cash: 100000     # Starting capital
   max_positions: 10
   position_sizing: "equal_weight"
+
+settlement:
+  cycle_days: 2                    # T+2 settlement cycle
+  timezone: "America/Sao_Paulo"    # Market timezone
+  strict_mode: true                # Enforce settlement rules
+  holiday_calendar: "b3"           # Use B3 holiday calendar
+
+loss_carryforward:
+  asset_specific_tracking: true    # Enable per-asset loss tracking
+  audit_trail_enabled: true        # Enable audit trail
 ```
+
+## Advanced Testing
+
+Run the comprehensive test suites for TCA, loss carryforward, and settlement:
+
+```bash
+python -m unittest discover tests
+```
+
+- `tests/test_tca.py`: Transaction Cost Analysis tests
+- `tests/test_enhanced_managers.py`: Loss carryforward and settlement manager tests
 
 ## Contributing
 
