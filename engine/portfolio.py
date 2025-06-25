@@ -38,12 +38,11 @@ class FeeConfig:
         brokerage_fee: Brokerage fee percentage (0% for Modal web/app)
         min_brokerage: Minimum brokerage charge (R$ 0 for Modal)
         iss_rate: ISS tax rate on brokerage (5% statutory max)
-        dealing_desk_base: Base dealing desk fee (R$ 25.21)
-        dealing_desk_rate: Dealing desk fee rate (0.5%)
-        dealing_desk_min: Minimum dealing desk fee (R$ 50.00)
         swing_trade_tax: Swing trade tax rate (15%)
         day_trade_tax: Day trade tax rate (20%)
         exemption_limit: Monthly swing trade exemption (R$ 20,000)
+        irrf_swing_rate: IRRF withholding rate for swing trades (0.005%)
+        irrf_day_rate: IRRF withholding rate for day trades (1%)
     """
     emolument: float = 0.00005
     settlement_day_trade: float = 0.00018
@@ -51,12 +50,11 @@ class FeeConfig:
     brokerage_fee: float = 0.0
     min_brokerage: float = 0.0
     iss_rate: float = 0.05
-    dealing_desk_base: float = 25.21
-    dealing_desk_rate: float = 0.005
-    dealing_desk_min: float = 50.0
     swing_trade_tax: float = 0.15
     day_trade_tax: float = 0.20
     exemption_limit: float = 20000.0
+    irrf_swing_rate: float = 0.00005  # 0.005% on swing-trade sale value
+    irrf_day_rate: float = 0.01       # 1% on day-trade profit
 
 
 class Portfolio:
@@ -107,6 +105,17 @@ class Portfolio:
         self.swing_sales_mtd = 0.0  # Monthly swing sales total
         self.current_month = datetime.now().month
         
+        # Daily P&L tracking for day trades
+        self.daily_pnl_by_asset = defaultdict(float)  # Track daily P&L per asset
+        self.last_trade_date = None  # Track last trade date for daily reset
+        
+        # Loss carryforward tracking per ticker
+        self.loss_balance = defaultdict(float)  # Track accumulated losses per ticker
+        
+        # T+2 settlement queue
+        self.settlement_queue = []  # Queue for T+2 settlement
+        self.settled_cash = initial_cash  # Cash available after settlement
+        
         logger.info(f"Portfolio initialized with R$ {initial_cash:,.2f}")
         logger.info(f"Fee config loaded: Modal brokerage (R$ 0), "
                    f"Day trade tax {self.fee_config.day_trade_tax*100}%, "
@@ -121,12 +130,6 @@ class Portfolio:
             costs = config['market']['costs']
             taxes = config['taxes']
             
-            # Parse dealing desk fee string
-            dealing_desk_str = costs['dealing_desk_fee']
-            dealing_desk_base = float(dealing_desk_str.split('+')[0].strip())
-            dealing_desk_rate = float(dealing_desk_str.split('+')[1].split('%')[0].strip()) / 100
-            dealing_desk_min = float(dealing_desk_str.split('min')[1].strip())
-            
             return FeeConfig(
                 emolument=costs['emolument'],
                 settlement_day_trade=costs['settlement_day_trade'],
@@ -134,27 +137,24 @@ class Portfolio:
                 brokerage_fee=costs['brokerage_fee'],
                 min_brokerage=costs['min_brokerage'],
                 iss_rate=costs['iss_rate'],
-                dealing_desk_base=dealing_desk_base,
-                dealing_desk_rate=dealing_desk_rate,
-                dealing_desk_min=dealing_desk_min,
                 swing_trade_tax=taxes['swing_trade'],
                 day_trade_tax=taxes['day_trade'],
-                exemption_limit=taxes['exemption_limit']
+                exemption_limit=taxes['exemption_limit'],
+                irrf_swing_rate=taxes.get('irrf_swing_rate', 0.00005),
+                irrf_day_rate=taxes.get('irrf_day_rate', 0.01)
             )
         except Exception as e:
             logger.warning(f"Could not load fee config from settings.yaml: {e}")
             logger.info("Using default Modal fee configuration")
             return FeeConfig()
     
-    def _calculate_fees(self, order_value: float, is_buy: bool, 
-                       order_method: Literal["electronic", "phone", "forced_close"]) -> Dict[str, float]:
+    def _calculate_fees(self, order_value: float, is_buy: bool) -> Dict[str, float]:
         """
-        Calculate all fees for a trade.
+        Calculate all fees for a trade (electronic orders only).
         
         Args:
             order_value (float): Total order value in BRL
             is_buy (bool): Whether this is a buy order
-            order_method (str): Order method (electronic, phone, forced_close)
             
         Returns:
             Dict[str, float]: Breakdown of all fees
@@ -171,18 +171,8 @@ class Portfolio:
         )
         fees['brokerage'] = brokerage_amount
         
-        # ISS on brokerage (5% of brokerage amount)
-        fees['iss'] = brokerage_amount * self.fee_config.iss_rate
-        
-        # Dealing desk fee (only for non-electronic orders)
-        if order_method != "electronic":
-            dealing_desk_fee = max(
-                self.fee_config.dealing_desk_base + (order_value * self.fee_config.dealing_desk_rate),
-                self.fee_config.dealing_desk_min
-            )
-            fees['dealing_desk'] = dealing_desk_fee
-        else:
-            fees['dealing_desk'] = 0.0
+        # Feature 7: ISS 5% on Brokerage
+        fees['iss'] = brokerage_amount * self.fee_config.iss_rate  # Why this matters: Models the municipal service tax on brokerage costs
         
         # Settlement fee (calculated in sell method based on day trade vs swing trade)
         fees['settlement'] = 0.0  # Will be calculated in sell method
@@ -198,30 +188,63 @@ class Portfolio:
             self.current_month = current_date.month
             logger.info(f"Reset monthly swing trade tracking for month {current_date.month}")
     
-    def buy(self, ticker: str, shares: int, price: float, date: datetime,
-            order_method: Literal["electronic", "phone", "forced_close"] = "electronic") -> Tuple[bool, str]:
+    def _calculate_t2_settlement_date(self, trade_date: datetime) -> datetime:
+        """Calculate T+2 settlement date (2 business days after trade)."""
+        # Simple implementation - add 2 days (weekend handling would be more complex)
+        settlement_date = trade_date + timedelta(days=2)
+        return settlement_date
+    
+    def _process_settlement_queue(self, current_date: datetime):
+        """Process settlement queue for trades that have reached T+2."""
+        # Process settlements that are due today
+        pending_settlements = []
+        for settlement in self.settlement_queue:
+            if settlement['settlement_date'].date() <= current_date.date():
+                # Execute settlement
+                if settlement['type'] == 'debit':
+                    self.settled_cash -= settlement['amount']
+                else:  # credit
+                    self.settled_cash += settlement['amount']
+                logger.info(f"T+2 settlement processed: {settlement['type']} R$ {settlement['amount']:.2f}")
+            else:
+                pending_settlements.append(settlement)
+        
+        self.settlement_queue = pending_settlements
+    
+    def buy(self, ticker: str, shares: int, price: float, date: datetime) -> Tuple[bool, str]:
         """
-        Execute a buy order with automatic fee calculation.
+        Execute a buy order with automatic fee calculation (electronic only).
         
         Args:
             ticker (str): Stock ticker symbol
             shares (int): Number of shares to buy
             price (float): Price per share
             date (datetime): Date of the trade
-            order_method (str): Order method (electronic, phone, forced_close)
             
         Returns:
             Tuple[bool, str]: (success, message)
         """
+        # Process settlement queue first
+        self._process_settlement_queue(date)
+        
         order_value = shares * price
-        fees = self._calculate_fees(order_value, is_buy=True, order_method=order_method)
+        fees = self._calculate_fees(order_value, is_buy=True)
         total_cost = order_value + fees['total']
         
-        # Check if we have enough cash
-        if total_cost > self.cash:
-            return False, f"Insufficient funds. Need R$ {total_cost:,.2f}, have R$ {self.cash:,.2f}"
+        # Check if we have enough settled cash
+        if total_cost > self.settled_cash:
+            return False, f"Insufficient settled funds. Need R$ {total_cost:,.2f}, have R$ {self.settled_cash:,.2f}"
         
-        # Deduct cash
+        # Queue T+2 settlement instead of immediate deduction
+        settlement_date = self._calculate_t2_settlement_date(date)
+        self.settlement_queue.append({
+            'type': 'debit',
+            'amount': total_cost,
+            'settlement_date': settlement_date,
+            'description': f'Buy {shares} {ticker} @ R$ {price:.2f}'
+        })
+        
+        # Update cash immediately for tracking (but not settled_cash)
         self.cash -= total_cost
         
         # Update or create position
@@ -259,7 +282,6 @@ class Portfolio:
             'shares': shares,
             'price': price,
             'order_value': order_value,
-            'order_method': order_method,
             'fees': fees,
             'total_cost': total_cost,
             'cash_after': self.cash
@@ -270,25 +292,29 @@ class Portfolio:
         self.total_fees_paid += fees['total']
         
         logger.info(f"Buy order executed: {shares} shares of {ticker} at R$ {price:.2f} "
-                   f"({order_method}), Fees: R$ {fees['total']:.2f}")
+                   f"Fees: R$ {fees['total']:.2f}")
         
         return True, f"Buy order executed: {shares} shares of {ticker} at R$ {price:.2f}"
     
-    def sell(self, ticker: str, shares: int, price: float, date: datetime,
-             order_method: Literal["electronic", "phone", "forced_close"] = "electronic") -> Tuple[bool, str]:
+    def sell(self, ticker: str, shares: int, price: float, date: datetime) -> Tuple[bool, str]:
         """
-        Execute a sell order with automatic fee and tax calculation.
+        Execute a sell order with automatic fee and tax calculation (electronic only).
         
         Args:
             ticker (str): Stock ticker symbol
             shares (int): Number of shares to sell
             price (float): Price per share
             date (datetime): Date of the trade
-            order_method (str): Order method (electronic, phone, forced_close)
             
         Returns:
             Tuple[bool, str]: (success, message)
         """
+        # Process settlement queue first
+        self._process_settlement_queue(date)
+        
+        # Reset daily tracking if needed
+        self._reset_daily_tracking(date)
+        
         # Reset monthly tracking if needed
         self._reset_monthly_tracking(date)
         
@@ -311,32 +337,70 @@ class Portfolio:
         is_daytrade = days_held == 0
         
         # Calculate fees (including settlement fee)
-        fees = self._calculate_fees(gross_proceeds, is_buy=False, order_method=order_method)
+        fees = self._calculate_fees(gross_proceeds, is_buy=False)
         
         # Add settlement fee based on trade type
         settlement_rate = (self.fee_config.settlement_day_trade if is_daytrade 
                           else self.fee_config.settlement_swing_trade)
         fees['settlement'] = gross_proceeds * settlement_rate
+        
+        # Feature 3: Swing IRRF 0.005%
+        if not is_daytrade:
+            fees['irrf'] = gross_proceeds * self.fee_config.irrf_swing_rate  # Why this matters: Models mandatory withholding on swing-trade settlements
+        else:
+            fees['irrf'] = 0.0  # Will be calculated later for day trades
+        
         fees['total'] = sum(fees.values())
         
-        # Calculate tax based on Brazilian rules
+        # Initialize tax variables
         tax_owed = 0.0
         exempt_amount = 0.0
+        irrf_credit = 0.0
         
         if gross_profit > 0:  # Only pay tax on profits
             if is_daytrade:
-                # Day trade: no exemption, 20% tax
-                tax_rate = self.fee_config.day_trade_tax
-                tax_owed = gross_profit * tax_rate
-                exempt_amount = 0.0
+                # Feature 4: Day-Trade CG Tax 20% on consolidated daily P&L
+                self.daily_pnl_by_asset[ticker] += gross_profit  # Add to daily P&L for this asset
+                consolidated_pnl = self.daily_pnl_by_asset[ticker]
+                
+                # Apply loss carryforward
+                if self.loss_balance[ticker] > 0:
+                    consolidated_pnl -= self.loss_balance[ticker]
+                    self.loss_balance[ticker] = max(0, self.loss_balance[ticker] - gross_profit)
+                
+                if consolidated_pnl > 0:
+                    tax_owed = consolidated_pnl * self.fee_config.day_trade_tax  # Why this matters: Consolidates same-day trades before applying day-trade tax
+                    exempt_amount = 0.0
+                else:
+                    tax_owed = 0.0
+                    # Add to loss carryforward
+                    self.loss_balance[ticker] += abs(consolidated_pnl)  # Why this matters: Allows past losses to offset future gains per tax rules
+                
+                # Feature 5: Day-Trade IRRF 1%
+                if consolidated_pnl > 0:
+                    irrf_credit = consolidated_pnl * self.fee_config.irrf_day_rate  # Why this matters: Captures the advance withholding on day-trade profits
+                    fees['irrf'] = irrf_credit
+                    fees['total'] = sum(fees.values())
+                
             else:
-                # Swing trade: apply monthly exemption
-                remaining_exemption = max(0, self.fee_config.exemption_limit - self.swing_sales_mtd)
+                # Feature 2: R$20,000 Exemption
+                remaining_exemption = max(0, self.fee_config.exemption_limit - self.swing_sales_mtd)  # Why this matters: Applies the legal monthly exemption before calculating tax
                 exempt_amount = min(remaining_exemption, gross_proceeds)
                 taxable_proceeds = gross_proceeds - exempt_amount
                 taxable_profit = gross_profit * (taxable_proceeds / gross_proceeds) if gross_proceeds > 0 else 0
-                tax_rate = self.fee_config.swing_trade_tax
-                tax_owed = taxable_profit * tax_rate
+                
+                # Apply loss carryforward
+                if self.loss_balance[ticker] > 0:
+                    taxable_profit -= self.loss_balance[ticker]
+                    self.loss_balance[ticker] = max(0, self.loss_balance[ticker] - taxable_profit)
+                
+                # Feature 1: Swing CG Tax 15%
+                if taxable_profit > 0:
+                    tax_owed = taxable_profit * self.fee_config.swing_trade_tax  # Why this matters: Ensures swing-trade gains over the exemption limit are taxed correctly
+                else:
+                    tax_owed = 0.0
+                    # Add to loss carryforward
+                    self.loss_balance[ticker] += abs(taxable_profit)
                 
                 # Update monthly swing sales tracking
                 self.swing_sales_mtd += gross_proceeds
@@ -344,7 +408,16 @@ class Portfolio:
         # Calculate net proceeds
         net_proceeds = gross_proceeds - fees['total'] - tax_owed
         
-        # Add cash back to portfolio
+        # Feature 8: T+2 Settlement for sell proceeds
+        settlement_date = self._calculate_t2_settlement_date(date)
+        self.settlement_queue.append({
+            'type': 'credit',
+            'amount': net_proceeds,
+            'settlement_date': settlement_date,
+            'description': f'Sell {shares} {ticker} @ R$ {price:.2f}'
+        })
+        
+        # Update cash immediately for tracking (but not settled_cash)
         self.cash += net_proceeds
         
         # Update position
@@ -366,7 +439,6 @@ class Portfolio:
             'shares': shares,
             'price': price,
             'order_value': gross_proceeds,
-            'order_method': order_method,
             'fees': fees,
             'gross_profit': gross_profit,
             'tax_owed': tax_owed,
@@ -375,7 +447,9 @@ class Portfolio:
             'days_held': days_held,
             'is_daytrade': is_daytrade,
             'cash_after': self.cash,
-            'swing_sales_mtd': self.swing_sales_mtd
+            'swing_sales_mtd': self.swing_sales_mtd,
+            'loss_balance': self.loss_balance[ticker],
+            'consolidated_pnl': self.daily_pnl_by_asset.get(ticker, 0) if is_daytrade else None
         }
         self.trades.append(trade_record)
         
@@ -390,18 +464,18 @@ class Portfolio:
         
         trade_type = "DAY TRADE" if is_daytrade else "SWING TRADE"
         logger.info(f"Sell order executed: {shares} shares of {ticker} at R$ {price:.2f} "
-                   f"({trade_type}, {order_method}), Profit: R$ {gross_profit:.2f}, "
+                   f"({trade_type}), Profit: R$ {gross_profit:.2f}, "
                    f"Tax: R$ {tax_owed:.2f}, Fees: R$ {fees['total']:.2f}")
         
         return True, f"Sell order executed: {shares} shares of {ticker} at R$ {price:.2f}"
     
     def get_portfolio_value(self, prices: Dict[str, float]) -> float:
-        """Calculate total portfolio value."""
+        """Calculate total portfolio value using settled cash."""
         positions_value = sum(
             self.positions[ticker]['shares'] * prices.get(ticker, 0)
             for ticker in self.positions
         )
-        return self.cash + positions_value
+        return self.settled_cash + positions_value
     
     def get_position_summary(self) -> Dict[str, Dict]:
         """Get summary of all current positions."""
@@ -477,7 +551,8 @@ class Portfolio:
         print("\n" + "="*60)
         print("PORTFOLIO SUMMARY")
         print("="*60)
-        print(f"Cash: R$ {self.cash:,.2f}")
+        print(f"Cash (including unsettled): R$ {self.cash:,.2f}")
+        print(f"Settled cash (T+2): R$ {self.settled_cash:,.2f}")
         print(f"Number of positions: {len(self.positions)}")
         print(f"Swing sales this month: R$ {self.swing_sales_mtd:,.2f}")
         
@@ -485,8 +560,9 @@ class Portfolio:
             print("\nCurrent Positions:")
             for ticker, position in self.positions.items():
                 days_held = (datetime.now() - position['purchase_date']).days
+                loss_balance = self.loss_balance.get(ticker, 0.0)
                 print(f"  {ticker}: {position['shares']} shares @ R$ {position['avg_price']:.2f} "
-                      f"(held {days_held} days)")
+                      f"(held {days_held} days, loss carryforward: R$ {loss_balance:.2f})")
         
         # Performance metrics
         metrics = self.get_performance_metrics()
@@ -498,6 +574,13 @@ class Portfolio:
         print(f"  Fees paid: R$ {metrics['total_fees_paid']:,.2f}")
         print(f"  Net profit: R$ {metrics['net_profit']:,.2f}")
         print("="*60)
+
+    def _reset_daily_tracking(self, current_date: datetime):
+        """Reset daily P&L tracking if we've moved to a new day."""
+        if self.last_trade_date is None or current_date.date() != self.last_trade_date:
+            self.daily_pnl_by_asset.clear()
+            self.last_trade_date = current_date.date()
+            logger.info(f"Reset daily P&L tracking for date {current_date.date()}")
 
 
 def main():
@@ -516,8 +599,7 @@ def main():
         ticker="VALE3",
         shares=100,
         price=50.0,
-        date=datetime.now(),
-        order_method="electronic"
+        date=datetime.now()
     )
     print(f"Buy VALE3: {msg}")
     
@@ -526,8 +608,7 @@ def main():
         ticker="VALE3",
         shares=100,
         price=52.0,
-        date=datetime.now(),
-        order_method="electronic"
+        date=datetime.now()
     )
     print(f"Sell VALE3 (day trade): {msg}")
     
@@ -539,8 +620,7 @@ def main():
         ticker="PETR4",
         shares=200,
         price=30.0,
-        date=datetime.now(),
-        order_method="electronic"
+        date=datetime.now()
     )
     print(f"Buy PETR4: {msg}")
     
@@ -550,22 +630,20 @@ def main():
         ticker="PETR4",
         shares=200,
         price=31.0,
-        date=tomorrow,
-        order_method="electronic"
+        date=tomorrow
     )
     print(f"Sell PETR4 (swing trade): {msg}")
     
-    # Example 3: Phone order with dealing desk fees
-    print("\n--- PHONE ORDER EXAMPLE ---")
+    # Example 3: Electronic order (Modal web/app)
+    print("\n--- ELECTRONIC ORDER EXAMPLE ---")
     
     success, msg = portfolio.buy(
         ticker="ITUB4",
         shares=150,
         price=35.0,
-        date=datetime.now(),
-        order_method="phone"
+        date=datetime.now()
     )
-    print(f"Buy ITUB4 (phone): {msg}")
+    print(f"Buy ITUB4 (electronic): {msg}")
     
     # Print comprehensive portfolio summary
     portfolio.print_summary()
@@ -578,7 +656,6 @@ def main():
             print(f"{trade['date'].strftime('%Y-%m-%d %H:%M')} | "
                   f"{trade['action']} {trade['ticker']} | "
                   f"{trade['shares']} shares @ R$ {trade['price']:.2f} | "
-                  f"Method: {trade['order_method']} | "
                   f"Fees: R$ {trade['fees']['total']:.2f}")
 
 
