@@ -30,10 +30,13 @@ quant_backtest/
 │   ├── portfolio.py           # Portfolio management (uses advanced managers)
 │   ├── tca.py                 # Transaction Cost Analysis (TCA) module
 │   ├── loss_manager.py        # Enhanced Loss Carryforward Manager
-│   └── settlement_manager.py  # Advanced Settlement Manager (T+2)
+│   ├── settlement_manager.py  # Advanced Settlement Manager (T+2)
+│   ├── base_strategy.py       # Abstract base class for strategies
+│   └── strategy/
+│       └── base_strategy.py   # (Duplicate base class for strategies)
 ├── scripts/
 │   └── download_data.py       # Data downloader
-├── strategies/                # Trading strategies
+├── strategies/                # User trading strategies (currently empty)
 ├── reports/                   # Backtest reports (NOT shared)
 ├── tests/                     # Comprehensive test suites
 ├── requirements.txt           # Python dependencies
@@ -45,6 +48,7 @@ quant_backtest/
 - **Transaction Cost Analysis (TCA)**: Modular, accurate calculation of all trading costs, including brokerage, emolument, settlement, and ISS. Fully configurable and tested.
 - **Enhanced Loss Carryforward Manager**: Tracks losses per asset and globally, supports indefinite carryforward, and provides audit trails for compliance.
 - **Advanced Settlement Manager**: Models T+2 settlement with business day handling, cash flow simulation, and robust error handling.
+- **Extensible Strategy Framework**: Implement your own trading strategies by subclassing the `BaseStrategy` class in `engine/base_strategy.py` or `engine/strategy/base_strategy.py` and placing your strategy files in the `strategies/` directory.
 - **Comprehensive Testing**: Extensive unit and integration tests for TCA, loss carryforward, and settlement logic.
 
 ## Setup Instructions
@@ -115,6 +119,10 @@ portfolio = EnhancedPortfolio('config/settings.yaml')
 # Add your backtest logic here
 "
 ```
+
+### Implement Your Own Strategies
+
+To create a custom trading strategy, subclass the `BaseStrategy` class from `engine/base_strategy.py` or `engine/strategy/base_strategy.py` and place your strategy file in the `strategies/` directory. The `strategies/` directory is currently empty and intended for user strategies.
 
 ## Security Features
 
