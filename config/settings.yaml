@@ -42,14 +42,29 @@ settlement:
 
 # Enhanced Loss Carryforward Configuration
 loss_carryforward:
-  max_tracking_years: 5            # Maximum years to track losses (regulatory flexibility)
-  global_loss_limit: null          # Potential future regulatory constraint (null = no limit)
-  asset_specific_tracking: true    # Enable per-asset loss tracking
-  temporal_management: true        # Enable timestamp-based loss management
-  audit_trail_enabled: true        # Enable comprehensive audit trail generation
-  auto_prune_old_losses: true      # Automatically remove losses older than max_tracking_years
-  partial_application: true        # Enable partial loss application
-  performance_caching: true        # Enable performance optimization with caching
+  max_tracking_years: null              # null = perpetual carryforward (Brazilian law 2025)
+  global_loss_limit: null               # No limit on accumulated losses (Brazilian law 2025)
+  asset_specific_tracking: true         # Enable per-asset loss tracking
+  temporal_management: true             # Enable timestamp-based loss management
+  audit_trail_enabled: true             # Enable comprehensive audit trail generation
+  auto_prune_old_losses: false          # Disabled - losses never expire (Brazilian law 2025)
+  partial_application: true             # Enable partial loss application
+  performance_caching: true             # Enable performance optimization with caching
+  
+  # Brazilian Regulatory Compliance (2025)
+  regulatory_compliance:
+    max_offset_percentage: 0.30         # Maximum 30% loss offset against capital gains
+    capital_gains_only: true            # Losses can ONLY offset capital gains
+    perpetual_carryforward: true        # No time limit for loss carryforward
+    cvm_compliance: true                # CVM (Brazilian Securities Commission) compliance
+    receita_federal_compliance: true    # Receita Federal compliance
+    
+  # Audit and Reporting
+  audit_requirements:
+    detailed_loss_tracking: true        # Track individual loss records
+    application_history: true           # Track loss application history
+    regulatory_reporting: true          # Enable regulatory reporting
+    compliance_validation: true         # Validate compliance with Brazilian law
 
 # Performance & Monitoring Configuration
 performance:

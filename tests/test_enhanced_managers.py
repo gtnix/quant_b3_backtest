@@ -265,6 +265,162 @@ class TestEnhancedLossCarryforwardManager(unittest.TestCase):
         self.assertEqual(asset_losses['VALE3'], 1000.0)
         self.assertEqual(asset_losses['PETR4'], 500.0)
 
+    def test_brazilian_regulatory_compliance_2025(self):
+        """Test Brazilian regulatory compliance for 2025 loss carryforward."""
+        # Test 30% maximum offset rule
+        loss_manager = EnhancedLossCarryforwardManager(max_tracking_years=None)  # Perpetual carryforward
+        
+        # Record accumulated losses
+        loss_manager.global_loss_balance = 10000.0
+        
+        # Test scenario 1: Partial loss offset (30% rule)
+        result = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=1000.0,
+            accumulated_capital_losses=10000.0
+        )
+        
+        # Should only offset 30% of gains (300.0)
+        self.assertEqual(result['taxable_gains'], 700.0)  # 1000 - 300
+        self.assertEqual(result['remaining_losses'], 9700.0)  # 10000 - 300
+        self.assertEqual(result['loss_offset_applied'], 300.0)
+        self.assertEqual(result['offset_percentage'], 30.0)
+        self.assertEqual(result['max_offset_allowed'], 300.0)
+        self.assertEqual(result['regulatory_compliance'], 'CVM_2025_BRAZILIAN_CAPITAL_MARKETS')
+        
+        # Test scenario 2: Complete loss offset (losses < 30% of gains)
+        result2 = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=1000.0,
+            accumulated_capital_losses=200.0
+        )
+        
+        # Should offset all available losses (200.0)
+        self.assertEqual(result2['taxable_gains'], 800.0)  # 1000 - 200
+        self.assertEqual(result2['remaining_losses'], 0.0)  # 200 - 200
+        self.assertEqual(result2['loss_offset_applied'], 200.0)
+        self.assertEqual(result2['offset_percentage'], 20.0)  # 200/1000 * 100
+        
+        # Test scenario 3: Zero gains
+        result3 = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=0.0,
+            accumulated_capital_losses=5000.0
+        )
+        
+        # Should not offset anything when there are no gains
+        self.assertEqual(result3['taxable_gains'], 0.0)
+        self.assertEqual(result3['remaining_losses'], 5000.0)
+        self.assertEqual(result3['loss_offset_applied'], 0.0)
+        self.assertEqual(result3['offset_percentage'], 0.0)
+    
+    def test_perpetual_loss_carryforward(self):
+        """Test perpetual loss carryforward according to Brazilian law."""
+        # Initialize with perpetual carryforward
+        loss_manager = EnhancedLossCarryforwardManager(max_tracking_years=None)
+        
+        # Record losses
+        loss_manager.record_trade_result("VALE3", -1000.0, self.base_date, "swing_trade")
+        loss_manager.record_trade_result("PETR4", -500.0, self.base_date + timedelta(days=1), "swing_trade")
+        
+        # Simulate time passing (more than typical tracking periods)
+        future_date = self.base_date + timedelta(days=1000)  # ~3 years later
+        
+        # Record another trade to trigger pruning check
+        loss_manager.record_trade_result("ITUB4", -300.0, future_date, "swing_trade")
+        
+        # All losses should still be available (perpetual carryforward)
+        total_losses = loss_manager.get_total_loss_balance()
+        self.assertEqual(total_losses, 1800.0)  # 1000 + 500 + 300
+        
+        # Test loss application after long period
+        result = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=2000.0,
+            accumulated_capital_losses=1800.0
+        )
+        
+        # Should apply 30% of gains (600.0)
+        self.assertEqual(result['taxable_gains'], 1400.0)  # 2000 - 600
+        self.assertEqual(result['remaining_losses'], 1200.0)  # 1800 - 600
+    
+    def test_negative_capital_gains_validation(self):
+        """Test validation that capital gains cannot be negative."""
+        loss_manager = EnhancedLossCarryforwardManager()
+        
+        with self.assertRaises(ValueError) as context:
+            loss_manager.calculate_loss_carryforward(
+                current_capital_gains=-100.0,
+                accumulated_capital_losses=500.0
+            )
+        
+        self.assertIn("Capital gains cannot be negative", str(context.exception))
+    
+    def test_regulatory_compliance_constants(self):
+        """Test that regulatory compliance constants are properly set."""
+        loss_manager = EnhancedLossCarryforwardManager(max_tracking_years=None)
+        
+        # Check Brazilian regulatory constants
+        self.assertEqual(loss_manager.LOSS_OFFSET_PERCENTAGE, 0.30)
+        self.assertTrue(loss_manager.CAPITAL_GAINS_ONLY)
+        self.assertTrue(loss_manager.PERPETUAL_CARRYFORWARD)
+        self.assertIsNone(loss_manager.max_tracking_years)  # Perpetual carryforward
+    
+    def test_loss_carryforward_edge_cases(self):
+        """Test edge cases for loss carryforward calculation."""
+        loss_manager = EnhancedLossCarryforwardManager()
+        
+        # Edge case 1: Very large losses vs small gains
+        result = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=100.0,
+            accumulated_capital_losses=1000000.0
+        )
+        
+        # Should only offset 30% of gains (30.0)
+        self.assertEqual(result['taxable_gains'], 70.0)
+        self.assertEqual(result['remaining_losses'], 999970.0)
+        self.assertEqual(result['loss_offset_applied'], 30.0)
+        
+        # Edge case 2: Very large gains vs small losses
+        result2 = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=1000000.0,
+            accumulated_capital_losses=100.0
+        )
+        
+        # Should offset all available losses (100.0)
+        self.assertEqual(result2['taxable_gains'], 999900.0)
+        self.assertEqual(result2['remaining_losses'], 0.0)
+        self.assertEqual(result2['loss_offset_applied'], 100.0)
+        
+        # Edge case 3: Zero losses
+        result3 = loss_manager.calculate_loss_carryforward(
+            current_capital_gains=1000.0,
+            accumulated_capital_losses=0.0
+        )
+        
+        # Should not offset anything
+        self.assertEqual(result3['taxable_gains'], 1000.0)
+        self.assertEqual(result3['remaining_losses'], 0.0)
+        self.assertEqual(result3['loss_offset_applied'], 0.0)
+    
+    def test_calculate_taxable_amount_regulatory_compliance(self):
+        """Test that calculate_taxable_amount uses regulatory-compliant loss carryforward."""
+        loss_manager = EnhancedLossCarryforwardManager()
+        
+        # Set up accumulated losses
+        loss_manager.global_loss_balance = 5000.0
+        
+        # Test taxable amount calculation
+        taxable_amount = loss_manager.calculate_taxable_amount(
+            current_gain=1000.0,
+            current_date=self.base_date,
+            ticker="VALE3"
+        )
+        
+        # Should apply 30% of gains (300.0)
+        expected_taxable = 1000.0 - (1000.0 * 0.30)
+        self.assertEqual(taxable_amount, expected_taxable)
+        
+        # Check that global loss balance was updated
+        expected_remaining = 5000.0 - (1000.0 * 0.30)
+        self.assertEqual(loss_manager.global_loss_balance, expected_remaining)
+
 
 class TestAdvancedSettlementManager(unittest.TestCase):
     """Comprehensive tests for Advanced Settlement Manager."""
