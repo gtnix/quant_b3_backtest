@@ -8,6 +8,7 @@ This module provides functionality to:
 - Handle Brazilian taxes with swing-trade exemption tracking
 - Support both day-trade and swing-trade modes
 - Maintain comprehensive trade history for analysis
+- Full loss carryforward and T+2 settlement compliance
 
 Author: Your Name
 Date: 2024
@@ -21,6 +22,10 @@ from typing import Dict, List, Tuple, Optional, Literal
 from dataclasses import dataclass
 import logging
 import yaml
+
+# Import new managers
+from loss_manager import LossCarryforwardManager
+from settlement_manager import SettlementManager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -109,12 +114,9 @@ class Portfolio:
         self.daily_pnl_by_asset = defaultdict(float)  # Track daily P&L per asset
         self.last_trade_date = None  # Track last trade date for daily reset
         
-        # Loss carryforward tracking per ticker
-        self.loss_balance = defaultdict(float)  # Track accumulated losses per ticker
-        
-        # T+2 settlement queue
-        self.settlement_queue = []  # Queue for T+2 settlement
-        self.settled_cash = initial_cash  # Cash available after settlement
+        # Initialize new managers
+        self.loss_manager = LossCarryforwardManager()
+        self.settlement_manager = SettlementManager(initial_cash=initial_cash)
         
         logger.info(f"Portfolio initialized with R$ {initial_cash:,.2f}")
         logger.info(f"Fee config loaded: Modal brokerage (R$ 0), "
@@ -186,30 +188,15 @@ class Portfolio:
         if current_date.month != self.current_month:
             self.swing_sales_mtd = 0.0
             self.current_month = current_date.month
-            logger.info(f"Reset monthly swing trade tracking for month {current_date.month}")
+            self.loss_manager.reset_monthly_tracking(current_date.month)
+            logger.info(f"Reset monthly tracking for month {current_date.month}")
     
-    def _calculate_t2_settlement_date(self, trade_date: datetime) -> datetime:
-        """Calculate T+2 settlement date (2 business days after trade)."""
-        # Simple implementation - add 2 days (weekend handling would be more complex)
-        settlement_date = trade_date + timedelta(days=2)
-        return settlement_date
-    
-    def _process_settlement_queue(self, current_date: datetime):
-        """Process settlement queue for trades that have reached T+2."""
-        # Process settlements that are due today
-        pending_settlements = []
-        for settlement in self.settlement_queue:
-            if settlement['settlement_date'].date() <= current_date.date():
-                # Execute settlement
-                if settlement['type'] == 'debit':
-                    self.settled_cash -= settlement['amount']
-                else:  # credit
-                    self.settled_cash += settlement['amount']
-                logger.info(f"T+2 settlement processed: {settlement['type']} R$ {settlement['amount']:.2f}")
-            else:
-                pending_settlements.append(settlement)
-        
-        self.settlement_queue = pending_settlements
+    def _reset_daily_tracking(self, current_date: datetime):
+        """Reset daily P&L tracking if we've moved to a new day."""
+        if self.last_trade_date is None or current_date.date() != self.last_trade_date:
+            self.daily_pnl_by_asset.clear()
+            self.last_trade_date = current_date.date()
+            logger.info(f"Reset daily P&L tracking for date {current_date.date()}")
     
     def buy(self, ticker: str, shares: int, price: float, date: datetime) -> Tuple[bool, str]:
         """
@@ -225,24 +212,24 @@ class Portfolio:
             Tuple[bool, str]: (success, message)
         """
         # Process settlement queue first
-        self._process_settlement_queue(date)
+        self.settlement_manager.process_settlements(date.date())
         
         order_value = shares * price
         fees = self._calculate_fees(order_value, is_buy=True)
         total_cost = order_value + fees['total']
         
         # Check if we have enough settled cash
-        if total_cost > self.settled_cash:
-            return False, f"Insufficient settled funds. Need R$ {total_cost:,.2f}, have R$ {self.settled_cash:,.2f}"
+        available_cash = self.settlement_manager.get_available_cash(date.date())
+        if total_cost > available_cash:
+            return False, f"Insufficient settled funds. Need R$ {total_cost:,.2f}, have R$ {available_cash:,.2f}"
         
-        # Queue T+2 settlement instead of immediate deduction
-        settlement_date = self._calculate_t2_settlement_date(date)
-        self.settlement_queue.append({
-            'type': 'debit',
-            'amount': total_cost,
-            'settlement_date': settlement_date,
-            'description': f'Buy {shares} {ticker} @ R$ {price:.2f}'
-        })
+        # Schedule T+2 settlement
+        self.settlement_manager.schedule_trade(
+            trade_date=date.date(),
+            amount=total_cost,
+            is_buy=True,
+            description=f'Buy {shares} {ticker} @ R$ {price:.2f}'
+        )
         
         # Update cash immediately for tracking (but not settled_cash)
         self.cash -= total_cost
@@ -310,7 +297,7 @@ class Portfolio:
             Tuple[bool, str]: (success, message)
         """
         # Process settlement queue first
-        self._process_settlement_queue(date)
+        self.settlement_manager.process_settlements(date.date())
         
         # Reset daily tracking if needed
         self._reset_daily_tracking(date)
@@ -364,9 +351,9 @@ class Portfolio:
                 consolidated_pnl = self.daily_pnl_by_asset[ticker]
                 
                 # Apply loss carryforward
-                if self.loss_balance[ticker] > 0:
-                    consolidated_pnl -= self.loss_balance[ticker]
-                    self.loss_balance[ticker] = max(0, self.loss_balance[ticker] - gross_profit)
+                if self.loss_manager.get_asset_loss_balance(ticker) > 0:
+                    consolidated_pnl -= self.loss_manager.get_asset_loss_balance(ticker)
+                    # Loss application is handled by the manager
                 
                 if consolidated_pnl > 0:
                     tax_owed = consolidated_pnl * self.fee_config.day_trade_tax  # Why this matters: Consolidates same-day trades before applying day-trade tax
@@ -374,7 +361,8 @@ class Portfolio:
                 else:
                     tax_owed = 0.0
                     # Add to loss carryforward
-                    self.loss_balance[ticker] += abs(consolidated_pnl)  # Why this matters: Allows past losses to offset future gains per tax rules
+                    self.loss_manager.record_trade_result(ticker, consolidated_pnl, 
+                                                        date.strftime('%Y-%m-%d'), 'day_trade')  # Why this matters: Allows past losses to offset future gains per tax rules
                 
                 # Feature 5: Day-Trade IRRF 1%
                 if consolidated_pnl > 0:
@@ -390,9 +378,10 @@ class Portfolio:
                 taxable_profit = gross_profit * (taxable_proceeds / gross_proceeds) if gross_proceeds > 0 else 0
                 
                 # Apply loss carryforward
-                if self.loss_balance[ticker] > 0:
-                    taxable_profit -= self.loss_balance[ticker]
-                    self.loss_balance[ticker] = max(0, self.loss_balance[ticker] - taxable_profit)
+                if self.loss_manager.get_asset_loss_balance(ticker) > 0:
+                    taxable_profit -= self.loss_manager.get_asset_loss_balance(ticker)
+                    self.loss_manager.record_trade_result(ticker, taxable_profit, 
+                                                        date.strftime('%Y-%m-%d'), 'swing_trade')
                 
                 # Feature 1: Swing CG Tax 15%
                 if taxable_profit > 0:
@@ -400,7 +389,8 @@ class Portfolio:
                 else:
                     tax_owed = 0.0
                     # Add to loss carryforward
-                    self.loss_balance[ticker] += abs(taxable_profit)
+                    self.loss_manager.record_trade_result(ticker, taxable_profit, 
+                                                        date.strftime('%Y-%m-%d'), 'swing_trade')
                 
                 # Update monthly swing sales tracking
                 self.swing_sales_mtd += gross_proceeds
@@ -408,14 +398,13 @@ class Portfolio:
         # Calculate net proceeds
         net_proceeds = gross_proceeds - fees['total'] - tax_owed
         
-        # Feature 8: T+2 Settlement for sell proceeds
-        settlement_date = self._calculate_t2_settlement_date(date)
-        self.settlement_queue.append({
-            'type': 'credit',
-            'amount': net_proceeds,
-            'settlement_date': settlement_date,
-            'description': f'Sell {shares} {ticker} @ R$ {price:.2f}'
-        })
+        # Schedule T+2 settlement for sell proceeds
+        self.settlement_manager.schedule_trade(
+            trade_date=date.date(),
+            amount=net_proceeds,
+            is_buy=False,
+            description=f'Sell {shares} {ticker} @ R$ {price:.2f}'
+        )
         
         # Update cash immediately for tracking (but not settled_cash)
         self.cash += net_proceeds
@@ -448,7 +437,7 @@ class Portfolio:
             'is_daytrade': is_daytrade,
             'cash_after': self.cash,
             'swing_sales_mtd': self.swing_sales_mtd,
-            'loss_balance': self.loss_balance[ticker],
+            'loss_balance': self.loss_manager.get_asset_loss_balance(ticker),
             'consolidated_pnl': self.daily_pnl_by_asset.get(ticker, 0) if is_daytrade else None
         }
         self.trades.append(trade_record)
@@ -475,7 +464,7 @@ class Portfolio:
             self.positions[ticker]['shares'] * prices.get(ticker, 0)
             for ticker in self.positions
         )
-        return self.settled_cash + positions_value
+        return self.settlement_manager.settled_cash + positions_value
     
     def get_position_summary(self) -> Dict[str, Dict]:
         """Get summary of all current positions."""
@@ -552,7 +541,7 @@ class Portfolio:
         print("PORTFOLIO SUMMARY")
         print("="*60)
         print(f"Cash (including unsettled): R$ {self.cash:,.2f}")
-        print(f"Settled cash (T+2): R$ {self.settled_cash:,.2f}")
+        print(f"Settled cash (T+2): R$ {self.settlement_manager.settled_cash:,.2f}")
         print(f"Number of positions: {len(self.positions)}")
         print(f"Swing sales this month: R$ {self.swing_sales_mtd:,.2f}")
         
@@ -560,9 +549,9 @@ class Portfolio:
             print("\nCurrent Positions:")
             for ticker, position in self.positions.items():
                 days_held = (datetime.now() - position['purchase_date']).days
-                loss_balance = self.loss_balance.get(ticker, 0.0)
+                loss_carryforward = self.loss_manager.get_asset_loss_balance(ticker)
                 print(f"  {ticker}: {position['shares']} shares @ R$ {position['avg_price']:.2f} "
-                      f"(held {days_held} days, loss carryforward: R$ {loss_balance:.2f})")
+                      f"(held {days_held} days, loss carryforward: R$ {loss_carryforward:.2f})")
         
         # Performance metrics
         metrics = self.get_performance_metrics()
@@ -573,14 +562,20 @@ class Portfolio:
         print(f"  Taxes paid: R$ {metrics['total_taxes_paid']:,.2f}")
         print(f"  Fees paid: R$ {metrics['total_fees_paid']:,.2f}")
         print(f"  Net profit: R$ {metrics['net_profit']:,.2f}")
+        
+        # Loss carryforward summary
+        loss_summary = self.loss_manager.get_loss_summary()
+        print(f"\nLoss Carryforward:")
+        print(f"  Total cumulative loss: R$ {loss_summary['total_cumulative_loss']:,.2f}")
+        print(f"  Assets with losses: {loss_summary['assets_with_losses']}")
+        
+        # Settlement summary
+        settlement_summary = self.settlement_manager.get_settlement_summary()
+        print(f"\nSettlement Status:")
+        print(f"  Pending settlements: {settlement_summary['pending_settlements']}")
+        print(f"  Unsettled cash: R$ {settlement_summary['unsettled_cash']:,.2f}")
+        
         print("="*60)
-
-    def _reset_daily_tracking(self, current_date: datetime):
-        """Reset daily P&L tracking if we've moved to a new day."""
-        if self.last_trade_date is None or current_date.date() != self.last_trade_date:
-            self.daily_pnl_by_asset.clear()
-            self.last_trade_date = current_date.date()
-            logger.info(f"Reset daily P&L tracking for date {current_date.date()}")
 
 
 def main():
