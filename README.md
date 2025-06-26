@@ -9,6 +9,7 @@ A comprehensive backtesting engine for Brazilian stocks (B3) with support for re
 - **Transaction Cost Analysis (TCA)**: Accurate, modular calculation of all trading costs (brokerage, emolument, settlement, ISS)
 - **Advanced Loss Carryforward**: Full compliance with Brazilian tax law, including indefinite and per-asset loss tracking
 - **Advanced Settlement Manager**: T+2 settlement queue, business day handling, and cash flow simulation
+- **Backtest Simulator**: Comprehensive backtesting with performance metrics and compliance (BacktestSimulator)
 - **Strategy Testing**: Framework for implementing and testing trading strategies
 - **Configuration**: Flexible settings for market hours, fees, portfolio, compliance, and performance
 - **Security**: Secure API key management for safe GitHub uploads
@@ -31,12 +32,16 @@ quant_backtest/
 │   ├── tca.py                 # Transaction Cost Analysis (TCA) module
 │   ├── loss_manager.py        # Enhanced Loss Carryforward Manager
 │   ├── settlement_manager.py  # Advanced Settlement Manager (T+2)
-│   └── base_strategy.py       # Abstract base class for strategies
+│   ├── base_strategy.py       # Abstract base class for strategies
+│   └── simulator.py           # Backtest simulator
 ├── scripts/
 │   └── download_data.py       # Data downloader
 ├── strategies/                # User trading strategies (currently empty)
 ├── reports/                   # Backtest reports (NOT shared)
 ├── tests/                     # Comprehensive test suites
+│   ├── test_tca.py            # Transaction Cost Analysis tests
+│   ├── test_enhanced_managers.py # Loss carryforward and settlement manager tests
+│   └── test_simulator.py      # Backtest simulator tests
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```
@@ -46,8 +51,9 @@ quant_backtest/
 - **Transaction Cost Analysis (TCA)**: Modular, accurate calculation of all trading costs, including brokerage, emolument, settlement, and ISS. Fully configurable and tested.
 - **Enhanced Loss Carryforward Manager**: Tracks losses per asset and globally, supports indefinite carryforward, and provides audit trails for compliance.
 - **Advanced Settlement Manager**: Models T+2 settlement with business day handling, cash flow simulation, and robust error handling.
+- **Backtest Simulator**: Comprehensive backtesting with performance metrics and compliance (BacktestSimulator in `engine/simulator.py`).
 - **Extensible Strategy Framework**: Implement your own trading strategies by subclassing the `BaseStrategy` class in `engine/base_strategy.py` and placing your strategy files in the `strategies/` directory.
-- **Comprehensive Testing**: Extensive unit and integration tests for TCA, loss carryforward, and settlement logic.
+- **Comprehensive Testing**: Extensive unit and integration tests for TCA, loss carryforward, settlement logic, and simulation.
 
 ## Setup Instructions
 
@@ -186,7 +192,7 @@ loss_carryforward:
 
 ## Advanced Testing
 
-Run the comprehensive test suites for TCA, loss carryforward, and settlement:
+Run the comprehensive test suites for TCA, loss carryforward, settlement, and simulation:
 
 ```bash
 python -m unittest discover tests
@@ -194,6 +200,7 @@ python -m unittest discover tests
 
 - `tests/test_tca.py`: Transaction Cost Analysis tests
 - `tests/test_enhanced_managers.py`: Loss carryforward and settlement manager tests
+- `tests/test_simulator.py`: Backtest simulator tests
 
 ## Contributing
 
