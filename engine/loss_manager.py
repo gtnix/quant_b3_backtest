@@ -8,8 +8,6 @@ Advanced loss tracking with configurable temporal and regulatory constraints:
 - Performance optimization with memoization and lazy loading
 - Robust error handling and defensive programming
 
-Compliance: Receita Federal IN RFB 1.585/2015, CVM Resolution 378/2009
-
 Author: Your Name
 Date: 2024
 """
@@ -484,7 +482,6 @@ def main():
     loss_mgr = EnhancedLossCarryforwardManager(max_tracking_years=None)  # Perpetual carryforward
     
     print("=== Brazilian Regulatory-Compliant Loss Carryforward Manager Test (2025) ===")
-    print("Compliance: CVM Resolution 378/2009, Receita Federal IN RFB 1.585/2015")
     print("Features: 30% max offset, perpetual carryforward, capital gains only")
     print()
     
@@ -559,7 +556,7 @@ def main():
     # Export audit trail
     loss_mgr.export_audit_trail("brazilian_loss_audit_trail.json")
     print("\nAudit trail exported to brazilian_loss_audit_trail.json")
-    print("\nRegulatory Compliance: ✅ CVM 2025, ✅ Receita Federal, ✅ 30% Max Offset")
+    print("\nRegulatory Compliance: ✅ Brazilian Capital Markets 2025, ✅ 30% Max Offset")
 
 
 if __name__ == "__main__":

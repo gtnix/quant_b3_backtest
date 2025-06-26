@@ -9,8 +9,6 @@ Advanced portfolio management with comprehensive Brazilian market compliance:
 - Detailed logging and audit trail generation
 - Transaction Cost Analysis (TCA) integration
 
-Compliance: Receita Federal IN RFB 1.585/2015, CVM Resolution 378/2009
-
 Author: Your Name
 Date: 2024
 """

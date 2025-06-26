@@ -1,14 +1,13 @@
 """
-Enhanced Settlement Manager for Brazilian Market T+2 Cash Flow
+Advanced Settlement Manager for Brazilian Market Backtesting
 
-Advanced T+2 settlement queue management with market-specific nuances:
-- Precise business day calculations with holiday support
-- Comprehensive error handling and defensive programming
-- Detailed logging mechanisms for audit trails
-- Performance optimization with caching
-- Market timezone handling for accurate settlement timing
-
-Compliance: B3 Settlement Rules, CVM Resolution 378/2009
+Sophisticated T+2 settlement tracking with comprehensive business day handling:
+- Precise settlement date calculations with B3 holiday calendar
+- Advanced error handling and retry mechanisms
+- Comprehensive audit trail generation
+- Performance optimization and caching
+- Integration with existing portfolio and loss manager
+- Transaction Cost Analysis (TCA) integration
 
 Author: Your Name
 Date: 2024

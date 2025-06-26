@@ -4,6 +4,10 @@ market:
     open: "10:00"          # continuous session starts
     close: "16:55"         # continuous session ends; closing auction 16:55-17:00
     timezone: "America/Sao_Paulo"
+  
+  # Market parameters
+  selic_rate: 0.15         # Current Brazilian SELIC rate (15.0% - 2025)
+  trading_days_per_year: 252  # Brazilian market standard
 
   # Transaction costs
   costs:
