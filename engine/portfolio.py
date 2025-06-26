@@ -188,13 +188,14 @@ class EnhancedPortfolio:
             'cost_percentage': cost_breakdown.cost_percentage
         }
     
-    def _calculate_taxes(self, profit: float, trade_type: str) -> Dict[str, float]:
+    def _calculate_taxes(self, profit: float, trade_type: str, ticker: str = None) -> Dict[str, float]:
         """
         Calculate Brazilian taxes with comprehensive compliance.
         
         Args:
             profit: Trade profit
             trade_type: Type of trade
+            ticker: Trading asset identifier (optional)
             
         Returns:
             Dict containing tax components
@@ -218,7 +219,7 @@ class EnhancedPortfolio:
         
         # Apply loss carryforward
         taxable_profit = self.loss_manager.calculate_taxable_amount(
-            profit, datetime.now(), None
+            profit, datetime.now(), ticker
         )
         
         # Calculate taxes
@@ -405,8 +406,18 @@ class EnhancedPortfolio:
             gross_profit = trade_value - cost_basis
             net_profit = gross_profit - costs['total_costs']
             
-            # Calculate taxes
-            taxes = self._calculate_taxes(net_profit, trade_type)
+            # Record loss/profit for carryforward and get taxable amount
+            taxable_profit = self.loss_manager.record_trade_result(
+                ticker=ticker,
+                trade_profit=net_profit,
+                trade_date=trade_date,
+                trade_type=trade_type,
+                trade_id=trade_id,
+                description=description
+            )
+            
+            # Calculate taxes on final taxable amount
+            taxes = self._calculate_taxes(taxable_profit, trade_type, ticker)
             final_profit = net_profit - taxes['total_taxes']
             
             # Update position
@@ -417,33 +428,6 @@ class EnhancedPortfolio:
             # Remove position if empty
             if position.quantity == 0:
                 del self.positions[ticker]
-            
-            # Record loss/profit for carryforward
-            if net_profit < 0:
-                self.loss_manager.record_trade_result(
-                    ticker=ticker,
-                    trade_profit=net_profit,
-                    trade_date=trade_date,
-                    trade_type=trade_type,
-                    trade_id=trade_id,
-                    description=description
-                )
-            else:
-                # Apply loss carryforward and calculate final taxable amount
-                taxable_profit = self.loss_manager.record_trade_result(
-                    ticker=ticker,
-                    trade_profit=net_profit,
-                    trade_date=trade_date,
-                    trade_type=trade_type,
-                    trade_id=trade_id,
-                    description=description
-                )
-                
-                # Recalculate taxes on final taxable amount
-                if taxable_profit > 0:
-                    final_taxes = self._calculate_taxes(taxable_profit, trade_type)
-                    final_profit = net_profit - final_taxes['total_taxes']
-                    taxes = final_taxes
             
             # Update cash and settlement
             cash_received = trade_value - costs['total_costs'] - taxes['total_taxes']

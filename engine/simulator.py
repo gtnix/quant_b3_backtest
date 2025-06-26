@@ -28,9 +28,6 @@ import json
 
 from engine.portfolio import EnhancedPortfolio
 from engine.base_strategy import BaseStrategy, TradingSignal, SignalType, TradeType
-from engine.tca import TransactionCostAnalyzer
-from engine.settlement_manager import AdvancedSettlementManager
-from engine.loss_manager import EnhancedLossCarryforwardManager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -138,14 +135,21 @@ class BacktestSimulator:
         self.initial_capital = initial_capital
         self.config_path = config_path
         
-        # Create portfolio with initial capital
-        self.portfolio = EnhancedPortfolio(config_path)
-        self.portfolio.cash = initial_capital
-        self.portfolio.initial_cash = initial_capital
-        self.portfolio.total_value = initial_capital
-        
-        # Update strategy portfolio reference
-        self.strategy.portfolio = self.portfolio
+        # Use strategy's existing portfolio or create new one if needed
+        if hasattr(self.strategy, 'portfolio') and self.strategy.portfolio is not None:
+            self.portfolio = self.strategy.portfolio
+            # Update portfolio with initial capital
+            self.portfolio.cash = initial_capital
+            self.portfolio.initial_cash = initial_capital
+            self.portfolio.total_value = initial_capital
+        else:
+            # Create portfolio with initial capital
+            self.portfolio = EnhancedPortfolio(config_path)
+            self.portfolio.cash = initial_capital
+            self.portfolio.initial_cash = initial_capital
+            self.portfolio.total_value = initial_capital
+            # Assign portfolio to strategy
+            self.strategy.portfolio = self.portfolio
         
         # Initialize tracking
         self.daily_portfolio_values: List[float] = []
@@ -399,7 +403,10 @@ class BacktestSimulator:
         """
         try:
             # Validate signal
-            if not self.strategy.validate_market_data({'price_data': pd.DataFrame([price_data])}):
+            if not self.strategy.validate_market_data({
+                'price_data': pd.DataFrame([price_data]),
+                'timestamp': signal.timestamp
+            }):
                 logger.warning(f"Invalid market data for signal: {signal}")
                 return
             
