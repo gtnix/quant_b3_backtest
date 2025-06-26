@@ -25,9 +25,9 @@ import logging
 import yaml
 import pytz
 
-from .loss_manager import EnhancedLossCarryforwardManager
-from .settlement_manager import AdvancedSettlementManager
-from .tca import TransactionCostAnalyzer
+from engine.loss_manager import EnhancedLossCarryforwardManager
+from engine.settlement_manager import AdvancedSettlementManager
+from engine.tca import TransactionCostAnalyzer
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -104,6 +104,7 @@ class EnhancedPortfolio:
         # Portfolio state
         self.positions: Dict[str, Position] = {}
         self.cash: float = self.config['portfolio']['initial_cash']
+        self.initial_cash: float = self.config['portfolio']['initial_cash']
         self.total_value: float = self.cash
         self.trade_history: List[Dict] = []
         self.daily_pnl: Dict[str, float] = {}  # {date: pnl}
@@ -638,6 +639,15 @@ class EnhancedPortfolio:
         # Print enhanced manager summaries
         self.loss_manager.print_summary()
         self.settlement_manager.print_summary()
+
+    def get_portfolio_value(self) -> float:
+        """
+        Return the current total portfolio value (cash + positions' market value).
+        """
+        total_positions_value = sum(
+            pos.market_value for pos in self.positions.values()
+        )
+        return self.cash + total_positions_value
 
 
 def main():

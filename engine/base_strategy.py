@@ -29,9 +29,9 @@ from enum import Enum
 import pandas as pd
 import numpy as np
 
-from ..portfolio import EnhancedPortfolio
-from ..tca import TransactionCostAnalyzer
-from ..loader import DataLoader
+from engine.portfolio import EnhancedPortfolio
+from engine.tca import TransactionCostAnalyzer
+from engine.loader import DataLoader
 
 # Configure logging
 logger = logging.getLogger(__name__)

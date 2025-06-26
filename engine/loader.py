@@ -9,8 +9,6 @@ This module provides functionality to:
 - Handle missing data and data quality issues
 - Prepare data for backtesting strategies
 
-Author: Your Name
-Date: 2024
 """
 
 import pandas as pd
