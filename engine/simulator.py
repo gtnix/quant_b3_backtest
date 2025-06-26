@@ -108,6 +108,24 @@ class BacktestSimulator:
         if not isinstance(strategy, BaseStrategy):
             raise ValueError("Strategy must be a BaseStrategy instance")
         
+        # Validate required strategy methods
+        required_methods = [
+            'validate_market_data',
+            'check_brazilian_market_constraints', 
+            'calculate_position_size',
+            'generate_signals',
+            'reset_strategy'
+        ]
+        
+        missing_methods = []
+        for method in required_methods:
+            if not hasattr(strategy, method):
+                missing_methods.append(method)
+        
+        if missing_methods:
+            raise ValueError(f"Strategy missing required methods: {missing_methods}. "
+                           f"Ensure BaseStrategy is properly implemented with all abstract methods.")
+        
         if initial_capital <= 0:
             raise ValueError("Initial capital must be positive")
         
@@ -315,8 +333,14 @@ class BacktestSimulator:
                     if signal.signal_type in [SignalType.BUY, SignalType.SELL]:
                         self._execute_trade(signal, daily_data)
                 
-                # Process settlements
-                self.portfolio.settlement_manager.process_settlements(date.date())
+                # Process settlements with defensive check
+                try:
+                    if hasattr(self.portfolio, 'settlement_manager') and self.portfolio.settlement_manager is not None:
+                        self.portfolio.settlement_manager.process_settlements(date.date())
+                    else:
+                        logger.warning(f"Settlement manager not available for date {date.date()}")
+                except Exception as e:
+                    logger.error(f"Error processing settlements for date {date.date()}: {str(e)}")
                 
                 # Record daily portfolio value
                 portfolio_value = self.portfolio.get_portfolio_value()
@@ -402,26 +426,59 @@ class BacktestSimulator:
             price_data: Current day's price data
         """
         try:
+            # Defensive check for strategy methods
+            if not hasattr(self.strategy, 'validate_market_data'):
+                logger.error("Strategy missing required method: validate_market_data")
+                return
+            
+            if not hasattr(self.strategy, 'check_brazilian_market_constraints'):
+                logger.error("Strategy missing required method: check_brazilian_market_constraints")
+                return
+            
+            if not hasattr(self.strategy, 'calculate_position_size'):
+                logger.error("Strategy missing required method: calculate_position_size")
+                return
+            
             # Validate signal
-            if not self.strategy.validate_market_data({
-                'price_data': pd.DataFrame([price_data]),
-                'timestamp': signal.timestamp
-            }):
-                logger.warning(f"Invalid market data for signal: {signal}")
+            try:
+                if not self.strategy.validate_market_data({
+                    'price_data': pd.DataFrame([price_data]),
+                    'timestamp': signal.timestamp
+                }):
+                    logger.warning(f"Invalid market data for signal: {signal}")
+                    return
+            except Exception as e:
+                logger.error(f"Error in validate_market_data: {str(e)}")
                 return
             
             # Check Brazilian market constraints
-            if not self.strategy.check_brazilian_market_constraints(signal):
-                logger.warning(f"Signal violates Brazilian market constraints: {signal}")
+            try:
+                if not self.strategy.check_brazilian_market_constraints(signal):
+                    logger.warning(f"Signal violates Brazilian market constraints: {signal}")
+                    return
+            except Exception as e:
+                logger.error(f"Error in check_brazilian_market_constraints: {str(e)}")
                 return
             
-            # Get available cash
-            available_cash = self.portfolio.settlement_manager.get_available_cash(
-                signal.timestamp.date()
-            )
+            # Get available cash with defensive check
+            try:
+                if not hasattr(self.portfolio, 'settlement_manager'):
+                    logger.error("Portfolio missing settlement_manager")
+                    return
+                
+                available_cash = self.portfolio.settlement_manager.get_available_cash(
+                    signal.timestamp.date()
+                )
+            except Exception as e:
+                logger.error(f"Error getting available cash: {str(e)}")
+                return
             
             # Calculate position size
-            quantity = self.strategy.calculate_position_size(signal, available_cash)
+            try:
+                quantity = self.strategy.calculate_position_size(signal, available_cash)
+            except Exception as e:
+                logger.error(f"Error in calculate_position_size: {str(e)}")
+                return
             
             if quantity <= 0:
                 logger.debug(f"Insufficient cash or invalid position size for signal: {signal}")
@@ -535,9 +592,11 @@ class BacktestSimulator:
         self.performance_metrics.total_commission = self.portfolio.total_commission
         self.performance_metrics.total_taxes = self.portfolio.total_taxes
         
-        # Calculate win/loss ratio from trade history
+        # Calculate win/loss ratio from trade history with Brazilian tax considerations
         if self.portfolio.trade_history:
             profits = []
+            taxable_profits = []
+            
             for trade in self.portfolio.trade_history:
                 if trade['action'] == 'SELL':
                     # Calculate profit/loss for sell trades
@@ -545,15 +604,37 @@ class BacktestSimulator:
                                 if t['action'] == 'BUY' and t['ticker'] == trade['ticker']]
                     
                     if buy_trades:
-                        # Simplified profit calculation
+                        # Enhanced profit calculation considering Brazilian tax rules
                         buy_price = buy_trades[0]['price']
                         sell_price = trade['price']
-                        profit = (sell_price - buy_price) * trade['quantity']
-                        profits.append(profit)
+                        quantity = trade['quantity']
+                        
+                        # Basic profit calculation
+                        gross_profit = (sell_price - buy_price) * quantity
+                        profits.append(gross_profit)
+                        
+                        # Apply Brazilian tax rules if loss carryforward manager is available
+                        try:
+                            if hasattr(self.portfolio, 'loss_manager') and self.portfolio.loss_manager is not None:
+                                # Get tax-adjusted profit considering loss carryforward
+                                tax_adjusted_profit = self.portfolio.loss_manager.calculate_taxable_profit(
+                                    ticker=trade['ticker'],
+                                    sell_price=sell_price,
+                                    sell_quantity=quantity,
+                                    sell_date=trade['date']
+                                )
+                                taxable_profits.append(tax_adjusted_profit)
+                            else:
+                                # Fallback to gross profit if loss manager not available
+                                taxable_profits.append(gross_profit)
+                        except Exception as e:
+                            logger.warning(f"Error calculating taxable profit: {str(e)}, using gross profit")
+                            taxable_profits.append(gross_profit)
             
             if profits:
-                winning_trades = [p for p in profits if p > 0]
-                losing_trades = [p for p in profits if p < 0]
+                # Use taxable profits for more accurate performance metrics
+                winning_trades = [p for p in taxable_profits if p > 0]
+                losing_trades = [p for p in taxable_profits if p < 0]
                 
                 self.performance_metrics.winning_trades = len(winning_trades)
                 self.performance_metrics.losing_trades = len(losing_trades)
@@ -569,7 +650,7 @@ class BacktestSimulator:
                     self.performance_metrics.avg_loss = np.mean(losing_trades)
                     self.performance_metrics.largest_loss = min(losing_trades)
                 
-                if profits:
+                if taxable_profits:
                     self.performance_metrics.profit_factor = (
                         sum(winning_trades) / abs(sum(losing_trades)) if sum(losing_trades) != 0 else float('inf')
                     )
