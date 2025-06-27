@@ -105,3 +105,33 @@ advanced:
   memory_optimization: true        # Enable memory optimization
   lazy_loading: true               # Enable lazy loading for large datasets
   compression_enabled: true        # Enable data compression for storage
+
+# SGS Data Configuration
+sgs:
+  # Banco Central SGS Series Configuration
+  # Series ID: Series Name
+  series:
+    11: "Selic Interest Rate"      # Brazilian benchmark interest rate
+    12: "CDI Interest Rate"        # Interbank deposit rate  
+    433: "IPCA Inflation Index"    # Consumer price index
+  
+  # API Configuration
+  api:
+    base_url: "http://api.bcb.gov.br/dados/serie/bcdata.sgs"
+    timeout: 30                    # Request timeout in seconds
+    max_retries: 3                 # Maximum retry attempts
+    user_agent: "quant_b3_backtest/1.0"
+  
+  # Data Processing Configuration
+  processing:
+    cache_enabled: true            # Enable data caching
+    save_processed: true           # Save processed data to files
+    data_path: "data/sgs"          # Path for SGS data storage
+    normalization_method: "LOCF"   # Last Observation Carried Forward
+  
+  # Data Quality Validation
+  validation:
+    enable_quality_checks: true    # Enable data quality validation
+    interest_rate_range: [0, 100]  # Valid range for interest rates (%)
+    inflation_range: [-50, 100]    # Valid range for inflation (%)
+    min_data_points: 10            # Minimum required data points
