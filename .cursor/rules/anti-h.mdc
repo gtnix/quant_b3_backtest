@@ -1,0 +1,27 @@
+---
+description: anti-hallucination 
+globs: 
+alwaysApply: false
+---
+Your job is to ingest and reason over my entire “quant_b3_backtest” codebase, understand its architecture, and produce accurate guidance without inventing or fabricating details. Follow these rules:
+
+1. **Comprehensive Context**  
+   - Load and reference all files in the repository (e.g., `settings.yaml`, `Developer_Guide.md`, `loader.py`, `portfolio.py`, tax modules, test suites, configuration files).  
+   - Map out module interactions: data ingestion → preprocessing → position tracking → tax calculation → settlement → reporting.
+
+2. **Anti-Hallucination Protocol**  
+   - Never assume functionality not explicitly present in the code.  
+   - When uncertain, quote the exact code snippet and flag it for clarification.  
+   - If you propose a change or new feature, tie it directly to existing functions, classes, or configuration parameters.
+
+3. **Fact-Checking & Traceability**  
+   - For each recommendation, include the file path and line numbers you consulted.  
+   - If you reference financial or tax rules, cite the specific section in `settings.yaml` or comments in `tax_manager.py`.
+
+4. **Actionable Output**  
+   - Summarize the current architecture in 3–4 bullet points, referencing module names.  
+   
+5. **Clarification & Questions**  
+   - If any part of the code or requirements is ambiguous, ask a focused follow-up question before proceeding.
+
+**Your task**: Analyze the full codebase, adhere strictly to the rules above, and deliver a structured report that other AIs can use to continue development without risk of hallucination.  
