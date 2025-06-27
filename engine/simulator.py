@@ -25,9 +25,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
+import yaml
 
 from engine.portfolio import EnhancedPortfolio
 from engine.base_strategy import BaseStrategy, TradingSignal, SignalType, TradeType
+from engine.performance_metrics import PerformanceMetrics
+from engine.tca import TransactionCostAnalyzer
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -402,20 +405,139 @@ class BacktestSimulator:
         # Get current day's data
         current_data = historical_data.iloc[-1] if not historical_data.empty else None
         
+        # Load SGS data for current date
+        sgs_data = self._load_sgs_data_for_date(current_date)
+        
         # Prepare market data dictionary
         market_data = {
             'price_data': historical_data,
             'current_price': current_data['close'] if current_data is not None else 0.0,
             'current_volume': current_data['volume'] if current_data is not None else 0.0,
             'timestamp': current_date,
+            'sgs_data': sgs_data,  # Add SGS data
             'market_conditions': {
                 'trend': 'up' if len(historical_data) >= 2 and 
                          historical_data['close'].iloc[-1] > historical_data['close'].iloc[-2] else 'down',
-                'volatility': historical_data['close'].pct_change().std() if len(historical_data) > 1 else 0.0
+                'volatility': historical_data['close'].pct_change().std() if len(historical_data) > 1 else 0.0,
+                'interest_rate_environment': self._classify_interest_rate_environment(sgs_data),
+                'inflation_environment': self._classify_inflation_environment(sgs_data)
             }
         }
         
         return market_data
+    
+    def _load_sgs_data_for_date(self, current_date: datetime) -> Dict[str, float]:
+        """
+        Load SGS data (interest rates, inflation) for the given date.
+        
+        Args:
+            current_date: Date to load SGS data for
+            
+        Returns:
+            Dictionary with SGS series values
+        """
+        try:
+            # Initialize SGS loader if not already done
+            if not hasattr(self, 'sgs_loader'):
+                from engine.sgs_data_loader import SGSDataLoader
+                self.sgs_loader = SGSDataLoader()
+            
+            # Calculate date range (last 30 days to ensure we have data)
+            end_date = current_date.strftime('%d/%m/%Y')
+            start_date = (current_date - timedelta(days=30)).strftime('%d/%m/%Y')
+            
+            sgs_data = {}
+            
+            # Load each SGS series
+            for series_id in self.sgs_loader.SGS_SERIES.keys():
+                try:
+                    series_data = self.sgs_loader.get_series_data(
+                        series_id=series_id,
+                        start_date=start_date,
+                        end_date=end_date,
+                        use_cache=True,
+                        save_processed=False  # Don't save during simulation
+                    )
+                    
+                    if series_data is not None and not series_data.empty:
+                        # Get the most recent value for the current date or closest previous date
+                        if current_date.date() in series_data.index:
+                            value = series_data.loc[current_date.date(), 'valor']
+                        else:
+                            # Get the closest previous date
+                            available_dates = series_data.index[series_data.index <= current_date.date()]
+                            if len(available_dates) > 0:
+                                closest_date = available_dates[-1]
+                                value = series_data.loc[closest_date, 'valor']
+                            else:
+                                value = None
+                        
+                        if value is not None:
+                            sgs_data[f'series_{series_id}'] = value
+                            sgs_data[self.sgs_loader.SGS_SERIES[series_id].lower().replace(' ', '_')] = value
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to load SGS series {series_id}: {e}")
+                    continue
+            
+            return sgs_data
+            
+        except Exception as e:
+            logger.error(f"Error loading SGS data: {e}")
+            return {}
+    
+    def _classify_interest_rate_environment(self, sgs_data: Dict[str, float]) -> str:
+        """
+        Classify the current interest rate environment.
+        
+        Args:
+            sgs_data: Dictionary with SGS data
+            
+        Returns:
+            String classification of interest rate environment
+        """
+        selic_rate = sgs_data.get('selic_interest_rate')
+        cdi_rate = sgs_data.get('cdi_interest_rate')
+        
+        if selic_rate is None:
+            return 'unknown'
+        
+        # Classify based on current Brazilian market conditions
+        if selic_rate >= 12.0:
+            return 'high_rates'  # High interest rate environment
+        elif selic_rate >= 8.0:
+            return 'moderate_rates'  # Moderate interest rate environment
+        elif selic_rate >= 4.0:
+            return 'low_rates'  # Low interest rate environment
+        else:
+            return 'very_low_rates'  # Very low interest rate environment
+    
+    def _classify_inflation_environment(self, sgs_data: Dict[str, float]) -> str:
+        """
+        Classify the current inflation environment.
+        
+        Args:
+            sgs_data: Dictionary with SGS data
+            
+        Returns:
+            String classification of inflation environment
+        """
+        ipca_rate = sgs_data.get('ipca_inflation_index')
+        
+        if ipca_rate is None:
+            return 'unknown'
+        
+        # Classify based on Brazilian inflation targets
+        if ipca_rate >= 6.0:
+            return 'high_inflation'  # High inflation environment
+        elif ipca_rate >= 4.5:
+            return 'above_target'  # Above target inflation
+        elif ipca_rate >= 2.5:
+            return 'target_range'  # Within target range
+        elif ipca_rate >= 1.5:
+            return 'below_target'  # Below target inflation
+        else:
+            return 'very_low_inflation'  # Very low inflation environment
     
     def _execute_trade(self, signal: TradingSignal, price_data: pd.Series) -> None:
         """

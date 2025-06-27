@@ -378,7 +378,70 @@ class BaseStrategy(ABC):
             logger.error("Timestamp must be a datetime object")
             return False
         
+        # Validate SGS data if present (optional but recommended)
+        sgs_data = market_data.get('sgs_data')
+        if sgs_data is not None:
+            if not isinstance(sgs_data, dict):
+                logger.warning("SGS data must be a dictionary")
+                return False
+            
+            # Log available SGS data for debugging
+            if sgs_data:
+                logger.debug(f"Available SGS data: {list(sgs_data.keys())}")
+        
         return True
+    
+    def get_sgs_data(self, market_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Extract SGS data from market data for strategy use.
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            Dictionary with SGS series values
+        """
+        sgs_data = market_data.get('sgs_data', {})
+        
+        # Provide default values if SGS data is not available
+        if not sgs_data:
+            logger.warning("No SGS data available, using default values")
+            return {
+                'selic_interest_rate': 0.15,  # Default SELIC rate
+                'cdi_interest_rate': 0.14,    # Default CDI rate
+                'ipca_inflation_index': 0.04, # Default IPCA rate
+                'series_11': 0.15,
+                'series_12': 0.14,
+                'series_433': 0.04
+            }
+        
+        return sgs_data
+    
+    def get_interest_rate_environment(self, market_data: Dict[str, Any]) -> str:
+        """
+        Get the current interest rate environment classification.
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            String classification of interest rate environment
+        """
+        market_conditions = market_data.get('market_conditions', {})
+        return market_conditions.get('interest_rate_environment', 'unknown')
+    
+    def get_inflation_environment(self, market_data: Dict[str, Any]) -> str:
+        """
+        Get the current inflation environment classification.
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            String classification of inflation environment
+        """
+        market_conditions = market_data.get('market_conditions', {})
+        return market_conditions.get('inflation_environment', 'unknown')
     
     def calculate_position_size(self, signal: TradingSignal, 
                               available_cash: float) -> int:
