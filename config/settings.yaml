@@ -9,6 +9,44 @@ market:
   selic_rate: 0.15         # Current Brazilian SELIC rate (15.0% - 2025)
   trading_days_per_year: 252  # Brazilian market standard
 
+  # Daily Factor Configuration
+  daily_factor:
+    source: 'bcb_official_api'
+    
+    # Advanced Transformation Configuration
+    transformation:
+      method: 'multiplicative'  # Options: 'multiplicative', 'exponential', 'compound'
+      annualization_factor: 252.0  # Trading days per year
+      compound_frequency: 1  # For compound method
+    
+    # Advanced Validation Configuration
+    validation:
+      strategies:  # Multiple validation methods can be applied
+        - method: 'iqr'
+          multiplier: 1.5
+        - method: 'zscore'
+          threshold: 3.0
+        - method: 'rolling_window'
+          window_size: 30
+      
+      bounds:
+        min_factor: 0.95   # Configurable lower bound
+        max_factor: 1.05   # Configurable upper bound
+    
+    interpolation:
+      method: 'time'
+      limit_direction: 'both'
+      max_consecutive_interpolations: 5
+    cache:
+      directory: 'data/daily_factors/'
+      format: 'parquet'
+    
+    logging:
+      level: 'INFO'
+      output:
+        - console
+        - file
+
   # Transaction costs
   costs:
     # --- mandatory B3 fees ---
