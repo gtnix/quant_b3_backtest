@@ -13,7 +13,7 @@ Date: 2024
 """
 
 import logging
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from collections import defaultdict
@@ -381,26 +381,17 @@ class EnhancedLossCarryforwardManager:
         
         logger.info(f"Audit trail exported to {filepath}")
     
-    def print_summary(self):
-        """Print comprehensive loss carryforward summary."""
+    def get_summary_data(self) -> Dict[str, Any]:
+        """Get loss carryforward summary data for HTML reports."""
         summary = self.get_loss_summary()
-        
-        print("\n" + "="*60)
-        print("ENHANCED LOSS CARRYFORWARD SUMMARY")
-        print("="*60)
-        print(f"Total cumulative loss: R$ {summary['total_cumulative_loss']:,.2f}")
-        print(f"Assets with losses: {summary['assets_with_losses']}")
-        print(f"Total losses recorded: {summary['total_losses_recorded']}")
-        print(f"Total applications: {summary['total_applications']}")
-        print(f"Max tracking years: {summary['max_tracking_years']}")
-        
-        if self.asset_losses:
-            print("\nAsset-specific losses:")
-            for ticker, loss in summary['asset_losses'].items():
-                if loss > 0:
-                    print(f"  {ticker}: R$ {loss:,.2f}")
-        
-        print("="*60)
+        return {
+            'total_cumulative_loss': summary['total_cumulative_loss'],
+            'assets_with_losses': summary['assets_with_losses'],
+            'total_losses_recorded': summary['total_losses_recorded'],
+            'total_applications': summary['total_applications'],
+            'max_tracking_years': summary['max_tracking_years'],
+            'asset_losses': summary['asset_losses']
+        }
 
     def calculate_loss_carryforward(
         self, 

@@ -17,7 +17,7 @@ import logging
 from collections import deque
 from datetime import datetime, timedelta, date
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Any
 import pytz
 import functools
 import json
@@ -405,37 +405,23 @@ class AdvancedSettlementManager:
         
         logger.info(f"Settlement audit trail exported to {filepath}")
     
-    def print_summary(self):
-        """Print comprehensive settlement summary."""
+    def get_summary_data(self) -> Dict[str, Any]:
+        """Get settlement summary data for HTML reports."""
         summary = self.get_settlement_summary()
-        
-        print("\n" + "="*60)
-        print("ENHANCED SETTLEMENT SUMMARY")
-        print("="*60)
-        print(f"Settled cash (available): R$ {summary['settled_cash']:,.2f}")
-        print(f"Total cash (including unsettled): R$ {summary['total_cash']:,.2f}")
-        print(f"Unsettled cash (in transit): R$ {summary['unsettled_cash']:,.2f}")
-        print(f"Pending settlements: {summary['pending_settlements']}")
-        print(f"Pending buys: R$ {summary['pending_buys']:,.2f}")
-        print(f"Pending sells: R$ {summary['pending_sells']:,.2f}")
-        print(f"Settlement history: {summary['settlement_history_count']}")
-        print(f"Failed settlements: {summary['failed_settlements_count']}")
-        print(f"Settlement cycle: T+{summary['settlement_days']}")
-        print(f"Timezone: {summary['timezone']}")
-        
-        if self.settlement_queue:
-            print("\nPending settlements:")
-            for item in self.settlement_queue:
-                print(f"  {item.settlement_date}: {item.trade_type.value} "
-                      f"R$ {item.amount:,.2f} - {item.description}")
-        
-        if self.failed_settlements:
-            print("\nFailed settlements:")
-            for item in self.failed_settlements:
-                print(f"  {item.original_trade_date}: {item.trade_type.value} "
-                      f"R$ {item.amount:,.2f} - {item.description}")
-        
-        print("="*60)
+        return {
+            'settled_cash': summary['settled_cash'],
+            'total_cash': summary['total_cash'],
+            'unsettled_cash': summary['unsettled_cash'],
+            'pending_settlements': summary['pending_settlements'],
+            'pending_buys': summary['pending_buys'],
+            'pending_sells': summary['pending_sells'],
+            'settlement_history_count': summary['settlement_history_count'],
+            'failed_settlements_count': summary['failed_settlements_count'],
+            'settlement_days': summary['settlement_days'],
+            'timezone': summary['timezone'],
+            'settlement_queue': [item.to_dict() for item in self.settlement_queue],
+            'failed_settlements': [item.to_dict() for item in self.failed_settlements]
+        }
 
 
 def main():

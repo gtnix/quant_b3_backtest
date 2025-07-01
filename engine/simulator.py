@@ -236,10 +236,11 @@ class BacktestSimulator:
         
         # Ensure index is datetime
         if not isinstance(data.index, pd.DatetimeIndex):
-            try:
+            if 'date' in data.columns:
+                data['date'] = pd.to_datetime(data['date'])
+                data = data.set_index('date')
+            else:
                 data.index = pd.to_datetime(data.index)
-            except Exception as e:
-                raise ValueError(f"Could not convert index to datetime: {e}")
         
         # Sort by date
         data = data.sort_index()
@@ -461,11 +462,12 @@ class BacktestSimulator:
                     
                     if series_data is not None and not series_data.empty:
                         # Get the most recent value for the current date or closest previous date
-                        if current_date.date() in series_data.index:
-                            value = series_data.loc[current_date.date(), 'valor']
+                        current_date_pd = pd.to_datetime(current_date.date())
+                        if current_date_pd in series_data.index:
+                            value = series_data.loc[current_date_pd, 'valor']
                         else:
                             # Get the closest previous date
-                            available_dates = series_data.index[series_data.index <= current_date.date()]
+                            available_dates = series_data.index[series_data.index <= current_date_pd]
                             if len(available_dates) > 0:
                                 closest_date = available_dates[-1]
                                 value = series_data.loc[closest_date, 'valor']
@@ -884,49 +886,32 @@ class BacktestSimulator:
             logger.error(f"Error exporting results: {str(e)}")
             raise
     
-    def print_summary(self) -> None:
-        """Print comprehensive simulation summary."""
-        print("\n" + "="*60)
-        print("BACKTEST SIMULATION SUMMARY")
-        print("="*60)
-        
-        print(f"Strategy: {self.strategy.strategy_name}")
-        print(f"Initial Capital: R$ {self.initial_capital:,.2f}")
-        print(f"Final Portfolio Value: R$ {self.performance_metrics.final_portfolio_value:,.2f}")
-        print(f"Net Profit: R$ {self.performance_metrics.net_profit:,.2f}")
-        print(f"Total Return: {self.performance_metrics.total_return:.4f} ({self.performance_metrics.total_return*100:.2f}%)")
-        
-        if self.performance_metrics.annualized_return != 0:
-            print(f"Annualized Return: {self.performance_metrics.annualized_return:.4f} ({self.performance_metrics.annualized_return*100:.2f}%)")
-        
-        print(f"Sharpe Ratio: {self.performance_metrics.sharpe_ratio:.4f}")
-        print(f"Maximum Drawdown: {self.performance_metrics.max_drawdown:.4f} ({self.performance_metrics.max_drawdown*100:.2f}%)")
-        print(f"Win/Loss Ratio: {self.performance_metrics.win_loss_ratio:.4f}")
-        print(f"Profit Factor: {self.performance_metrics.profit_factor:.4f}")
-        
-        print(f"\nTrading Statistics:")
-        print(f"Total Trades: {self.performance_metrics.total_trades}")
-        print(f"Winning Trades: {self.performance_metrics.winning_trades}")
-        print(f"Losing Trades: {self.performance_metrics.losing_trades}")
-        
-        if self.performance_metrics.avg_win != 0:
-            print(f"Average Win: R$ {self.performance_metrics.avg_win:,.2f}")
-        if self.performance_metrics.avg_loss != 0:
-            print(f"Average Loss: R$ {self.performance_metrics.avg_loss:,.2f}")
-        if self.performance_metrics.largest_win != 0:
-            print(f"Largest Win: R$ {self.performance_metrics.largest_win:,.2f}")
-        if self.performance_metrics.largest_loss != 0:
-            print(f"Largest Loss: R$ {self.performance_metrics.largest_loss:,.2f}")
-        
-        print(f"\nCosts:")
-        print(f"Total Commission: R$ {self.performance_metrics.total_commission:,.2f}")
-        print(f"Total Taxes: R$ {self.performance_metrics.total_taxes:,.2f}")
-        
-        if self.simulation_start_time and self.simulation_end_time:
-            duration = self.simulation_end_time - self.simulation_start_time
-            print(f"\nSimulation Duration: {duration}")
-        
-        print("="*60)
+    def get_summary_data(self) -> Dict[str, Any]:
+        """Get simulation summary data for HTML reports."""
+        return {
+            'strategy_name': self.strategy.strategy_name,
+            'initial_capital': self.initial_capital,
+            'final_portfolio_value': self.performance_metrics.final_portfolio_value,
+            'net_profit': self.performance_metrics.net_profit,
+            'total_return': self.performance_metrics.total_return,
+            'annualized_return': self.performance_metrics.annualized_return,
+            'sharpe_ratio': self.performance_metrics.sharpe_ratio,
+            'max_drawdown': self.performance_metrics.max_drawdown,
+            'win_loss_ratio': self.performance_metrics.win_loss_ratio,
+            'profit_factor': self.performance_metrics.profit_factor,
+            'total_trades': self.performance_metrics.total_trades,
+            'winning_trades': self.performance_metrics.winning_trades,
+            'losing_trades': self.performance_metrics.losing_trades,
+            'avg_win': self.performance_metrics.avg_win,
+            'avg_loss': self.performance_metrics.avg_loss,
+            'largest_win': self.performance_metrics.largest_win,
+            'largest_loss': self.performance_metrics.largest_loss,
+            'total_commission': self.performance_metrics.total_commission,
+            'total_taxes': self.performance_metrics.total_taxes,
+            'simulation_duration': (
+                self.simulation_end_time - self.simulation_start_time
+            ).total_seconds() if self.simulation_start_time and self.simulation_end_time else None
+        }
 
 
 def main():

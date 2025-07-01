@@ -11,6 +11,7 @@ A comprehensive backtesting engine for Brazilian stocks (B3) with support for re
 - **Advanced Settlement Manager**: T+2 settlement queue, business day handling, and cash flow simulation
 - **Backtest Simulator**: Comprehensive backtesting with performance metrics and compliance (BacktestSimulator)
 - **Strategy Testing**: Framework for implementing and testing trading strategies
+- **HTML Reporting**: Interactive Plotly dashboards with PDF export capabilities
 - **Configuration**: Flexible settings for market hours, fees, portfolio, compliance, and performance
 - **Security**: Secure API key management for safe GitHub uploads
 - **Comprehensive Testing**: Extensive test suites for all advanced modules

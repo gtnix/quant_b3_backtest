@@ -25,6 +25,7 @@ import pytz
 from engine.portfolio import EnhancedPortfolio
 from engine.loss_manager import EnhancedLossCarryforwardManager
 from engine.tca import TransactionCostAnalyzer
+from engine.sgs_data_loader import SGSDataLoader
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -108,7 +109,12 @@ class PerformanceMetrics:
         
         # Brazilian market constants - load from configuration
         self.TRADING_DAYS_PER_YEAR = self.config['market'].get('trading_days_per_year', 252)
-        self.RISK_FREE_RATE = self.config['market'].get('selic_rate', 0.15)  # Brazilian SELIC rate from config
+        self.STATIC_RISK_FREE_RATE = self.config['market'].get('selic_rate', 0.15)  # Static fallback rate
+        
+        # Initialize SGS data loader for dynamic rates
+        self.sgs_loader = None
+        self.selic_data = None
+        self._initialize_sgs_integration()
         
         # Initialize metrics containers
         self.returns_metrics = ReturnsMetrics()
@@ -117,6 +123,121 @@ class PerformanceMetrics:
         self.trade_metrics = TradeMetrics()
         
         logger.info("Performance Metrics initialized with Brazilian market parameters")
+        logger.info(f"Static SELIC rate: {self.STATIC_RISK_FREE_RATE:.4f}")
+    
+    def _initialize_sgs_integration(self):
+        """Initialize SGS data loader for dynamic risk-free rates."""
+        try:
+            self.sgs_loader = SGSDataLoader()
+            logger.info("SGS data loader initialized for dynamic SELIC rates")
+        except Exception as e:
+            logger.warning(f"Failed to initialize SGS loader: {e}. Using static rates only.")
+            self.sgs_loader = None
+    
+    def _load_selic_data(self, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """
+        Load SELIC rate data from SGS for the specified date range.
+        
+        Args:
+            start_date: Start date for data retrieval
+            end_date: End date for data retrieval
+            
+        Returns:
+            DataFrame with SELIC rates or None if unavailable
+        """
+        if self.sgs_loader is None:
+            return None
+        
+        try:
+            # Format dates for SGS API (dd/mm/yyyy)
+            start_str = start_date.strftime("%d/%m/%Y")
+            end_str = end_date.strftime("%d/%m/%Y")
+            
+            # Fetch SELIC rate data (Series ID: 11)
+            selic_data = self.sgs_loader.get_series_data(11, start_str, end_str)
+            
+            if selic_data is not None and not selic_data.empty:
+                logger.info(f"Loaded {len(selic_data)} SELIC rate data points")
+                return selic_data
+            else:
+                logger.warning("No SELIC data available from SGS")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Error loading SELIC data: {e}")
+            return None
+    
+    def get_risk_free_rate(self, date: datetime) -> float:
+        """
+        Get risk-free rate for a specific date.
+        
+        Args:
+            date: Date for which to get the risk-free rate
+            
+        Returns:
+            Risk-free rate as decimal (e.g., 0.15 for 15%)
+        """
+        # Try to get dynamic rate from SGS data
+        if self.selic_data is not None and not self.selic_data.empty:
+            try:
+                # Find the closest available rate for the given date
+                date_str = date.strftime("%Y-%m-%d")
+                
+                # Check if exact date exists
+                if date_str in self.selic_data.index:
+                    rate = self.selic_data.loc[date_str, 'valor'] / 100.0  # Convert percentage to decimal
+                    logger.debug(f"Dynamic SELIC rate for {date_str}: {rate:.4f}")
+                    return rate
+                
+                # Find the most recent rate before the given date
+                available_dates = self.selic_data.index[self.selic_data.index <= date_str]
+                if len(available_dates) > 0:
+                    latest_date = available_dates[-1]
+                    rate = self.selic_data.loc[latest_date, 'valor'] / 100.0
+                    logger.debug(f"Dynamic SELIC rate for {date_str} (using {latest_date}): {rate:.4f}")
+                    return rate
+                    
+            except Exception as e:
+                logger.warning(f"Error getting dynamic SELIC rate: {e}")
+        
+        # Fallback to static rate
+        logger.debug(f"Using static SELIC rate: {self.STATIC_RISK_FREE_RATE:.4f}")
+        return self.STATIC_RISK_FREE_RATE
+    
+    def set_selic_data(self, selic_data: pd.DataFrame):
+        """
+        Set SELIC data for dynamic rate calculation.
+        
+        Args:
+            selic_data: DataFrame with SELIC rates (index: dates, column: 'valor')
+        """
+        if selic_data is not None and not selic_data.empty:
+            self.selic_data = selic_data
+            logger.info(f"Set SELIC data with {len(selic_data)} data points")
+        else:
+            logger.warning("Invalid SELIC data provided")
+    
+    def load_selic_data_for_period(self, start_date: datetime, end_date: datetime):
+        """
+        Load SELIC data for a specific period.
+        
+        Args:
+            start_date: Start date for data retrieval
+            end_date: End date for data retrieval
+        """
+        selic_data = self._load_selic_data(start_date, end_date)
+        if selic_data is not None:
+            self.set_selic_data(selic_data)
+        else:
+            logger.info("Using static SELIC rate for the period")
+    
+    @property
+    def RISK_FREE_RATE(self) -> float:
+        """
+        Property to maintain backward compatibility.
+        Returns the current risk-free rate (static fallback).
+        """
+        return self.STATIC_RISK_FREE_RATE
     
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration with error handling."""
@@ -187,12 +308,13 @@ class PerformanceMetrics:
         logger.info(f"Returns calculated: Total={total_return:.4f}, Annualized={annualized_return:.4f}")
         return self.returns_metrics
     
-    def calculate_risk_metrics(self, daily_returns: List[float]) -> RiskMetrics:
+    def calculate_risk_metrics(self, daily_returns: List[float], start_date: Optional[datetime] = None) -> RiskMetrics:
         """
         Calculate risk-adjusted performance metrics.
         
         Args:
             daily_returns: List of daily returns
+            start_date: Start date for dynamic risk-free rate calculation (optional)
             
         Returns:
             RiskMetrics object with calculated metrics
@@ -206,8 +328,18 @@ class PerformanceMetrics:
         # Calculate volatility (annualized)
         volatility = np.std(returns_array) * np.sqrt(self.TRADING_DAYS_PER_YEAR)
         
+        # Calculate risk-free rate for the period
+        if start_date is not None and self.selic_data is not None:
+            # Use dynamic rate for the start date
+            risk_free_rate = self.get_risk_free_rate(start_date)
+            logger.info(f"Using dynamic SELIC rate: {risk_free_rate:.4f} for risk metrics")
+        else:
+            # Use static rate
+            risk_free_rate = self.STATIC_RISK_FREE_RATE
+            logger.info(f"Using static SELIC rate: {risk_free_rate:.4f} for risk metrics")
+        
         # Calculate Sharpe Ratio
-        excess_returns = returns_array - (self.RISK_FREE_RATE / self.TRADING_DAYS_PER_YEAR)
+        excess_returns = returns_array - (risk_free_rate / self.TRADING_DAYS_PER_YEAR)
         sharpe_ratio = np.mean(excess_returns) / np.std(returns_array) * np.sqrt(self.TRADING_DAYS_PER_YEAR) if np.std(returns_array) > 0 else 0.0
         
         # Calculate Sortino Ratio
@@ -264,11 +396,21 @@ class PerformanceMetrics:
         day_trade_taxes = 0.0
         
         for trade in trade_history:
-            if trade.get('taxes', 0) > 0:
+            taxes = trade.get('taxes', 0)
+            # Handle different tax field types
+            if isinstance(taxes, (int, float)) and taxes > 0:
                 if trade.get('trade_type') == 'swing_trade':
-                    swing_trade_taxes += trade['taxes']
+                    swing_trade_taxes += taxes
                 elif trade.get('trade_type') == 'day_trade':
-                    day_trade_taxes += trade['taxes']
+                    day_trade_taxes += taxes
+            elif isinstance(taxes, dict):
+                # Handle case where taxes is a dictionary
+                tax_amount = taxes.get('amount', 0)
+                if tax_amount > 0:
+                    if trade.get('trade_type') == 'swing_trade':
+                        swing_trade_taxes += tax_amount
+                    elif trade.get('trade_type') == 'day_trade':
+                        day_trade_taxes += tax_amount
         
         # Calculate tax efficiency
         pre_tax_return = self.returns_metrics.total_return
@@ -392,21 +534,28 @@ class RiskAdjustedMetrics:
         self.performance_metrics = performance_metrics
         self.risk_metrics = performance_metrics.risk_metrics
     
-    def calculate_all_risk_metrics(self, daily_returns: List[float]) -> Dict[str, float]:
+    def calculate_all_risk_metrics(self, daily_returns: List[float], start_date: Optional[datetime] = None) -> Dict[str, float]:
         """
         Calculate all risk-adjusted metrics.
         
         Args:
             daily_returns: List of daily returns
+            start_date: Start date for dynamic risk-free rate calculation (optional)
             
         Returns:
             Dictionary containing all risk metrics
         """
         # Calculate basic risk metrics
-        self.performance_metrics.calculate_risk_metrics(daily_returns)
+        self.performance_metrics.calculate_risk_metrics(daily_returns, start_date)
         
         # Additional risk metrics
         returns_array = np.array(daily_returns)
+        
+        # Get risk-free rate (dynamic or static)
+        if start_date is not None:
+            risk_free_rate = self.performance_metrics.get_risk_free_rate(start_date)
+        else:
+            risk_free_rate = self.performance_metrics.STATIC_RISK_FREE_RATE
         
         # Information Ratio (assuming benchmark return of 0)
         information_ratio = np.mean(returns_array) / np.std(returns_array) * np.sqrt(self.performance_metrics.TRADING_DAYS_PER_YEAR) if np.std(returns_array) > 0 else 0.0
@@ -415,7 +564,7 @@ class RiskAdjustedMetrics:
         treynor_ratio = np.mean(returns_array) / 1.0 * self.performance_metrics.TRADING_DAYS_PER_YEAR if 1.0 != 0 else 0.0
         
         # Jensen's Alpha (assuming market return of 0)
-        jensen_alpha = np.mean(returns_array) * self.performance_metrics.TRADING_DAYS_PER_YEAR - self.performance_metrics.RISK_FREE_RATE
+        jensen_alpha = np.mean(returns_array) * self.performance_metrics.TRADING_DAYS_PER_YEAR - risk_free_rate
         
         # Skewness and Kurtosis
         skewness = self._calculate_skewness(returns_array)
@@ -614,13 +763,15 @@ class ComprehensivePerformanceAnalysis:
         logger.info("Comprehensive Performance Analysis initialized")
     
     def run_comprehensive_analysis(self, portfolio_values: List[float], 
-                                 daily_returns: List[float]) -> Dict[str, Any]:
+                                 daily_returns: List[float], 
+                                 start_date: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Run comprehensive performance analysis.
         
         Args:
             portfolio_values: List of daily portfolio values
             daily_returns: List of daily returns
+            start_date: Start date for dynamic risk-free rate calculation (optional)
             
         Returns:
             Dictionary containing all performance analysis results
@@ -629,7 +780,7 @@ class ComprehensivePerformanceAnalysis:
         returns_metrics = self.performance_metrics.calculate_returns(
             portfolio_values, datetime.now(), datetime.now()
         )
-        risk_metrics_dict = self.risk_metrics.calculate_all_risk_metrics(daily_returns)
+        risk_metrics_dict = self.risk_metrics.calculate_all_risk_metrics(daily_returns, start_date)
         tax_metrics = self.performance_metrics.calculate_tax_metrics()
         trade_metrics = self.performance_metrics.calculate_trade_metrics()
         tax_aware_metrics = self.tax_metrics.calculate_tax_aware_returns(portfolio_values)
@@ -663,7 +814,8 @@ class ComprehensivePerformanceAnalysis:
             'analysis_timestamp': datetime.now().isoformat(),
             'market_parameters': {
                 'trading_days_per_year': self.performance_metrics.TRADING_DAYS_PER_YEAR,
-                'risk_free_rate': self.performance_metrics.RISK_FREE_RATE,
+                'risk_free_rate': self.performance_metrics.get_risk_free_rate(start_date) if start_date else self.performance_metrics.STATIC_RISK_FREE_RATE,
+                'risk_free_rate_source': 'dynamic_sgs' if start_date and self.performance_metrics.selic_data is not None else 'static_config',
                 'market_timezone': self.performance_metrics.timezone.zone
             }
         }
@@ -672,78 +824,20 @@ class ComprehensivePerformanceAnalysis:
         return comprehensive_analysis
     
     def generate_performance_report(self, analysis_results: Dict[str, Any], 
-                                  output_path: str = "reports/performance_report.txt") -> None:
+                                  output_path: str = "reports/performance_report.json") -> None:
         """
-        Generate comprehensive performance report.
+        Generate comprehensive performance report as JSON for HTML integration.
         
         Args:
             analysis_results: Results from comprehensive analysis
             output_path: Path to save the report
         """
-        report_lines = []
-        report_lines.append("=" * 80)
-        report_lines.append("BRAZILIAN B3 QUANT BACKTEST - COMPREHENSIVE PERFORMANCE REPORT")
-        report_lines.append("=" * 80)
-        report_lines.append(f"Analysis Date: {analysis_results['analysis_timestamp']}")
-        report_lines.append("")
-        
-        # Returns Analysis
-        report_lines.append("RETURNS ANALYSIS")
-        report_lines.append("-" * 40)
-        returns = analysis_results['returns_analysis']
-        report_lines.append(f"Total Return: {returns['total_return']:.4f} ({returns['total_return']*100:.2f}%)")
-        report_lines.append(f"Annualized Return: {returns['annualized_return']:.4f} ({returns['annualized_return']*100:.2f}%)")
-        report_lines.append(f"Logarithmic Return: {returns['logarithmic_return']:.4f}")
-        report_lines.append(f"Trading Days: {returns['trading_days']}")
-        report_lines.append("")
-        
-        # Risk Analysis
-        report_lines.append("RISK ANALYSIS")
-        report_lines.append("-" * 40)
-        risk = analysis_results['risk_analysis']
-        report_lines.append(f"Sharpe Ratio: {risk['sharpe_ratio']:.4f}")
-        report_lines.append(f"Sortino Ratio: {risk['sortino_ratio']:.4f}")
-        report_lines.append(f"Calmar Ratio: {risk['calmar_ratio']:.4f}")
-        report_lines.append(f"Maximum Drawdown: {risk['max_drawdown']:.4f} ({risk['max_drawdown']*100:.2f}%)")
-        report_lines.append(f"Volatility: {risk['volatility']:.4f} ({risk['volatility']*100:.2f}%)")
-        report_lines.append(f"Value at Risk (95%): {risk['var_95']:.4f} ({risk['var_95']*100:.2f}%)")
-        report_lines.append("")
-        
-        # Tax Analysis
-        report_lines.append("TAX ANALYSIS")
-        report_lines.append("-" * 40)
-        tax = analysis_results['tax_analysis']
-        report_lines.append(f"Total Taxes Paid: R$ {tax['total_taxes_paid']:.2f}")
-        report_lines.append(f"Tax Efficiency: {tax['tax_efficiency']:.4f} ({tax['tax_efficiency']*100:.2f}%)")
-        report_lines.append(f"Effective Tax Rate: {tax['effective_tax_rate']:.4f} ({tax['effective_tax_rate']*100:.2f}%)")
-        report_lines.append("")
-        
-        # Trade Analysis
-        report_lines.append("TRADE ANALYSIS")
-        report_lines.append("-" * 40)
-        trade = analysis_results['trade_analysis']
-        report_lines.append(f"Total Trades: {trade['total_trades']}")
-        report_lines.append(f"Win Rate: {trade['win_rate']:.4f} ({trade['win_rate']*100:.2f}%)")
-        report_lines.append(f"Profit Factor: {trade['profit_factor']:.4f}")
-        report_lines.append(f"Average Win: R$ {trade['average_win']:.2f}")
-        report_lines.append(f"Average Loss: R$ {trade['average_loss']:.2f}")
-        report_lines.append("")
-        
-        # Regulatory Compliance
-        report_lines.append("REGULATORY COMPLIANCE")
-        report_lines.append("-" * 40)
-        compliance = analysis_results['regulatory_compliance']
-        report_lines.append(f"Regulatory Framework: {compliance['regulatory_framework']}")
-        report_lines.append(f"CVM Compliance: {compliance['cvm_compliance']}")
-        report_lines.append(f"Receita Federal Compliance: {compliance['receita_federal_compliance']}")
-        report_lines.append("")
-        
-        # Write report to file
+        # Write report to JSON file for HTML integration
         import os
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
         with open(output_path, 'w') as f:
-            f.write('\n'.join(report_lines))
+            json.dump(analysis_results, f, indent=2, default=str)
         
         logger.info(f"Performance report generated: {output_path}")
     
