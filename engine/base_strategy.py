@@ -41,6 +41,7 @@ class TradeType(Enum):
     """Enumeration for Brazilian market trade types."""
     DAY_TRADE = "day_trade"
     SWING_TRADE = "swing_trade"
+    AUTO = "auto"
 
 
 class SignalType(Enum):
@@ -61,7 +62,7 @@ class TradingSignal:
         price: Suggested execution price
         quantity: Suggested quantity
         confidence: Signal confidence (0.0 to 1.0)
-        trade_type: Brazilian trade type (day_trade or swing_trade)
+        trade_type: Brazilian trade type (day_trade, swing_trade, or auto)
         timestamp: Signal generation timestamp
         metadata: Additional signal metadata
     """
@@ -394,15 +395,9 @@ class BaseStrategy(ABC):
     def get_sgs_data(self, market_data: Dict[str, Any]) -> Dict[str, float]:
         """
         Extract SGS data from market data for strategy use.
-        
-        Args:
-            market_data: Market data dictionary
-            
-        Returns:
-            Dictionary with SGS series values
+        Always includes 'selic_daily_factor' if available for robust risk-free/benchmarking logic.
         """
         sgs_data = market_data.get('sgs_data', {})
-        
         # Provide default values if SGS data is not available
         if not sgs_data:
             logger.warning("No SGS data available, using default values")
@@ -412,9 +407,22 @@ class BaseStrategy(ABC):
                 'ipca_inflation_index': 0.04, # Default IPCA rate
                 'series_11': 0.15,
                 'series_12': 0.14,
-                'series_433': 0.04
+                'series_433': 0.04,
+                'selic_daily_factor': 1.0006  # Default daily factor (approx 15% annual)
             }
-        
+        # Always include selic_daily_factor if available
+        if 'selic_daily_factor' not in sgs_data:
+            # Try to compute from series_11 if possible
+            if 'series_11' in sgs_data:
+                valor = sgs_data['series_11']
+                if valor > 1.0:
+                    sgs_data['selic_daily_factor'] = valor
+                elif valor > 0.01:
+                    sgs_data['selic_daily_factor'] = 1 + (valor / 100)
+                else:
+                    sgs_data['selic_daily_factor'] = 1 + valor
+            else:
+                sgs_data['selic_daily_factor'] = 1.0006  # fallback
         return sgs_data
     
     def get_interest_rate_environment(self, market_data: Dict[str, Any]) -> str:

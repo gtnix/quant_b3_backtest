@@ -197,12 +197,56 @@ class B3TickerManager:
         self.api_key = api_key
         self.base_url = base_url
         
-        # Curated list of major B3 tickers as fallback
+        # Comprehensive list of B3 tickers (major stocks)
         self.major_b3_tickers = [
-            "VALE3", "PETR4", "ITUB4", "BBDC4", "ABEV3", "WEGE3", "RENT3", "BBAS3",
-            "B3SA3", "SUZB3", "JBSS3", "LREN3", "MGLU3", "RAIL3", "CCRO3", "USIM5",
-            "GGBR4", "CSAN3", "EMBR3", "BRFS3", "VIVT3", "TOTS3", "QUAL3", "CVCB3",
-            "HYPE3", "IRBR3", "GOLL4", "AZUL4", "CASH3", "MULT3", "BRML3", "CYRE3"
+            # Petrobras and Vale (largest by market cap)
+            "PETR4", "VALE3", "PETR3",
+            
+            # Banks
+            "ITUB4", "BBDC4", "BBAS3", "SANB11", "BRSR6", "BPAC11",
+            
+            # Consumer goods
+            "ABEV3", "WEGE3", "LREN3", "MGLU3", "CVCB3", "HYPE3", "QUAL3",
+            
+            # Industrial and materials
+            "GGBR4", "CSAN3", "USIM5", "CCRO3", "RAIL3", "SUZB3", "JBSS3",
+            
+            # Technology and services
+            "TOTS3", "RENT3", "B3SA3", "EMBR3", "VIVT3", "IRBR3",
+            
+            # Airlines and transport
+            "GOLL4", "AZUL4", "CASH3",
+            
+            # Real estate and construction
+            "CYRE3", "MULT3", "BRML3", "MRVE3", "PDGR3", "TEND3",
+            
+            # Energy and utilities
+            "ENBR3", "ENEV3", "EGIE3", "TAEE11", "CPLE6",
+            
+            # Healthcare
+            "HAPV3", "QUAL3", "RADL3",
+            
+            # Retail and commerce
+            "LAME4", "MGLU3", "BTOW3", "VVAR3", "AMAR3",
+            
+            # Additional major stocks
+            "BRFS3", "JBS3", "MRFG3", "NATU3", "PCAR4", "UGPA3", "VULC3",
+            "WIZS3", "YDUQ3", "ZAMP3", "AESB3", "ALPA4", "ALUP11", "ANIM3",
+            "ARZZ3", "ASAI3", "AZEV4", "BEEF3", "BHIA3", "BRAP4", "BRKM5",
+            "CAML3", "CCXC3", "CIEL3", "CMIG4", "COGN3", "CPFE3", "CRFB3",
+            "CSMG3", "CURY3", "DXCO3", "ECOR3", "EGIE3", "ELET3", "ELET6",
+            "EMAE4", "ENAT3", "ENEV3", "EQTL3", "ESTC3", "EVEN3", "EZTC3",
+            "FLRY3", "FRAS3", "GNDI3", "GOAU4", "GRND3", "GUAR3", "HGTX3",
+            "HOOT4", "IGTA3", "INEP4", "INTB3", "IRBR3", "ITSA4", "JHSF3",
+            "KLBN4", "LIGT3", "LINX3", "LOGG3", "LPSB3", "LWSA3", "MILS3",
+            "MOVI3", "MPLU3", "MRSA6B", "MTRE3", "MULT3", "NEOE3", "ODPV3",
+            "OIBR3", "OIBR4", "PARD3", "PCAR4", "PETZ3", "POMO4", "POSI3",
+            "PRIO3", "PSSA3", "PTBL3", "QUAL3", "RADL3", "RAIL3", "RAPT4",
+            "RECV3", "RENT3", "RNEW11", "ROMI3", "SAPR4", "SBSP3", "SEER3",
+            "SHUL4", "SLCE3", "SMTO3", "SOMA3", "SULA11", "TAEE11", "TASA4",
+            "TCSA3", "TECN3", "TEND3", "TGMA3", "TOTS3", "TRIS3", "TUPY3",
+            "UGPA3", "UNIP6", "USIM5", "VALE3", "VIVT3", "VULC3", "WEGE3",
+            "WIZS3", "YDUQ3", "ZAMP3"
         ]
     
     def get_tickers_from_api(self) -> List[str]:
@@ -222,7 +266,8 @@ class B3TickerManager:
             response.raise_for_status()
             
             # Parse CSV data
-            df = pd.read_csv(pd.StringIO(response.text))
+            import io
+            df = pd.read_csv(io.StringIO(response.text))
             
             # Filter for B3 exchange (BVMF)
             b3_symbols = df[df['exchange'] == 'BVMF']['symbol'].tolist()
@@ -241,26 +286,19 @@ class B3TickerManager:
     
     def get_tickers(self, use_fallback: bool = True) -> List[str]:
         """
-        Get B3 tickers with fallback to curated list.
+        Get B3 tickers. Since Alpha Vantage LISTING_STATUS doesn't include international stocks,
+        we use our comprehensive curated list of B3 stocks.
         
         Args:
-            use_fallback (bool): Whether to use fallback list if API fails
+            use_fallback (bool): Not used anymore, kept for compatibility
             
         Returns:
             List[str]: List of B3 tickers
         """
-        # Try API first
-        api_tickers = self.get_tickers_from_api()
-        
-        if api_tickers:
-            logging.info(f"Successfully fetched {len(api_tickers)} tickers from API")
-            return api_tickers
-        
-        if use_fallback:
-            logging.warning("API failed, using curated fallback list")
-            return self.major_b3_tickers.copy()
-        
-        return []
+        # Alpha Vantage LISTING_STATUS only includes US exchanges, not B3
+        # Therefore we use our comprehensive curated list
+        logging.info(f"Using comprehensive B3 ticker list with {len(self.major_b3_tickers)} stocks")
+        return self.major_b3_tickers.copy()
 
 class EnhancedB3DataDownloader:
     """
@@ -771,29 +809,24 @@ class EnhancedB3DataDownloader:
 
 def main():
     """
-    Main function demonstrating the enhanced downloader usage.
-    
-    This function provides examples of different usage patterns and
-    handles common error scenarios with helpful user guidance.
+    Main function to download all B3 stocks from Alpha Vantage.
     """
     try:
         # Initialize the enhanced downloader
         downloader = EnhancedB3DataDownloader()
         
-        print("🚀 Enhanced B3 Data Downloader")
+        print("🚀 B3 Stocks Data Downloader")
         print("=" * 50)
+        print("Downloading all available B3 stocks for the last 15 years...")
+        print("Note: This may take several hours due to API rate limits (5 calls/minute)")
+        print()
         
-        # Example 1: Download specific tickers
-        print("\n📊 Example 1: Download specific tickers")
-        test_tickers = ["VALE3", "PETR4", "ITUB4"]
-        results = downloader.download_multiple_tickers(test_tickers)
-        
-        # Example 2: Run complete download process
-        print("\n📈 Example 2: Complete download process")
+        # Run complete download process for all B3 stocks
         success = downloader.run_complete_download(
-            max_tickers=5,  # Limit for testing
+            use_api_tickers=True,  # Try to get all available B3 tickers from API
+            max_tickers=None,  # No limit - download all available
             consolidate=True,
-            output_filename="b3_sample_data.csv"
+            output_filename="b3_all_stocks_data.csv"
         )
         
         if success:

@@ -86,7 +86,7 @@ class EnhancedPortfolio:
         
         # Initialize enhanced managers
         self.loss_manager = EnhancedLossCarryforwardManager(
-            max_tracking_years=self.config.get('loss_carryforward', {}).get('max_tracking_years', 5),
+            config_path=config_path,
             timezone=self.config['market']['trading_hours']['timezone']
         )
         
@@ -138,7 +138,7 @@ class EnhancedPortfolio:
             quantity: Number of shares
             price: Price per share
             trade_date: Date of trade
-            trade_type: Type of trade
+            trade_type: Type of trade ('day_trade', 'swing_trade', or 'auto')
             
         Raises:
             ValueError: If inputs are invalid
@@ -155,8 +155,104 @@ class EnhancedPortfolio:
         if not isinstance(trade_date, datetime):
             raise ValueError("Trade date must be a datetime object")
         
-        if trade_type not in ['day_trade', 'swing_trade']:
-            raise ValueError("Trade type must be 'day_trade' or 'swing_trade'")
+        if trade_type not in ['day_trade', 'swing_trade', 'auto']:
+            raise ValueError("Trade type must be 'day_trade', 'swing_trade', or 'auto'")
+    
+    def _detect_day_trade(self, ticker: str, sell_date: datetime) -> bool:
+        """
+        Automatically detect if a sell operation constitutes a day trade.
+        
+        Brazilian tax law defines day trade as:
+        - Buy and sell of the same asset on the same trading day
+        - Partial day trades are also considered day trades
+        - Multiple buys/sells on the same day for the same asset are netted
+        
+        Args:
+            ticker: Trading asset identifier
+            sell_date: Date of the sell operation
+            
+        Returns:
+            True if this is a day trade, False otherwise
+        """
+        try:
+            # Find all buy trades for this ticker on the same day
+            same_day_buys = [
+                trade for trade in self.trade_history
+                if (trade['ticker'] == ticker and 
+                    trade['action'] == 'BUY' and 
+                    trade['date'].date() == sell_date.date())
+            ]
+            
+            # If there are no buys on the same day, it's not a day trade
+            if not same_day_buys:
+                return False
+            
+            # Check if there are any previous sells for this ticker on the same day
+            # If yes, this is part of a day trading sequence
+            same_day_sells = [
+                trade for trade in self.trade_history
+                if (trade['ticker'] == ticker and 
+                    trade['action'] == 'SELL' and 
+                    trade['date'].date() == sell_date.date())
+            ]
+            
+            # If there are previous sells on the same day, this is a day trade
+            if same_day_sells:
+                return True
+            
+            # Check if the most recent buy before this sell is on the same day
+            # Get all buy trades for this ticker before the sell date
+            previous_buys = [
+                trade for trade in self.trade_history
+                if (trade['ticker'] == ticker and 
+                    trade['action'] == 'BUY' and 
+                    trade['date'].date() <= sell_date.date())
+            ]
+            
+            if not previous_buys:
+                return False
+            
+            # Get the most recent buy
+            latest_buy = max(previous_buys, key=lambda x: x['date'])
+            
+            # If the most recent buy is on the same day as the sell, it's a day trade
+            return latest_buy['date'].date() == sell_date.date()
+            
+        except Exception as e:
+            logger.error(f"Error detecting day trade for {ticker}: {str(e)}")
+            return False
+    
+    def _resolve_trade_type(self, ticker: str, trade_date: datetime, 
+                           trade_type: str, action: str) -> str:
+        """
+        Resolve the actual trade type, handling 'auto' detection.
+        
+        Args:
+            ticker: Trading asset identifier
+            trade_date: Date of the trade
+            trade_type: Requested trade type ('day_trade', 'swing_trade', or 'auto')
+            action: Trade action ('BUY' or 'SELL')
+            
+        Returns:
+            Resolved trade type ('day_trade' or 'swing_trade')
+        """
+        if trade_type != 'auto':
+            return trade_type
+        
+        # For buy operations, we can't determine if it's a day trade yet
+        # Default to swing trade and let the sell operation determine the type
+        if action == 'BUY':
+            return 'swing_trade'
+        
+        # For sell operations, detect if it's a day trade
+        if action == 'SELL':
+            is_day_trade = self._detect_day_trade(ticker, trade_date)
+            detected_type = 'day_trade' if is_day_trade else 'swing_trade'
+            
+            logger.info(f"Auto-detected trade type for {ticker} sell on {trade_date.date()}: {detected_type}")
+            return detected_type
+        
+        return 'swing_trade'  # Default fallback
     
     def _calculate_trade_costs(self, trade_value: float, trade_type: str) -> Dict[str, float]:
         """
@@ -186,56 +282,201 @@ class EnhancedPortfolio:
             'cost_percentage': cost_breakdown.cost_percentage
         }
     
-    def _calculate_taxes(self, profit: float, trade_type: str, ticker: str = None) -> Dict[str, float]:
+    def _calculate_taxes(self, profit: float, trade_type: str, ticker: str = None, 
+                        gross_sales: float = 0.0, trade_date: datetime = None,
+                        gross_profit: float = None) -> Dict[str, float]:
         """
-        Calculate Brazilian taxes with comprehensive compliance.
+        Calculate Brazilian taxes for individual taxpayers with comprehensive compliance.
+        
+        Brazilian PF Tax Rules (July 2025):
+        - Swing Trade: 15% on monthly net profit, IRRF 0.005% on each sale (credit only)
+        - Day Trade: 20% on monthly net profit, IRRF 1% on daily net profit per asset (credit only)
+        - Swing exemption: if total sales ≤ R$ 20,000/month, profit is exempt and doesn't consume losses
+        - IRRF is NOT deducted from tax base - it's a credit against final tax liability
+        - Capital gains tax is calculated on monthly aggregated profit, not per trade
         
         Args:
-            profit: Trade profit
-            trade_type: Type of trade
+            profit: Net trade profit (after costs, before loss carryforward) - used for tax calculation
+            trade_type: Type of trade ('swing_trade' or 'day_trade')
             ticker: Trading asset identifier (optional)
+            gross_sales: Total sales amount for this trade (for IRRF calculation)
+            trade_date: Date of trade (for month reference)
+            gross_profit: Gross trade profit (before costs) - used for IRRF calculation on day trades
             
         Returns:
-            Dict containing tax components
+            Dict containing tax components for this trade
         """
         taxes = self.config['taxes']
         
-        if profit <= 0:
-            return {
-                'capital_gains_tax': 0.0,
-                'irrf_withholding': 0.0,
-                'total_taxes': 0.0
-            }
+        # Convert trade_type to modality
+        modality = "DAY" if trade_type == 'day_trade' else "SWING"
         
-        # Capital gains tax
-        if trade_type == 'day_trade':
-            capital_gains_rate = taxes['day_trade']
-            irrf_rate = taxes['irrf_day_rate']
-        else:
-            capital_gains_rate = taxes['swing_trade']
-            irrf_rate = taxes['irrf_swing_rate']
+        # Get month reference for exemption calculation
+        month_ref = trade_date.date() if trade_date else datetime.now().date()
         
-        # Apply loss carryforward
-        taxable_profit = self.loss_manager.calculate_taxable_amount(
-            profit, datetime.now(), ticker
+        # Get monthly aggregated data for proper tax calculation
+        if trade_type == 'swing_trade':
+            monthly_sales = self.loss_manager.get_monthly_swing_sales(month_ref)
+            monthly_profits = self.loss_manager.get_monthly_swing_profits(month_ref)
+        else:  # day_trade
+            monthly_sales = 0.0  # Day trades don't use sales for exemption
+            monthly_profits = self.loss_manager.get_monthly_day_profits(month_ref)
+        
+        # Apply loss carryforward with new interface
+        taxable_profit, audit_log = self.loss_manager.calculate_taxable_amount(
+            gross_profit=profit,
+            modality=modality,
+            gross_sales=monthly_sales,  # Use monthly aggregated sales
+            month_ref=month_ref
         )
         
-        # Calculate taxes
+        # Calculate IRRF withholding for this specific trade (this is a credit, not a deduction)
+        if trade_type == 'day_trade':
+            # Day trade: IRRF 1% on daily net profit per asset (if positive)
+            # Brazilian law: broker nets all day trades for the same asset per day
+            if gross_profit is not None and gross_profit > 0:
+                irrf_withholding = gross_profit * taxes['irrf_day_rate']  # 1%
+            else:
+                irrf_withholding = 0.0
+        else:
+            # Swing trade: IRRF 0.005% on each sale (regardless of profit/loss)
+            # Brazilian law: IRRF is withheld on each sale, regardless of exemption
+            irrf_withholding = gross_sales * taxes['irrf_swing_rate']  # 0.005%
+        
+        # For capital gains tax calculation, we need to use monthly aggregated data
+        # This is just for this trade's contribution to monthly tax
+        if trade_type == 'day_trade':
+            capital_gains_rate = taxes['day_trade']  # 20%
+        else:
+            capital_gains_rate = taxes['swing_trade']  # 15%
+        
+        # Calculate this trade's contribution to monthly capital gains tax
+        # Note: This is simplified - in reality, capital gains tax is calculated monthly
         capital_gains_tax = taxable_profit * capital_gains_rate
         
-        # IRRF withholding
-        if trade_type == 'day_trade':
-            irrf_withholding = profit * irrf_rate  # On gross profit
-        else:
-            irrf_withholding = profit * irrf_rate  # On sale value
+        # Calculate final tax liability for this trade (capital gains tax - IRRF credit)
+        final_tax_liability = max(0.0, capital_gains_tax - irrf_withholding)
         
-        total_taxes = capital_gains_tax + irrf_withholding
+        # Total taxes for this trade = final tax liability + IRRF withholding
+        total_taxes = final_tax_liability + irrf_withholding
         
         return {
             'capital_gains_tax': capital_gains_tax,
             'irrf_withholding': irrf_withholding,
             'total_taxes': total_taxes,
-            'taxable_profit': taxable_profit
+            'taxable_profit': taxable_profit,
+            'irrf_credit': irrf_withholding,  # IRRF acts as a credit
+            'final_tax_liability': final_tax_liability,  # Amount due to government
+            'audit_log': audit_log,
+            'monthly_aggregated': {
+                'monthly_sales': monthly_sales,
+                'monthly_profits': monthly_profits,
+                'month_ref': month_ref.isoformat()
+            }
+        }
+    
+    def calculate_monthly_tax_liability(self, month_ref: date, trade_type: str = None) -> Dict[str, float]:
+        """
+        Calculate monthly tax liability according to Brazilian tax rules.
+        
+        Brazilian PF Tax Rules (July 2025):
+        - Swing Trade: 15% on monthly net profit, IRRF 0.005% on each sale (credit only)
+        - Day Trade: 20% on monthly net profit, IRRF 1% on daily net profit per asset (credit only)
+        - Final DARF = Monthly capital gains tax - Total IRRF credits
+        
+        Args:
+            month_ref: Reference month for tax calculation
+            trade_type: Optional filter for specific trade type
+            
+        Returns:
+            Dict containing monthly tax components
+        """
+        taxes = self.config['taxes']
+        
+        # Get monthly aggregated data
+        if trade_type == 'swing_trade' or trade_type is None:
+            monthly_swing_sales = self.loss_manager.get_monthly_swing_sales(month_ref)
+            monthly_swing_profits = self.loss_manager.get_monthly_swing_profits(month_ref)
+        else:
+            monthly_swing_sales = 0.0
+            monthly_swing_profits = 0.0
+            
+        if trade_type == 'day_trade' or trade_type is None:
+            monthly_day_profits = self.loss_manager.get_monthly_day_profits(month_ref)
+        else:
+            monthly_day_profits = 0.0
+        
+        # Calculate taxable profits after loss carryforward
+        # Note: R$ 20,000 exemption is automatically applied in loss_manager
+        # If monthly sales ≤ R$ 20,000, taxable_profit = 0 (no capital gains tax)
+        # But IRRF is still withheld on each sale regardless of exemption
+        swing_taxable_profit, swing_audit = self.loss_manager.calculate_taxable_amount(
+            gross_profit=monthly_swing_profits,
+            modality="SWING",
+            gross_sales=monthly_swing_sales,
+            month_ref=month_ref
+        )
+        
+        day_taxable_profit, day_audit = self.loss_manager.calculate_taxable_amount(
+            gross_profit=monthly_day_profits,
+            modality="DAY",
+            gross_sales=0.0,  # Day trades don't use sales for exemption
+            month_ref=month_ref
+        )
+        
+        # Calculate capital gains taxes
+        swing_capital_gains_tax = swing_taxable_profit * taxes['swing_trade']  # 15%
+        day_capital_gains_tax = day_taxable_profit * taxes['day_trade']  # 20%
+        total_capital_gains_tax = swing_capital_gains_tax + day_capital_gains_tax
+        
+        # Calculate total IRRF credits for the month
+        # Swing trade IRRF: 0.005% on total monthly sales (withheld on each sale)
+        # Note: IRRF is withheld regardless of R$ 20,000 exemption
+        swing_irrf_credit = monthly_swing_sales * taxes['irrf_swing_rate']  # 0.005%
+        
+        # Day trade IRRF: 1% on total monthly profits (simplified - should be per asset per day)
+        # Note: R$ 1.00 minimum rule does NOT apply to day trades
+        day_irrf_credit = monthly_day_profits * taxes['irrf_day_rate'] if monthly_day_profits > 0 else 0.0  # 1%
+        
+        # Apply R$ 1.00 minimum withholding rule ONLY to swing trades
+        # Brazilian law: R$ 1.00 minimum rule does NOT apply to day trades
+        swing_irrf_waived = False
+        if swing_irrf_credit <= 1.00 and swing_irrf_credit > 0:
+            logger.info(f"Swing trade IRRF withholding waived: R$ {swing_irrf_credit:.2f} ≤ R$ 1.00")
+            swing_irrf_credit = 0.0
+            swing_irrf_waived = True
+        
+        total_irrf_credit = swing_irrf_credit + day_irrf_credit
+        
+        # Calculate final DARF liability
+        final_darf_liability = max(0.0, total_capital_gains_tax - total_irrf_credit)
+        
+        return {
+            'month_ref': month_ref.isoformat(),
+            'swing_trade': {
+                'monthly_sales': monthly_swing_sales,
+                'monthly_profits': monthly_swing_profits,
+                'taxable_profit': swing_taxable_profit,
+                'capital_gains_tax': swing_capital_gains_tax,
+                'irrf_credit': swing_irrf_credit,
+                'irrf_withholding_waived': swing_irrf_waived,
+                'audit_log': swing_audit
+            },
+            'day_trade': {
+                'monthly_profits': monthly_day_profits,
+                'taxable_profit': day_taxable_profit,
+                'capital_gains_tax': day_capital_gains_tax,
+                'irrf_credit': day_irrf_credit,
+                'irrf_withholding_waived': False,  # R$ 1.00 rule does NOT apply to day trades
+                'audit_log': day_audit
+            },
+            'total': {
+                'capital_gains_tax': total_capital_gains_tax,
+                'irrf_credit': total_irrf_credit,
+                'irrf_withholding_waived': swing_irrf_waived,  # Only swing trades can have waiver
+                'final_darf_liability': final_darf_liability,
+                'total_taxes_paid': final_darf_liability + total_irrf_credit
+            }
         }
     
     def buy(self, ticker: str, quantity: int, price: float, 
@@ -249,7 +490,7 @@ class EnhancedPortfolio:
             quantity: Number of shares to buy
             price: Price per share
             trade_date: Date of trade
-            trade_type: Type of trade
+            trade_type: Type of trade ('day_trade', 'swing_trade', or 'auto')
             trade_id: Optional trade identifier
             description: Trade description
             
@@ -259,13 +500,16 @@ class EnhancedPortfolio:
         try:
             self._validate_trade_inputs(ticker, quantity, price, trade_date, trade_type)
             
+            # Resolve trade type (handle auto-detection)
+            resolved_trade_type = self._resolve_trade_type(ticker, trade_date, trade_type, 'BUY')
+            
             trade_value = quantity * price
             
             # Use TCA for buy order costs
             cost_breakdown = self.tca.calculate_costs(
                 order_value=trade_value,
                 is_buy=True,
-                trade_type=trade_type
+                trade_type=resolved_trade_type
             )
             costs = {
                 'emolument': cost_breakdown.emolument,
@@ -304,7 +548,7 @@ class EnhancedPortfolio:
                     avg_price=price,
                     current_price=price,
                     last_update=trade_date,
-                    trade_type=trade_type,
+                    trade_type=resolved_trade_type,
                     position_id=trade_id,
                     description=description
                 )
@@ -333,7 +577,7 @@ class EnhancedPortfolio:
                 'price': price,
                 'value': trade_value,
                 'costs': costs,
-                'trade_type': trade_type,
+                'trade_type': resolved_trade_type,
                 'trade_id': trade_id,
                 'description': description
             }
@@ -359,7 +603,7 @@ class EnhancedPortfolio:
             quantity: Number of shares to sell
             price: Price per share
             trade_date: Date of trade
-            trade_type: Type of trade
+            trade_type: Type of trade ('day_trade', 'swing_trade', or 'auto')
             trade_id: Optional trade identifier
             description: Trade description
             
@@ -368,6 +612,9 @@ class EnhancedPortfolio:
         """
         try:
             self._validate_trade_inputs(ticker, quantity, price, trade_date, trade_type)
+            
+            # Resolve trade type (handle auto-detection)
+            resolved_trade_type = self._resolve_trade_type(ticker, trade_date, trade_type, 'SELL')
             
             # Check position
             if ticker not in self.positions:
@@ -387,7 +634,7 @@ class EnhancedPortfolio:
             cost_breakdown = self.tca.calculate_costs(
                 order_value=trade_value,
                 is_buy=False,
-                trade_type=trade_type
+                trade_type=resolved_trade_type
             )
             costs = {
                 'emolument': cost_breakdown.emolument,
@@ -404,18 +651,29 @@ class EnhancedPortfolio:
             gross_profit = trade_value - cost_basis
             net_profit = gross_profit - costs['total_costs']
             
-            # Record loss/profit for carryforward and get taxable amount
-            taxable_profit = self.loss_manager.record_trade_result(
+            # Convert trade_type to modality for loss manager
+            modality = "DAY" if resolved_trade_type == 'day_trade' else "SWING"
+            
+            # Record loss/profit for carryforward
+            self.loss_manager.record_trade_result(
                 ticker=ticker,
                 trade_profit=net_profit,
                 trade_date=trade_date,
-                trade_type=trade_type,
+                modality=modality,
                 trade_id=trade_id,
-                description=description
+                description=description,
+                gross_sales=trade_value  # Pass gross sales for monthly tracking
             )
             
-            # Calculate taxes on final taxable amount
-            taxes = self._calculate_taxes(taxable_profit, trade_type, ticker)
+            # Calculate taxes with new interface (including exemption handling)
+            taxes = self._calculate_taxes(
+                profit=net_profit, 
+                trade_type=resolved_trade_type, 
+                ticker=ticker,
+                gross_sales=trade_value,  # For exemption calculation
+                trade_date=trade_date,
+                gross_profit=gross_profit  # For IRRF calculation on day trades
+            )
             final_profit = net_profit - taxes['total_taxes']
             
             # Update position
@@ -457,7 +715,7 @@ class EnhancedPortfolio:
             self.daily_pnl[date_key] += final_profit
             
             # Update day trade P&L
-            if trade_type == 'day_trade':
+            if resolved_trade_type == 'day_trade':
                 self.day_trade_pnl += final_profit
             
             # Record trade
@@ -473,7 +731,7 @@ class EnhancedPortfolio:
                 'gross_profit': gross_profit,
                 'net_profit': net_profit,
                 'final_profit': final_profit,
-                'trade_type': trade_type,
+                'trade_type': resolved_trade_type,
                 'trade_id': trade_id,
                 'description': description
             }

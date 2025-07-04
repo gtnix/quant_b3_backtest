@@ -2,7 +2,7 @@
 Advanced Settlement Manager for Brazilian Market Backtesting
 
 Sophisticated T+2 settlement tracking with comprehensive business day handling:
-- Precise settlement date calculations with B3 holiday calendar
+- Precise settlement date calculations with B3 holiday calendar using dias_uteis
 - Advanced error handling and retry mechanisms
 - Comprehensive audit trail generation
 - Performance optimization and caching
@@ -22,6 +22,18 @@ import pytz
 import functools
 import json
 from enum import Enum
+
+# Import dias_uteis for Brazilian business day calculations
+try:
+    import dias_uteis
+    DIAS_UTEIS_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("dias_uteis library loaded successfully for Brazilian business day calculations")
+except ImportError:
+    DIAS_UTEIS_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.error("dias_uteis library is required but not available. Please install dias_uteis: pip install dias_uteis")
+    raise ImportError("dias_uteis library is required for Brazilian business day calculations")
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +75,7 @@ class AdvancedSettlementManager:
     Sophisticated T+2 settlement tracking with market-specific nuances.
     
     Features:
-    - Precise business day calculations with holiday support
+    - Precise business day calculations with dias_uteis library
     - Comprehensive error handling and validation
     - Performance optimization with caching
     - Detailed audit trail and logging
@@ -82,42 +94,24 @@ class AdvancedSettlementManager:
             settlement_days: Standard settlement cycle (default B3: 2 days)
             market_timezone: Precise market timezone handling
         """
+        if not DIAS_UTEIS_AVAILABLE:
+            raise ImportError("dias_uteis library is required for Brazilian business day calculations")
+        
         self.settlement_queue: deque = deque()
-        self.settled_cash: float = initial_cash
-        self.total_cash: float = initial_cash
+        self.cash_settled: float = initial_cash  # Renamed for clarity
+        self.cash_pending_in: float = 0.0  # Cash to receive from SELLs (unsettled)
+        self.cash_pending_out: float = 0.0  # Cash to pay for BUYs (unsettled)
         self.settlement_days = settlement_days
         self.timezone = pytz.timezone(market_timezone)
         self.settlement_history: List[SettlementItem] = []
         self.failed_settlements: List[SettlementItem] = []
         self._business_days_cache = {}  # Cache for business day calculations
         
-        # Brazilian market holidays (simplified - in production, use official calendar)
-        self.market_holidays = {
-            # New Year's Day
-            date(2024, 1, 1), date(2025, 1, 1),
-            # Carnival (simplified)
-            date(2024, 2, 12), date(2024, 2, 13), date(2024, 2, 14),
-            date(2025, 3, 4), date(2025, 3, 5), date(2025, 3, 6),
-            # Good Friday
-            date(2024, 3, 29), date(2025, 4, 18),
-            # Tiradentes
-            date(2024, 4, 21), date(2025, 4, 21),
-            # Labor Day
-            date(2024, 5, 1), date(2025, 5, 1),
-            # Independence Day
-            date(2024, 9, 7), date(2025, 9, 7),
-            # Our Lady of Aparecida
-            date(2024, 10, 12), date(2025, 10, 12),
-            # All Souls' Day
-            date(2024, 11, 2), date(2025, 11, 2),
-            # Republic Proclamation Day
-            date(2024, 11, 15), date(2025, 11, 15),
-            # Christmas
-            date(2024, 12, 25), date(2025, 12, 25),
-        }
+        logger.info("Using dias_uteis library for Brazilian business day calculations")
         
         logger.info(f"Advanced Settlement Manager initialized "
-                   f"(T+{settlement_days}, timezone: {market_timezone})")
+                   f"(T+{settlement_days}, timezone: {market_timezone}, "
+                   f"dias_uteis: enabled)")
     
     def _validate_inputs(self, trade_date: datetime, amount: float, 
                         trade_type: TradeType, ticker: Optional[str] = None) -> None:
@@ -147,7 +141,7 @@ class AdvancedSettlementManager:
     
     def _is_business_day(self, check_date: date) -> bool:
         """
-        Check if a date is a business day (not weekend or holiday).
+        Check if a date is a business day using dias_uteis.
         
         Args:
             check_date: Date to check
@@ -160,15 +154,15 @@ class AdvancedSettlementManager:
         if cache_key in self._business_days_cache:
             return self._business_days_cache[cache_key]
         
-        # Weekend check
-        if check_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
-            self._business_days_cache[cache_key] = False
-            return False
-        
-        # Holiday check
-        is_holiday = check_date in self.market_holidays
-        self._business_days_cache[cache_key] = not is_holiday
-        return not is_holiday
+        # Use dias_uteis library for accurate Brazilian business day calculation
+        try:
+            # dias_uteis.is_du() returns True if it's a business day
+            is_business = dias_uteis.is_du(check_date)
+            self._business_days_cache[cache_key] = is_business
+            return is_business
+        except Exception as e:
+            logger.error(f"Error using dias_uteis for date {check_date}: {e}")
+            raise
     
     def _calculate_business_days_forward(self, start_date: date, days: int) -> date:
         """
@@ -181,15 +175,18 @@ class AdvancedSettlementManager:
         Returns:
             date: Target date
         """
-        current_date = start_date
-        business_days_added = 0
-        
-        while business_days_added < days:
-            current_date += timedelta(days=1)
-            if self._is_business_day(current_date):
-                business_days_added += 1
-        
-        return current_date
+        try:
+            # If start_date is not a business day, find the next business day first
+            current_date = start_date
+            if not self._is_business_day(current_date):
+                current_date = self.get_next_business_day(current_date)
+            
+            # Use dias_uteis for accurate Brazilian business day calculation
+            target_date = dias_uteis.delta_du(current_date, days)
+            return target_date
+        except Exception as e:
+            logger.error(f"Error using dias_uteis for business day calculation: {e}")
+            raise
     
     def _calculate_t2_settlement_date(self, trade_date: date) -> date:
         """
@@ -202,6 +199,39 @@ class AdvancedSettlementManager:
             date: Settlement date (T+2 business days)
         """
         return self._calculate_business_days_forward(trade_date, self.settlement_days)
+    
+    def get_business_days_between(self, start_date: date, end_date: date) -> int:
+        """
+        Calculate the number of business days between two dates.
+        
+        Args:
+            start_date: Start date
+            end_date: End date
+            
+        Returns:
+            int: Number of business days between the dates
+        """
+        try:
+            return dias_uteis.diff_du(start_date, end_date)
+        except Exception as e:
+            logger.error(f"Error using dias_uteis for business days calculation: {e}")
+            raise
+    
+    def get_next_business_day(self, from_date: date) -> date:
+        """
+        Get the next business day from a given date.
+        
+        Args:
+            from_date: Starting date
+            
+        Returns:
+            date: Next business day
+        """
+        try:
+            return dias_uteis.next_du(from_date)
+        except Exception as e:
+            logger.error(f"Error using dias_uteis for next business day: {e}")
+            raise
     
     def schedule_trade(self, 
                        trade_date: datetime, 
@@ -252,11 +282,11 @@ class AdvancedSettlementManager:
             # Add to queue
             self.settlement_queue.append(settlement_item)
             
-            # Update total cash immediately (but not settled cash)
-            if trade_type == 'BUY':
-                self.total_cash -= amount
+            # Update pending cash counters
+            if trade_type_enum == TradeType.BUY:
+                self.cash_pending_out += amount
             else:  # SELL
-                self.total_cash += amount
+                self.cash_pending_in += amount
             
             logger.info(f"Scheduled {settlement_item.trade_type.value} settlement: "
                        f"R$ {amount:,.2f} for {settlement_date}, "
@@ -288,11 +318,14 @@ class AdvancedSettlementManager:
                     try:
                         # Execute settlement
                         if settlement.trade_type == TradeType.BUY:
-                            # Buy settlement: cash was already deducted, just confirm
+                            # Buy settlement: deduct cash from settled balance and pending out
+                            self.cash_pending_out -= settlement.amount
+                            self.cash_settled -= settlement.amount
                             newly_available -= settlement.amount
                         else:  # SELL
-                            # Sell settlement: add cash to settled balance
-                            self.settled_cash += settlement.amount
+                            # Sell settlement: add cash to settled balance and reduce pending in
+                            self.cash_pending_in -= settlement.amount
+                            self.cash_settled += settlement.amount
                             newly_available += settlement.amount
                         
                         # Mark as settled
@@ -343,34 +376,32 @@ class AdvancedSettlementManager:
             
             if strict_mode:
                 # In strict mode, only return settled cash
-                return self.settled_cash
+                return self.cash_settled
             else:
-                # In non-strict mode, return total cash (including unsettled)
+                # In non-strict mode, return total cash (settled + pending_in - pending_out)
                 return self.total_cash
                 
         except Exception as e:
             logger.error(f"Error calculating available cash: {str(e)}")
             # Return settled cash as fallback
-            return self.settled_cash
+            return self.cash_settled
     
     def get_unsettled_cash(self) -> float:
         """Get cash that is not yet settled (in transit)."""
-        return self.total_cash - self.settled_cash
+        # Unsettled cash = pending sells (cash to be received) - pending buys (cash to be paid)
+        return self.cash_pending_in - self.cash_pending_out
     
     def get_settlement_summary(self) -> Dict:
         """Get comprehensive settlement summary."""
-        pending_buys = sum(item.amount for item in self.settlement_queue 
-                          if item.trade_type == TradeType.BUY)
-        pending_sells = sum(item.amount for item in self.settlement_queue 
-                           if item.trade_type == TradeType.SELL)
-        
         return {
-            'settled_cash': self.settled_cash,
+            'cash_settled': self.cash_settled,
+            'cash_pending_in': self.cash_pending_in,
+            'cash_pending_out': self.cash_pending_out,
             'total_cash': self.total_cash,
             'unsettled_cash': self.get_unsettled_cash(),
             'pending_settlements': len(self.settlement_queue),
-            'pending_buys': pending_buys,
-            'pending_sells': pending_sells,
+            'pending_buys': self.cash_pending_out,
+            'pending_sells': self.cash_pending_in,
             'settlement_history_count': len(self.settlement_history),
             'failed_settlements_count': len(self.failed_settlements),
             'settlement_days': self.settlement_days,
@@ -409,7 +440,9 @@ class AdvancedSettlementManager:
         """Get settlement summary data for HTML reports."""
         summary = self.get_settlement_summary()
         return {
-            'settled_cash': summary['settled_cash'],
+            'cash_settled': summary['cash_settled'],
+            'cash_pending_in': summary['cash_pending_in'],
+            'cash_pending_out': summary['cash_pending_out'],
             'total_cash': summary['total_cash'],
             'unsettled_cash': summary['unsettled_cash'],
             'pending_settlements': summary['pending_settlements'],
@@ -420,17 +453,46 @@ class AdvancedSettlementManager:
             'settlement_days': summary['settlement_days'],
             'timezone': summary['timezone'],
             'settlement_queue': [item.to_dict() for item in self.settlement_queue],
-            'failed_settlements': [item.to_dict() for item in self.failed_settlements]
+            'failed_settlements': [item.to_dict() for item in self.failed_settlements],
+            'dias_uteis_enabled': DIAS_UTEIS_AVAILABLE
         }
+    
+    def print_summary(self) -> None:
+        """Print comprehensive settlement summary to console."""
+        summary = self.get_settlement_summary()
+        
+        print("\n=== Advanced Settlement Manager Summary ===")
+        print(f"💰 Cash Settled: R$ {summary['cash_settled']:,.2f}")
+        print(f"📥 Cash Pending In: R$ {summary['cash_pending_in']:,.2f}")
+        print(f"📤 Cash Pending Out: R$ {summary['cash_pending_out']:,.2f}")
+        print(f"💳 Total Cash: R$ {summary['total_cash']:,.2f}")
+        print(f"⏳ Unsettled Cash: R$ {summary['unsettled_cash']:,.2f}")
+        print(f"📋 Pending Settlements: {summary['pending_settlements']}")
+        print(f"📈 Pending Buys: R$ {summary['pending_buys']:,.2f}")
+        print(f"📉 Pending Sells: R$ {summary['pending_sells']:,.2f}")
+        print(f"✅ Settlement History: {summary['settlement_history_count']} items")
+        print(f"❌ Failed Settlements: {summary['failed_settlements_count']} items")
+        print(f"🔄 Settlement Cycle: T+{summary['settlement_days']}")
+        print(f"🌍 Timezone: {summary['timezone']}")
+        print(f"📅 dias_uteis: {'✅ Enabled'}")
+        
+        print("=" * 50)
+
+    @property
+    def total_cash(self) -> float:
+        """Calculate total cash as settled + pending_in - pending_out."""
+        return self.cash_settled + self.cash_pending_in - self.cash_pending_out
 
 
 def main():
-    """Example usage demonstrating enhanced settlement functionality."""
+    """Example usage demonstrating enhanced settlement functionality with dias_uteis."""
     
-    # Initialize advanced settlement manager
-    settlement_mgr = AdvancedSettlementManager(initial_cash=10000.0)
+    print("=== Advanced Settlement Manager Test with dias_uteis ===")
     
-    print("=== Advanced Settlement Manager Test ===")
+    # Initialize advanced settlement manager with dias_uteis enabled
+    settlement_mgr = AdvancedSettlementManager(
+        initial_cash=10000.0,
+    )
     
     # Scenario: Multiple trades over several days with business day handling
     today = date.today()
@@ -457,15 +519,21 @@ def main():
     )
     print(f"Available cash: R$ {settlement_mgr.get_available_cash(today + timedelta(days=1)):,.2f}")
     
-    print(f"\n--- Day 3 ({today + timedelta(days=2)}) ---")
-    # First settlement should be processed
-    available = settlement_mgr.get_available_cash(today + timedelta(days=2))
-    print(f"Available cash: R$ {available:,.2f}")
+    # Demonstrate business day calculations
+    print(f"\n--- Business Day Calculations ---")
+    next_business_day = settlement_mgr.get_next_business_day(today)
+    print(f"Next business day from {today}: {next_business_day}")
     
-    print(f"\n--- Day 4 ({today + timedelta(days=3)}) ---")
-    # Second settlement should be processed
-    available = settlement_mgr.get_available_cash(today + timedelta(days=3))
-    print(f"Available cash: R$ {available:,.2f}")
+    business_days_between = settlement_mgr.get_business_days_between(today, today + timedelta(days=7))
+    print(f"Business days between {today} and {today + timedelta(days=7)}: {business_days_between}")
+    
+    # Test settlement processing
+    print(f"\n--- Settlement Processing ---")
+    # Process settlements for the next few days
+    for i in range(2, 6):
+        test_date = today + timedelta(days=i)
+        available = settlement_mgr.get_available_cash(test_date)
+        print(f"Day {i} ({test_date}): Available cash: R$ {available:,.2f}")
     
     # Print enhanced summary
     settlement_mgr.print_summary()
@@ -473,6 +541,28 @@ def main():
     # Export audit trail
     settlement_mgr.export_audit_trail("settlement_audit_trail.json")
     print("\nSettlement audit trail exported to settlement_audit_trail.json")
+    
+    # Demonstrate dias_uteis functionality
+    print(f"\n--- dias_uteis Business Day Calculations ---")
+    
+    # Test business day calculations
+    test_date = date(2024, 1, 1)  # New Year's Day
+    is_business = settlement_mgr._is_business_day(test_date)
+    next_business = settlement_mgr.get_next_business_day(test_date)
+    
+    print(f"New Year's Day ({test_date}): Business day: {is_business}")
+    print(f"Next business day after {test_date}: {next_business}")
+    
+    # Test T+2 settlement calculation
+    trade_date = date(2024, 12, 27)  # Friday before New Year
+    settlement_date = settlement_mgr._calculate_t2_settlement_date(trade_date)
+    business_days = settlement_mgr.get_business_days_between(trade_date, settlement_date)
+    
+    print(f"Trade date: {trade_date} (Friday before New Year)")
+    print(f"T+2 settlement date: {settlement_date}")
+    print(f"Business days between: {business_days}")
+    
+    print("✅ dias_uteis library provides accurate Brazilian business day calculations")
 
 
 if __name__ == "__main__":

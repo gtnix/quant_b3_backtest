@@ -409,6 +409,9 @@ class BacktestSimulator:
         # Load SGS data for current date
         sgs_data = self._load_sgs_data_for_date(current_date)
         
+        # Calculate SELIC-CDI spread for historical analysis
+        selic_cdi_spread = self._calculate_selic_cdi_spread(sgs_data)
+        
         # Prepare market data dictionary
         market_data = {
             'price_data': historical_data,
@@ -416,6 +419,7 @@ class BacktestSimulator:
             'current_volume': current_data['volume'] if current_data is not None else 0.0,
             'timestamp': current_date,
             'sgs_data': sgs_data,  # Add SGS data
+            'selic_cdi_spread': selic_cdi_spread,  # Add spread for historical analysis
             'market_conditions': {
                 'trend': 'up' if len(historical_data) >= 2 and 
                          historical_data['close'].iloc[-1] > historical_data['close'].iloc[-2] else 'down',
@@ -430,26 +434,16 @@ class BacktestSimulator:
     def _load_sgs_data_for_date(self, current_date: datetime) -> Dict[str, float]:
         """
         Load SGS data (interest rates, inflation) for the given date.
-        
-        Args:
-            current_date: Date to load SGS data for
-            
-        Returns:
-            Dictionary with SGS series values
+        Returns a dictionary with keys like 'selic_daily_factor', 'cdi_interest_rate', etc.
         """
         try:
             # Initialize SGS loader if not already done
             if not hasattr(self, 'sgs_loader'):
                 from engine.sgs_data_loader import SGSDataLoader
                 self.sgs_loader = SGSDataLoader()
-            
-            # Calculate date range (last 30 days to ensure we have data)
             end_date = current_date.strftime('%d/%m/%Y')
             start_date = (current_date - timedelta(days=30)).strftime('%d/%m/%Y')
-            
             sgs_data = {}
-            
-            # Load each SGS series
             for series_id in self.sgs_loader.SGS_SERIES.keys():
                 try:
                     series_data = self.sgs_loader.get_series_data(
@@ -457,40 +451,64 @@ class BacktestSimulator:
                         start_date=start_date,
                         end_date=end_date,
                         use_cache=True,
-                        save_processed=False  # Don't save during simulation
+                        save_processed=False
                     )
-                    
                     if series_data is not None and not series_data.empty:
-                        # Get the most recent value for the current date or closest previous date
                         current_date_pd = pd.to_datetime(current_date.date())
                         if current_date_pd in series_data.index:
-                            value = series_data.loc[current_date_pd, 'valor']
+                            row = series_data.loc[current_date_pd]
                         else:
-                            # Get the closest previous date
                             available_dates = series_data.index[series_data.index <= current_date_pd]
                             if len(available_dates) > 0:
                                 closest_date = available_dates[-1]
-                                value = series_data.loc[closest_date, 'valor']
+                                row = series_data.loc[closest_date]
                             else:
-                                value = None
-                        
-                        if value is not None:
-                            sgs_data[f'series_{series_id}'] = value
-                            sgs_data[self.sgs_loader.SGS_SERIES[series_id].lower().replace(' ', '_')] = value
-                            
+                                row = None
+                        if row is not None:
+                            if series_id == 11 and 'daily_factor' in row:
+                                sgs_data['selic_daily_factor'] = row['daily_factor']
+                            sgs_data[f'series_{series_id}'] = row['valor']
+                            sgs_data[self.sgs_loader.SGS_SERIES[series_id].lower().replace(' ', '_')] = row['valor']
                 except Exception as e:
                     logger.warning(f"Failed to load SGS series {series_id}: {e}")
                     continue
-            
             return sgs_data
-            
         except Exception as e:
             logger.error(f"Error loading SGS data: {e}")
             return {}
     
+    def _calculate_selic_cdi_spread(self, sgs_data: Dict[str, float]) -> Optional[float]:
+        """
+        Calculate the SELIC-CDI spread for historical analysis.
+        
+        This spread was historically significant (≈ 0,06 p.p. ao ano) but has
+        converged to zero since 2019 due to infrastructure integration.
+        
+        Args:
+            sgs_data: Dictionary with SGS data
+            
+        Returns:
+            Spread value (SELIC - CDI) or None if data unavailable
+        """
+        selic_rate = sgs_data.get('selic_interest_rate')
+        cdi_rate = sgs_data.get('cdi_interest_rate')
+        
+        if selic_rate is not None and cdi_rate is not None:
+            return selic_rate - cdi_rate
+        
+        return None
+    
     def _classify_interest_rate_environment(self, sgs_data: Dict[str, float]) -> str:
         """
         Classify the current interest rate environment.
+        
+        Note: SELIC (series 11) and CDI (series 12) have evolved over time:
+        - 2015-2017: Real differences (CDI slightly higher than SELIC)
+        - 2018: Gradual convergence due to infrastructure integration
+        - 2019+: Perfect convergence (Banco Central fills series 12 with SELIC)
+        
+        For 15-year historical analysis, maintaining both series is important
+        to preserve historical spread data and enable spread-based strategies.
         
         Args:
             sgs_data: Dictionary with SGS data
@@ -501,15 +519,19 @@ class BacktestSimulator:
         selic_rate = sgs_data.get('selic_interest_rate')
         cdi_rate = sgs_data.get('cdi_interest_rate')
         
-        if selic_rate is None:
+        # Use SELIC as primary indicator (official rate)
+        # CDI is maintained for historical spread analysis
+        primary_rate = selic_rate if selic_rate is not None else cdi_rate
+        
+        if primary_rate is None:
             return 'unknown'
         
         # Classify based on current Brazilian market conditions
-        if selic_rate >= 12.0:
+        if primary_rate >= 12.0:
             return 'high_rates'  # High interest rate environment
-        elif selic_rate >= 8.0:
+        elif primary_rate >= 8.0:
             return 'moderate_rates'  # Moderate interest rate environment
-        elif selic_rate >= 4.0:
+        elif primary_rate >= 4.0:
             return 'low_rates'  # Low interest rate environment
         else:
             return 'very_low_rates'  # Very low interest rate environment

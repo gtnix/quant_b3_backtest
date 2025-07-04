@@ -9,44 +9,6 @@ market:
   selic_rate: 0.15         # Current Brazilian SELIC rate (15.0% - 2025)
   trading_days_per_year: 252  # Brazilian market standard
 
-  # Daily Factor Configuration
-  daily_factor:
-    source: 'bcb_official_api'
-    
-    # Advanced Transformation Configuration
-    transformation:
-      method: 'multiplicative'  # Options: 'multiplicative', 'exponential', 'compound'
-      annualization_factor: 252.0  # Trading days per year
-      compound_frequency: 1  # For compound method
-    
-    # Advanced Validation Configuration
-    validation:
-      strategies:  # Multiple validation methods can be applied
-        - method: 'iqr'
-          multiplier: 1.5
-        - method: 'zscore'
-          threshold: 3.0
-        - method: 'rolling_window'
-          window_size: 30
-      
-      bounds:
-        min_factor: 0.95   # Configurable lower bound
-        max_factor: 1.05   # Configurable upper bound
-    
-    interpolation:
-      method: 'time'
-      limit_direction: 'both'
-      max_consecutive_interpolations: 5
-    cache:
-      directory: 'data/daily_factors/'
-      format: 'parquet'
-    
-    logging:
-      level: 'INFO'
-      output:
-        - console
-        - file
-
   # Transaction costs
   costs:
     # --- mandatory B3 fees ---
@@ -59,13 +21,23 @@ market:
     min_brokerage: 0.0                 # no minimum charge
     iss_rate: 0.05                     # up to 5 % ISS on brokerage (currently 0 because brokerage = 0)
 
-# Tax Configuration
+# Tax Configuration - Brazilian PF Rules (July 2025)
 taxes:
-  swing_trade: 0.15        # 15 % capital-gains tax
-  day_trade: 0.20          # 20 % capital-gains tax
-  exemption_limit: 20000   # tax-free sales ceiling for non-day-trade (BRL/month)
-  irrf_swing_rate: 0.00005 # 0.005% IRRF withholding on swing-trade sale value
-  irrf_day_rate: 0.01      # 1% IRRF withholding on day-trade profit
+  # Tax rates for individual taxpayers
+  swing_trade: 0.15        # 15% on monthly net profit from common operations
+  day_trade: 0.20          # 20% on monthly net profit from day trading
+  
+  # Exemption for individual taxpayers (swing trade only)
+  swing_exemption_limit: 20000   # R$ 20,000/month - sales ≤ this amount are tax exempt
+  
+  # IRRF (withholding tax) - Credit against final tax liability
+  irrf_swing_rate: 0.00005 # 0.005% IRRF on gross sales (swing trade) - credit only
+  irrf_day_rate: 0.01      # 1% IRRF on net profit per operation (day trade) - credit only
+  
+  # Individual taxpayer settings (no 30% limit)
+  person_type: "individual"         # individual = individual taxpayer, corporate = corporate taxpayer
+  max_loss_offset_percentage: 1.0  # 100% - individuals can offset up to 100% of profit
+  loss_carryforward_perpetual: true # Losses are carried forward indefinitely
 
 # Portfolio Settings
 portfolio:
@@ -93,13 +65,14 @@ loss_carryforward:
   partial_application: true             # Enable partial loss application
   performance_caching: true             # Enable performance optimization with caching
   
-  # Brazilian Regulatory Compliance (2025)
+  # Brazilian Regulatory Compliance (2025) - Individual Taxpayers
   regulatory_compliance:
-    max_offset_percentage: 0.30         # Maximum 30% loss offset against capital gains
+    max_offset_percentage: 1.0          # 100% loss offset for individuals (no 30% limit)
     capital_gains_only: true            # Losses can ONLY offset capital gains
     perpetual_carryforward: true        # No time limit for loss carryforward
     cvm_compliance: true                # CVM (Brazilian Securities Commission) compliance
     receita_federal_compliance: true    # Receita Federal compliance
+    person_type: "individual"           # Individual taxpayer rules (IN RFB 1.585/2015)
     
   # Audit and Reporting
   audit_requirements:

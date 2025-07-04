@@ -170,39 +170,42 @@ class PerformanceMetrics:
     def get_risk_free_rate(self, date: datetime) -> float:
         """
         Get risk-free rate for a specific date.
-        
-        Args:
-            date: Date for which to get the risk-free rate
-            
-        Returns:
-            Risk-free rate as decimal (e.g., 0.15 for 15%)
+        Returns the daily risk-free rate as a decimal (e.g., 0.0005 for 0.05%).
+        Uses the 'daily_factor' column if available (preferred), otherwise falls back to 'valor'.
         """
-        # Try to get dynamic rate from SGS data
         if self.selic_data is not None and not self.selic_data.empty:
             try:
-                # Find the closest available rate for the given date
                 date_str = date.strftime("%Y-%m-%d")
-                
-                # Check if exact date exists
+                # Prefer daily_factor if available
                 if date_str in self.selic_data.index:
-                    rate = self.selic_data.loc[date_str, 'valor'] / 100.0  # Convert percentage to decimal
-                    logger.debug(f"Dynamic SELIC rate for {date_str}: {rate:.4f}")
-                    return rate
-                
-                # Find the most recent rate before the given date
-                available_dates = self.selic_data.index[self.selic_data.index <= date_str]
-                if len(available_dates) > 0:
-                    latest_date = available_dates[-1]
-                    rate = self.selic_data.loc[latest_date, 'valor'] / 100.0
-                    logger.debug(f"Dynamic SELIC rate for {date_str} (using {latest_date}): {rate:.4f}")
-                    return rate
-                    
+                    row = self.selic_data.loc[date_str]
+                else:
+                    available_dates = self.selic_data.index[self.selic_data.index <= date_str]
+                    if len(available_dates) > 0:
+                        latest_date = available_dates[-1]
+                        row = self.selic_data.loc[latest_date]
+                    else:
+                        row = None
+                if row is not None:
+                    if 'daily_factor' in row:
+                        rate = row['daily_factor'] - 1
+                        logger.debug(f"Dynamic SELIC daily_factor for {date_str}: {rate:.8f}")
+                        return rate
+                    elif 'valor' in row:
+                        # Fallback: treat as percent if > 0.01, else decimal
+                        valor = row['valor']
+                        if valor > 1.0:
+                            rate = valor
+                        elif valor > 0.01:
+                            rate = valor / 100
+                        else:
+                            rate = valor
+                        logger.debug(f"Dynamic SELIC valor for {date_str}: {rate:.8f}")
+                        return rate
             except Exception as e:
                 logger.warning(f"Error getting dynamic SELIC rate: {e}")
-        
-        # Fallback to static rate
-        logger.debug(f"Using static SELIC rate: {self.STATIC_RISK_FREE_RATE:.4f}")
-        return self.STATIC_RISK_FREE_RATE
+        logger.debug(f"Using static SELIC rate: {self.STATIC_RISK_FREE_RATE:.8f}")
+        return self.STATIC_RISK_FREE_RATE / self.TRADING_DAYS_PER_YEAR
     
     def set_selic_data(self, selic_data: pd.DataFrame):
         """

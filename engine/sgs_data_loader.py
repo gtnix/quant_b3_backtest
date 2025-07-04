@@ -28,6 +28,23 @@ import pandas_market_calendars as mcal
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Utility function for SELIC daily factor conversion
+def get_daily_factor(valor):
+    """
+    Convert Banco Central SGS 'valor' to a daily compounding factor.
+    Handles:
+      - 'valor' as daily factor (e.g., 1.00050788)
+      - 'valor' as daily rate in decimal (e.g., 0.00050788)
+      - 'valor' as daily rate in percent (e.g., 0.050788)
+    Returns:
+      - daily_factor (float): value to use for compounding (e.g., 1.00050788)
+    """
+    if valor > 1.0:
+        return valor
+    elif valor > 0.01:
+        return 1 + (valor / 100)
+    else:
+        return 1 + valor
 
 class SGSDataLoader:
     """
@@ -283,7 +300,7 @@ class SGSDataLoader:
             filepath = self.data_path / filename
             
             # Save to CSV
-            df.to_csv(filepath)
+            df.to_csv(filepath, float_format='%.8f')
             
             # Save metadata
             metadata = {
@@ -377,6 +394,11 @@ class SGSDataLoader:
         if save_processed:
             self.save_processed_data(normalized_data, series_id, start_date, end_date)
         
+        # --- Add daily_factor column for SELIC (series 11) ---
+        if series_id == 11 and normalized_data is not None and not normalized_data.empty:
+            normalized_data['daily_factor'] = normalized_data['valor'].apply(get_daily_factor)
+            logger.info("Added 'daily_factor' column to SELIC (series 11) DataFrame.")
+
         return normalized_data
     
     def get_all_series_data(self, start_date: str, end_date: str, 
