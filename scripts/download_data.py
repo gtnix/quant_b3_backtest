@@ -12,6 +12,7 @@ Key Features:
 - Data consolidation into long-format CSV
 - Detailed logging and progress tracking
 - Configuration management with validation
+- Adjusted data only (includes corporate action adjustments)
 
 Author: Enhanced Implementation
 Date: 2024
@@ -31,6 +32,9 @@ import sys
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+
+# Add import for IBRA tickers
+from ibra_tickers import IBRA_TICKERS
 
 # Configure comprehensive logging
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -160,9 +164,14 @@ class ConfigurationManager:
         
         # Set default values
         alpha_vantage_config.setdefault('base_url', "https://www.alphavantage.co/query")
+        alpha_vantage_config.setdefault('data_type', 'adjusted')  # Default to adjusted data
         alpha_vantage_config.setdefault('rate_limit_calls_per_minute', 5)
         alpha_vantage_config.setdefault('max_retries', 3)
         alpha_vantage_config.setdefault('timeout_seconds', 30)
+        
+        # Validate data_type setting
+        if alpha_vantage_config['data_type'] != 'adjusted':
+            raise ValueError(f"Invalid data_type '{alpha_vantage_config['data_type']}'. Only 'adjusted' is supported.")
         
         return config
     
@@ -175,131 +184,6 @@ class ConfigurationManager:
         """
         return self.config['alpha_vantage']
 
-class B3TickerManager:
-    """
-    Manages B3 ticker retrieval with multiple fallback mechanisms.
-    
-    This class handles:
-    - Fetching tickers from Alpha Vantage API
-    - Maintaining a curated list of major B3 tickers
-    - Providing fallback mechanisms
-    - Handling ticker naming conventions
-    """
-    
-    def __init__(self, api_key: str, base_url: str):
-        """
-        Initialize the B3 ticker manager.
-        
-        Args:
-            api_key (str): Alpha Vantage API key
-            base_url (str): Alpha Vantage API base URL
-        """
-        self.api_key = api_key
-        self.base_url = base_url
-        
-        # Comprehensive list of B3 tickers (major stocks)
-        self.major_b3_tickers = [
-            # Petrobras and Vale (largest by market cap)
-            "PETR4", "VALE3", "PETR3",
-            
-            # Banks
-            "ITUB4", "BBDC4", "BBAS3", "SANB11", "BRSR6", "BPAC11",
-            
-            # Consumer goods
-            "ABEV3", "WEGE3", "LREN3", "MGLU3", "CVCB3", "HYPE3", "QUAL3",
-            
-            # Industrial and materials
-            "GGBR4", "CSAN3", "USIM5", "CCRO3", "RAIL3", "SUZB3", "JBSS3",
-            
-            # Technology and services
-            "TOTS3", "RENT3", "B3SA3", "EMBR3", "VIVT3", "IRBR3",
-            
-            # Airlines and transport
-            "GOLL4", "AZUL4", "CASH3",
-            
-            # Real estate and construction
-            "CYRE3", "MULT3", "BRML3", "MRVE3", "PDGR3", "TEND3",
-            
-            # Energy and utilities
-            "ENBR3", "ENEV3", "EGIE3", "TAEE11", "CPLE6",
-            
-            # Healthcare
-            "HAPV3", "QUAL3", "RADL3",
-            
-            # Retail and commerce
-            "LAME4", "MGLU3", "BTOW3", "VVAR3", "AMAR3",
-            
-            # Additional major stocks
-            "BRFS3", "JBS3", "MRFG3", "NATU3", "PCAR4", "UGPA3", "VULC3",
-            "WIZS3", "YDUQ3", "ZAMP3", "AESB3", "ALPA4", "ALUP11", "ANIM3",
-            "ARZZ3", "ASAI3", "AZEV4", "BEEF3", "BHIA3", "BRAP4", "BRKM5",
-            "CAML3", "CCXC3", "CIEL3", "CMIG4", "COGN3", "CPFE3", "CRFB3",
-            "CSMG3", "CURY3", "DXCO3", "ECOR3", "EGIE3", "ELET3", "ELET6",
-            "EMAE4", "ENAT3", "ENEV3", "EQTL3", "ESTC3", "EVEN3", "EZTC3",
-            "FLRY3", "FRAS3", "GNDI3", "GOAU4", "GRND3", "GUAR3", "HGTX3",
-            "HOOT4", "IGTA3", "INEP4", "INTB3", "IRBR3", "ITSA4", "JHSF3",
-            "KLBN4", "LIGT3", "LINX3", "LOGG3", "LPSB3", "LWSA3", "MILS3",
-            "MOVI3", "MPLU3", "MRSA6B", "MTRE3", "MULT3", "NEOE3", "ODPV3",
-            "OIBR3", "OIBR4", "PARD3", "PCAR4", "PETZ3", "POMO4", "POSI3",
-            "PRIO3", "PSSA3", "PTBL3", "QUAL3", "RADL3", "RAIL3", "RAPT4",
-            "RECV3", "RENT3", "RNEW11", "ROMI3", "SAPR4", "SBSP3", "SEER3",
-            "SHUL4", "SLCE3", "SMTO3", "SOMA3", "SULA11", "TAEE11", "TASA4",
-            "TCSA3", "TECN3", "TEND3", "TGMA3", "TOTS3", "TRIS3", "TUPY3",
-            "UGPA3", "UNIP6", "USIM5", "VALE3", "VIVT3", "VULC3", "WEGE3",
-            "WIZS3", "YDUQ3", "ZAMP3"
-        ]
-    
-    def get_tickers_from_api(self) -> List[str]:
-        """
-        Fetch B3 tickers from Alpha Vantage LISTING_STATUS endpoint.
-        
-        Returns:
-            List[str]: List of B3 tickers without .SA suffix
-        """
-        try:
-            params = {
-                "function": "LISTING_STATUS",
-                "apikey": self.api_key
-            }
-            
-            response = requests.get(self.base_url, params=params, timeout=30)
-            response.raise_for_status()
-            
-            # Parse CSV data
-            import io
-            df = pd.read_csv(io.StringIO(response.text))
-            
-            # Filter for B3 exchange (BVMF)
-            b3_symbols = df[df['exchange'] == 'BVMF']['symbol'].tolist()
-            
-            # Remove .SA suffix and clean up
-            b3_symbols_clean = [
-                symbol.replace('.SA', '') for symbol in b3_symbols
-                if symbol.endswith('.SA')
-            ]
-            
-            return sorted(b3_symbols_clean)
-            
-        except Exception as e:
-            logging.warning(f"Failed to fetch tickers from API: {e}")
-            return []
-    
-    def get_tickers(self, use_fallback: bool = True) -> List[str]:
-        """
-        Get B3 tickers. Since Alpha Vantage LISTING_STATUS doesn't include international stocks,
-        we use our comprehensive curated list of B3 stocks.
-        
-        Args:
-            use_fallback (bool): Not used anymore, kept for compatibility
-            
-        Returns:
-            List[str]: List of B3 tickers
-        """
-        # Alpha Vantage LISTING_STATUS only includes US exchanges, not B3
-        # Therefore we use our comprehensive curated list
-        logging.info(f"Using comprehensive B3 ticker list with {len(self.major_b3_tickers)} stocks")
-        return self.major_b3_tickers.copy()
-
 class EnhancedB3DataDownloader:
     """
     Enhanced B3 data downloader with comprehensive features.
@@ -309,7 +193,8 @@ class EnhancedB3DataDownloader:
     - Comprehensive error handling
     - Data consolidation and formatting
     - Progress tracking and statistics
-    - Flexible ticker management
+    - Adjusted data only (includes corporate action adjustments)
+    - Uses IBRA_TICKERS for Brazilian stock symbols
     """
     
     def __init__(self, config_path: str = "config/secrets.yaml"):
@@ -329,6 +214,7 @@ class EnhancedB3DataDownloader:
         # Initialize API parameters
         self.api_key = self.alpha_vantage_config['api_key']
         self.base_url = self.alpha_vantage_config['base_url']
+        self.data_type = self.alpha_vantage_config['data_type']
         self.calls_per_minute = self.alpha_vantage_config['rate_limit_calls_per_minute']
         self.max_retries = self.alpha_vantage_config['max_retries']
         self.timeout = self.alpha_vantage_config['timeout_seconds']
@@ -339,9 +225,6 @@ class EnhancedB3DataDownloader:
         self.raw_data_dir.mkdir(parents=True, exist_ok=True)
         self.processed_data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize ticker manager
-        self.ticker_manager = B3TickerManager(self.api_key, self.base_url)
-        
         # Rate limiting
         self.last_call_time = 0
         self.rate_limit_lock = threading.Lock()
@@ -349,7 +232,8 @@ class EnhancedB3DataDownloader:
         # Statistics tracking
         self.stats = DownloadStats()
         
-        self.logger.info("Enhanced B3 Data Downloader initialized successfully")
+        self.logger.info(f"Enhanced B3 Data Downloader initialized successfully")
+        self.logger.info(f"Data type configured: {self.data_type} (includes corporate action adjustments)")
     
     def _rate_limit(self):
         """Implement thread-safe rate limiting."""
@@ -424,7 +308,7 @@ class EnhancedB3DataDownloader:
             ticker (str): Stock ticker symbol (without .SA suffix)
             
         Returns:
-            DownloadResult: Result of the download operation
+            DownloadResult: Result of the download operation with adjusted data
         """
         start_time = time.time()
         
@@ -469,16 +353,30 @@ class EnhancedB3DataDownloader:
             # Convert to DataFrame
             df = pd.DataFrame.from_dict(time_series, orient='index')
             
-            # Rename columns
+            # Rename columns - TIME_SERIES_DAILY_ADJUSTED format
             column_mapping = {
                 '1. open': 'open',
                 '2. high': 'high',
                 '3. low': 'low',
                 '4. close': 'close',
                 '5. adjusted close': 'adjusted_close',
-                '6. volume': 'volume'
+                '6. volume': 'volume',
+                '7. dividend amount': 'dividend_amount',
+                '8. split coefficient': 'split_coefficient'
             }
-            df = df.rename(columns=column_mapping)
+            
+            # Apply mapping for columns that exist
+            existing_columns = {k: v for k, v in column_mapping.items() if k in df.columns}
+            df = df.rename(columns=existing_columns)
+            
+            # Log which columns were found and mapped
+            if existing_columns:
+                self.logger.info(f"Column mapping for {ticker}: {existing_columns}")
+            
+            # Log any unmapped columns
+            unmapped_columns = [col for col in df.columns if col not in existing_columns.values()]
+            if unmapped_columns:
+                self.logger.warning(f"Unmapped columns for {ticker}: {unmapped_columns}")
             
             # Convert to numeric
             for col in df.columns:
@@ -535,16 +433,30 @@ class EnhancedB3DataDownloader:
             csv_path = self.raw_data_dir / f"{ticker}_raw.csv"
             df.to_csv(csv_path)
             
-            # Save metadata
+            # Save enhanced metadata
             metadata = {
+                "version": "1.3",
                 "ticker": ticker,
+                "currency": "BRL",
+                "data_type": "adjusted",
+                "price_type": {
+                    "open": "raw",
+                    "high": "raw",
+                    "low": "raw",
+                    "close": "raw",
+                    "adjusted_close": "adjusted",
+                    "dividend_amount": "raw",
+                    "split_coefficient": "adjustment_factor"
+                },
+                "data_sources": "Alpha Vantage TIME_SERIES_DAILY_ADJUSTED",
                 "download_date": datetime.now().isoformat(),
                 "data_points": len(df),
                 "date_range": {
                     "start": df.index.min().isoformat() if len(df) > 0 else None,
                     "end": df.index.max().isoformat() if len(df) > 0 else None
                 },
-                "columns": list(df.columns)
+                "columns": list(df.columns),
+                "note": "OHLC prices are raw BRL values from B3. adjusted_close incorporates corporate actions."
             }
             
             meta_path = self.raw_data_dir / f"{ticker}_meta.json"
@@ -570,7 +482,7 @@ class EnhancedB3DataDownloader:
         self.stats.start_time = datetime.now()
         self.stats.total_requests = len(tickers)
         
-        self.logger.info(f"Starting download for {len(tickers)} tickers")
+        self.logger.info(f"Starting adjusted data download for {len(tickers)} tickers")
         
         results = []
         
@@ -750,7 +662,6 @@ class EnhancedB3DataDownloader:
     
     def run_complete_download(self, 
                             tickers: Optional[List[str]] = None,
-                            use_api_tickers: bool = True,
                             max_tickers: Optional[int] = None,
                             consolidate: bool = True,
                             output_filename: str = "b3_consolidated_data.csv") -> bool:
@@ -758,8 +669,7 @@ class EnhancedB3DataDownloader:
         Run a complete download process with all features.
         
         Args:
-            tickers (Optional[List[str]]): Specific tickers to download
-            use_api_tickers (bool): Whether to fetch tickers from API
+            tickers (Optional[List[str]]): Specific tickers to download (defaults to IBRA_TICKERS)
             max_tickers (Optional[int]): Maximum number of tickers to download
             consolidate (bool): Whether to consolidate data into single CSV
             output_filename (str): Name of the consolidated output file
@@ -772,10 +682,8 @@ class EnhancedB3DataDownloader:
             
             # Get tickers
             if tickers is None:
-                if use_api_tickers:
-                    tickers = self.ticker_manager.get_tickers(use_fallback=True)
-                else:
-                    tickers = self.ticker_manager.major_b3_tickers.copy()
+                # Use IBRA_TICKERS as the default source
+                tickers = IBRA_TICKERS.copy()
             
             if not tickers:
                 self.logger.error("No tickers available for download")
@@ -815,18 +723,21 @@ def main():
         # Initialize the enhanced downloader
         downloader = EnhancedB3DataDownloader()
         
-        print("🚀 B3 Stocks Data Downloader")
+        print("🚀 B3 Adjusted Stocks Data Downloader")
         print("=" * 50)
-        print("Downloading all available B3 stocks for the last 15 years...")
+        print("Downloading all IBRA stocks (adjusted data) for the last 15 years...")
         print("Note: This may take several hours due to API rate limits (5 calls/minute)")
         print()
         
-        # Run complete download process for all B3 stocks
+        # Use IBRA tickers
+        tickers = IBRA_TICKERS
+        
+        # Run complete download process for all IBRA stocks
         success = downloader.run_complete_download(
-            use_api_tickers=True,  # Try to get all available B3 tickers from API
+            tickers=tickers,
             max_tickers=None,  # No limit - download all available
             consolidate=True,
-            output_filename="b3_all_stocks_data.csv"
+            output_filename="b3_adjusted_stocks_data.csv"
         )
         
         if success:

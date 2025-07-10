@@ -75,13 +75,71 @@ class DataLoader:
             # Load CSV data
             data = pd.read_csv(csv_file, index_col=0, parse_dates=True)
             
-            # Ensure proper column names
-            expected_columns = ['open', 'high', 'low', 'close', 'adjusted_close', 'volume']
-            if not all(col in data.columns for col in expected_columns):
-                logger.error(f"Missing expected columns in {ticker}. Expected: {expected_columns}")
+            # Handle column name variations and additional columns
+            column_mapping = {}
+            
+            # Map potential column name variations
+            for col in data.columns:
+                col_lower = col.lower().strip()
+                
+                # Handle numbered prefixes (e.g., "7. dividend amount" -> "dividend_amount")
+                if col_lower.startswith('7.') or col_lower.startswith('7 '):
+                    column_mapping[col] = 'dividend_amount'
+                elif col_lower.startswith('8.') or col_lower.startswith('8 '):
+                    column_mapping[col] = 'split_coefficient'
+                elif col_lower == 'ticker':
+                    column_mapping[col] = 'ticker'
+                # Keep standard columns as they are
+                elif col_lower in ['open', 'high', 'low', 'close', 'adjusted_close', 'volume']:
+                    column_mapping[col] = col_lower
+            
+            # Apply column mapping
+            if column_mapping:
+                data = data.rename(columns=column_mapping)
+                logger.info(f"Applied column mapping for {ticker}: {column_mapping}")
+            
+            # Ensure required columns exist
+            required_columns = ['open', 'high', 'low', 'close', 'adjusted_close', 'volume']
+            missing_columns = [col for col in required_columns if col not in data.columns]
+            
+            if missing_columns:
+                logger.error(f"Missing required columns in {ticker}: {missing_columns}")
+                logger.error(f"Available columns: {list(data.columns)}")
                 return None
             
-            logger.info(f"Loaded raw data for {ticker}: {len(data)} rows")
+            # Keep only required columns plus any additional useful columns
+            columns_to_keep = required_columns.copy()
+            
+            # Add dividend and split information if available
+            if 'dividend_amount' in data.columns:
+                columns_to_keep.append('dividend_amount')
+                logger.info(f"Found dividend_amount column for {ticker}")
+            
+            if 'split_coefficient' in data.columns:
+                columns_to_keep.append('split_coefficient')
+                logger.info(f"Found split_coefficient column for {ticker}")
+            
+            # Remove ticker column if it exists (we already know the ticker)
+            if 'ticker' in columns_to_keep:
+                columns_to_keep.remove('ticker')
+            
+            # Select only the columns we want to keep
+            data = data[columns_to_keep]
+            
+            # Convert numeric columns
+            numeric_columns = ['open', 'high', 'low', 'close', 'adjusted_close', 'volume']
+            for col in numeric_columns:
+                if col in data.columns:
+                    data[col] = pd.to_numeric(data[col], errors='coerce')
+            
+            # Convert dividend and split columns if they exist
+            if 'dividend_amount' in data.columns:
+                data['dividend_amount'] = pd.to_numeric(data['dividend_amount'], errors='coerce')
+            
+            if 'split_coefficient' in data.columns:
+                data['split_coefficient'] = pd.to_numeric(data['split_coefficient'], errors='coerce')
+            
+            logger.info(f"Loaded raw data for {ticker}: {len(data)} rows with columns: {list(data.columns)}")
             return data
             
         except Exception as e:
@@ -243,7 +301,7 @@ class DataLoader:
     def handle_corporate_actions(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Handle corporate actions like splits and dividends.
-        Note: Alpha Vantage data is already adjusted for splits.
+        Enhanced to use actual dividend and split data when available.
         
         Args:
             data (pd.DataFrame): Price data
@@ -251,19 +309,54 @@ class DataLoader:
         Returns:
             pd.DataFrame: Data with corporate actions handled
         """
-        # Alpha Vantage TIME_SERIES_DAILY_ADJUSTED already handles splits
-        # We just need to ensure we're using adjusted_close for calculations
+        # Track corporate actions for reporting
+        corporate_actions = {
+            'dividends': 0,
+            'splits': 0,
+            'total_actions': 0
+        }
         
-        # Create a price ratio to detect potential splits
+        # Handle dividends if dividend_amount column exists
+        if 'dividend_amount' in data.columns:
+            dividend_days = data[data['dividend_amount'] > 0]
+            if len(dividend_days) > 0:
+                corporate_actions['dividends'] = len(dividend_days)
+                logger.info(f"Found {len(dividend_days)} dividend payments")
+                
+                # Calculate dividend yield for dividend days
+                data['dividend_yield'] = 0.0
+                data.loc[data['dividend_amount'] > 0, 'dividend_yield'] = (
+                    data.loc[data['dividend_amount'] > 0, 'dividend_amount'] / 
+                    data.loc[data['dividend_amount'] > 0, 'close']
+                )
+        
+        # Handle splits if split_coefficient column exists
+        if 'split_coefficient' in data.columns:
+            split_days = data[data['split_coefficient'] != 1.0]
+            if len(split_days) > 0:
+                corporate_actions['splits'] = len(split_days)
+                logger.info(f"Found {len(split_days)} stock splits")
+                
+                # Log split details
+                for date, row in split_days.iterrows():
+                    logger.info(f"Split on {date}: {row['split_coefficient']:.3f}")
+        
+        # Create a price ratio to detect potential splits (fallback method)
         data['price_ratio'] = data['close'] / data['adjusted_close']
         
         # Flag potential splits (price ratio significantly different from 1)
         potential_splits = data[abs(data['price_ratio'] - 1) > 0.1]
-        if len(potential_splits) > 0:
-            logger.info(f"Detected {len(potential_splits)} potential corporate actions")
+        if len(potential_splits) > 0 and 'split_coefficient' not in data.columns:
+            logger.info(f"Detected {len(potential_splits)} potential corporate actions via price ratio")
         
-        # Remove the temporary column
+        # Remove the temporary price_ratio column
         data = data.drop('price_ratio', axis=1)
+        
+        # Calculate total corporate actions
+        corporate_actions['total_actions'] = corporate_actions['dividends'] + corporate_actions['splits']
+        
+        if corporate_actions['total_actions'] > 0:
+            logger.info(f"Corporate actions summary: {corporate_actions}")
         
         return data
     
