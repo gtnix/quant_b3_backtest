@@ -82,8 +82,21 @@ class DataLoader:
             for col in data.columns:
                 col_lower = col.lower().strip()
                 
-                # Handle numbered prefixes (e.g., "7. dividend amount" -> "dividend_amount")
-                if col_lower.startswith('7.') or col_lower.startswith('7 '):
+                # Handle numbered prefixes for main price columns
+                if col_lower.startswith('1.') or col_lower.startswith('1 '):
+                    column_mapping[col] = 'open'
+                elif col_lower.startswith('2.') or col_lower.startswith('2 '):
+                    column_mapping[col] = 'high'
+                elif col_lower.startswith('3.') or col_lower.startswith('3 '):
+                    column_mapping[col] = 'low'
+                elif col_lower.startswith('4.') or col_lower.startswith('4 '):
+                    column_mapping[col] = 'close'
+                elif col_lower.startswith('5.') or col_lower.startswith('5 '):
+                    column_mapping[col] = 'adjusted_close'
+                elif col_lower.startswith('6.') or col_lower.startswith('6 '):
+                    column_mapping[col] = 'volume'
+                # Handle numbered prefixes for additional columns
+                elif col_lower.startswith('7.') or col_lower.startswith('7 '):
                     column_mapping[col] = 'dividend_amount'
                 elif col_lower.startswith('8.') or col_lower.startswith('8 '):
                     column_mapping[col] = 'split_coefficient'
@@ -98,8 +111,8 @@ class DataLoader:
                 data = data.rename(columns=column_mapping)
                 logger.info(f"Applied column mapping for {ticker}: {column_mapping}")
             
-            # Ensure required columns exist
-            required_columns = ['open', 'high', 'low', 'close', 'adjusted_close', 'volume']
+            # Ensure required columns exist (be more flexible for index data)
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
             missing_columns = [col for col in required_columns if col not in data.columns]
             
             if missing_columns:
@@ -107,8 +120,24 @@ class DataLoader:
                 logger.error(f"Available columns: {list(data.columns)}")
                 return None
             
+            # Handle adjusted_close based on ticker type
+            if 'adjusted_close' not in data.columns:
+                # For index data (like IBOV), use close as adjusted_close
+                if ticker.upper() in ['IBOV', 'IBOV.SA', 'IBOVESPA', '^BVSP']:
+                    logger.info(f"Using close as adjusted_close for index {ticker}")
+                    data['adjusted_close'] = data['close']
+                else:
+                    # For stocks, they should have adjusted_close
+                    logger.error(f"Stock {ticker} missing adjusted_close column - this is required for stocks")
+                    logger.error(f"Available columns: {list(data.columns)}")
+                    return None
+            
             # Keep only required columns plus any additional useful columns
             columns_to_keep = required_columns.copy()
+
+            # Always keep adjusted_close if present
+            if 'adjusted_close' in data.columns and 'adjusted_close' not in columns_to_keep:
+                columns_to_keep.append('adjusted_close')
             
             # Add dividend and split information if available
             if 'dividend_amount' in data.columns:
@@ -257,6 +286,7 @@ class DataLoader:
         # Exponential moving averages
         data['ema_12'] = data['close'].ewm(span=12).mean()
         data['ema_26'] = data['close'].ewm(span=26).mean()
+        data['ema_50'] = data['close'].ewm(span=50).mean()
         
         # MACD
         data['macd'] = data['ema_12'] - data['ema_26']
@@ -401,10 +431,16 @@ class DataLoader:
         data = self.apply_liquidity_filters(data)
         data = self.calculate_technical_indicators(data)
         
-        # Remove rows with NaN values (from technical indicators)
+        # Remove rows with NaN values in essential columns only
         initial_rows = len(data)
-        data = data.dropna()
-        logger.info(f"Removed {initial_rows - len(data)} rows with NaN values from technical indicators")
+        essential_columns = ['close', 'volume', 'ema_12', 'ema_26', 'ema_50', 'rsi']
+        available_essential_columns = [col for col in essential_columns if col in data.columns]
+        
+        if available_essential_columns:
+            data = data.dropna(subset=available_essential_columns)
+            logger.info(f"Removed {initial_rows - len(data)} rows with NaN values in essential columns: {available_essential_columns}")
+        else:
+            logger.warning(f"No essential columns found for NaN filtering")
         
         # Save processed data if requested
         if save_processed and len(data) > 0:

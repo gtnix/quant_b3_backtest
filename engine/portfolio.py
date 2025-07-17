@@ -334,6 +334,7 @@ class EnhancedPortfolio:
         if trade_type == 'day_trade':
             # Day trade: IRRF 1% on daily net profit per asset (if positive)
             # Brazilian law: broker nets all day trades for the same asset per day
+            # For individual trades, we calculate based on this trade's contribution
             if gross_profit is not None and gross_profit > 0:
                 irrf_withholding = gross_profit * taxes['irrf_day_rate']  # 1%
             else:
@@ -434,9 +435,9 @@ class EnhancedPortfolio:
         # Note: IRRF is withheld regardless of R$ 20,000 exemption
         swing_irrf_credit = monthly_swing_sales * taxes['irrf_swing_rate']  # 0.005%
         
-        # Day trade IRRF: 1% on total monthly profits (simplified - should be per asset per day)
+        # Day trade IRRF: 1% on daily net profit per asset (Brazilian law compliance)
         # Note: R$ 1.00 minimum rule does NOT apply to day trades
-        day_irrf_credit = monthly_day_profits * taxes['irrf_day_rate'] if monthly_day_profits > 0 else 0.0  # 1%
+        day_irrf_credit = self.loss_manager.calculate_day_trade_irrf(month_ref)
         
         # Apply R$ 1.00 minimum withholding rule ONLY to swing trades
         # Brazilian law: R$ 1.00 minimum rule does NOT apply to day trades

@@ -19,7 +19,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import logging
-from typing import Optional, Dict, List, Union
+from typing import Optional, Dict, List, Union, Any
 import json
 from datetime import datetime, timedelta
 import yaml
@@ -27,6 +27,27 @@ import pandas_market_calendars as mcal
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Custom Exception Classes for SELIC Data Handling
+class SELICDataError(Exception):
+    """Base exception for SELIC data issues."""
+    pass
+
+class SELICDataUnavailableError(SELICDataError):
+    """Raised when SELIC data is completely unavailable."""
+    pass
+
+class SELICDataInsufficientError(SELICDataError):
+    """Raised when SELIC data coverage is insufficient."""
+    pass
+
+class SELICDataQualityError(SELICDataError):
+    """Raised when SELIC data quality is below required thresholds."""
+    pass
+
+class SELICDataValidationError(SELICDataError):
+    """Raised when SELIC data validation fails."""
+    pass
 
 # Utility function for SELIC daily factor conversion
 def get_daily_factor(valor):
@@ -278,6 +299,285 @@ class SGSDataLoader:
             logger.warning(f"Very few data points ({len(df)}) for series {series_id}")
         
         return True
+    
+    def validate_selic_data_coverage(self, start_date: str, end_date: str) -> Dict[str, Any]:
+        """
+        Validate SELIC data coverage for the specified period.
+        
+        Args:
+            start_date (str): Start date in format 'dd/mm/yyyy'
+            end_date (str): End date in format 'dd/mm/yyyy'
+            
+        Returns:
+            Dict[str, Any]: Detailed coverage analysis
+        """
+        try:
+            # Get strict mode configuration
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            quality_config = self.config.get('sgs', {}).get('quality_thresholds', {})
+            
+            # Check if strict mode is enabled
+            if not strict_config.get('enabled', False):
+                return {'strict_mode_enabled': False, 'coverage_percentage': 100.0}
+            
+            # Fetch SELIC data (series 11)
+            selic_data = self.get_series_data(11, start_date, end_date, use_cache=True, save_processed=False)
+            
+            if selic_data is None or selic_data.empty:
+                raise SELICDataUnavailableError(f"No SELIC data available for period {start_date} to {end_date}")
+            
+            # Calculate coverage metrics
+            start_dt = pd.to_datetime(start_date, dayfirst=True)
+            end_dt = pd.to_datetime(end_date, dayfirst=True)
+            
+            # Get B3 trading calendar for the period
+            b3 = mcal.get_calendar('BVMF')
+            schedule = b3.schedule(start_date=start_dt, end_date=end_dt)
+            total_trading_days = len(schedule)
+            
+            # Count days with SELIC data
+            days_with_data = len(selic_data.dropna())
+            coverage_percentage = (days_with_data / total_trading_days) * 100 if total_trading_days > 0 else 0
+            
+            # Check minimum coverage requirement
+            min_coverage = strict_config.get('minimum_coverage_percentage', 95.0)
+            if coverage_percentage < min_coverage:
+                raise SELICDataInsufficientError(
+                    f"SELIC data coverage ({coverage_percentage:.1f}%) below minimum requirement ({min_coverage}%)"
+                )
+            
+            # Check minimum data points requirement
+            min_data_points = quality_config.get('minimum_data_points', 100)
+            if days_with_data < min_data_points:
+                raise SELICDataInsufficientError(
+                    f"Insufficient SELIC data points ({days_with_data}) below minimum requirement ({min_data_points})"
+                )
+            
+            # Check for large gaps
+            max_gap_days = quality_config.get('maximum_gap_days', 5)
+            gaps = self._find_data_gaps(selic_data, max_gap_days)
+            
+            # Check rate validity
+            rate_range = quality_config.get('rate_validity_range', [0.001, 100.0])
+            invalid_rates = self._check_rate_validity(selic_data, rate_range)
+            
+            # Calculate quality score
+            quality_score = self._calculate_selic_quality_score(selic_data, gaps, invalid_rates)
+            
+            return {
+                'strict_mode_enabled': True,
+                'coverage_percentage': coverage_percentage,
+                'total_trading_days': total_trading_days,
+                'days_with_data': days_with_data,
+                'data_gaps': gaps,
+                'invalid_rates': invalid_rates,
+                'quality_score': quality_score,
+                'meets_requirements': True
+            }
+            
+        except (SELICDataUnavailableError, SELICDataInsufficientError) as e:
+            # Re-raise these specific exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Error validating SELIC data coverage: {e}")
+            raise SELICDataValidationError(f"Failed to validate SELIC data coverage: {e}")
+    
+    def get_selic_data_quality_score(self, data: pd.DataFrame) -> float:
+        """
+        Calculate SELIC data quality score (0-100%).
+        
+        Args:
+            data (pd.DataFrame): SELIC data DataFrame
+            
+        Returns:
+            float: Quality score from 0 to 100
+        """
+        if data is None or data.empty:
+            return 0.0
+        
+        try:
+            score = 0.0
+            max_score = 100.0
+            
+            # Completeness (40% of score)
+            completeness = 1.0 - (data['valor'].isna().sum() / len(data))
+            score += completeness * 40
+            
+            # Consistency (30% of score)
+            # Check for reasonable rate changes (not more than 50% in one day)
+            if len(data) > 1:
+                rate_changes = data['valor'].pct_change().abs()
+                reasonable_changes = (rate_changes <= 0.5).sum()
+                consistency = reasonable_changes / (len(data) - 1)
+                score += consistency * 30
+            else:
+                score += 30  # Single data point gets full consistency score
+            
+            # Reasonableness (30% of score)
+            # Check if rates are within reasonable bounds (0.1% to 100%)
+            reasonable_rates = ((data['valor'] >= 0.001) & (data['valor'] <= 100.0)).sum()
+            reasonableness = reasonable_rates / len(data)
+            score += reasonableness * 30
+            
+            return min(score, max_score)
+            
+        except Exception as e:
+            logger.error(f"Error calculating SELIC quality score: {e}")
+            return 0.0
+    
+    def _find_data_gaps(self, data: pd.DataFrame, max_gap_days: int) -> List[Dict[str, Any]]:
+        """
+        Find gaps in SELIC data that exceed the maximum allowed gap.
+        
+        Args:
+            data (pd.DataFrame): SELIC data DataFrame
+            max_gap_days (int): Maximum allowed gap in days
+            
+        Returns:
+            List[Dict[str, Any]]: List of gap information
+        """
+        gaps = []
+        
+        if len(data) < 2:
+            return gaps
+        
+        # Sort by date
+        data_sorted = data.sort_index()
+        
+        # Find gaps
+        for i in range(1, len(data_sorted)):
+            current_date = data_sorted.index[i]
+            previous_date = data_sorted.index[i-1]
+            
+            # Calculate business days between dates
+            business_days = len(pd.bdate_range(previous_date, current_date)) - 1
+            
+            if business_days > max_gap_days:
+                gaps.append({
+                    'start_date': previous_date,
+                    'end_date': current_date,
+                    'gap_days': business_days,
+                    'max_allowed': max_gap_days
+                })
+        
+        return gaps
+    
+    def _check_rate_validity(self, data: pd.DataFrame, rate_range: List[float]) -> List[Dict[str, Any]]:
+        """
+        Check if SELIC rates are within valid range.
+        
+        Args:
+            data (pd.DataFrame): SELIC data DataFrame
+            rate_range (List[float]): Valid rate range [min, max]
+            
+        Returns:
+            List[Dict[str, Any]]: List of invalid rate information
+        """
+        invalid_rates = []
+        
+        if len(data) == 0:
+            return invalid_rates
+        
+        min_rate, max_rate = rate_range
+        
+        # Find rates outside valid range
+        invalid_mask = (data['valor'] < min_rate) | (data['valor'] > max_rate)
+        invalid_data = data[invalid_mask]
+        
+        for date, row in invalid_data.iterrows():
+            invalid_rates.append({
+                'date': date,
+                'rate': row['valor'],
+                'min_allowed': min_rate,
+                'max_allowed': max_rate
+            })
+        
+        return invalid_rates
+    
+    def _calculate_selic_quality_score(self, data: pd.DataFrame, gaps: List[Dict], invalid_rates: List[Dict]) -> float:
+        """
+        Calculate overall SELIC data quality score.
+        
+        Args:
+            data (pd.DataFrame): SELIC data DataFrame
+            gaps (List[Dict]): List of data gaps
+            invalid_rates (List[Dict]): List of invalid rates
+            
+        Returns:
+            float: Quality score from 0 to 100
+        """
+        if data is None or data.empty:
+            return 0.0
+        
+        try:
+            base_score = self.get_selic_data_quality_score(data)
+            
+            # Penalize for gaps
+            gap_penalty = len(gaps) * 5  # 5 points per gap
+            
+            # Penalize for invalid rates
+            rate_penalty = len(invalid_rates) * 10  # 10 points per invalid rate
+            
+            # Calculate final score
+            final_score = max(0.0, base_score - gap_penalty - rate_penalty)
+            
+            return final_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating final SELIC quality score: {e}")
+            return 0.0
+    
+    def generate_selic_data_report(self, start_date: str, end_date: str) -> str:
+        """
+        Generate detailed report about SELIC data availability.
+        
+        Args:
+            start_date (str): Start date in format 'dd/mm/yyyy'
+            end_date (str): End date in format 'dd/mm/yyyy'
+            
+        Returns:
+            str: Detailed report
+        """
+        try:
+            coverage_info = self.validate_selic_data_coverage(start_date, end_date)
+            
+            report = f"""
+SELIC Data Analysis Report
+==========================
+Period: {start_date} to {end_date}
+Strict Mode: {'Enabled' if coverage_info.get('strict_mode_enabled', False) else 'Disabled'}
+
+Data Coverage: {coverage_info.get('coverage_percentage', 0):.1f}%
+Total Trading Days: {coverage_info.get('total_trading_days', 0)}
+Days with Data: {coverage_info.get('days_with_data', 0)}
+Quality Score: {coverage_info.get('quality_score', 0):.1f}%
+
+Data Gaps: {len(coverage_info.get('data_gaps', []))}
+Invalid Rates: {len(coverage_info.get('invalid_rates', []))}
+
+Requirements Met: {'Yes' if coverage_info.get('meets_requirements', False) else 'No'}
+"""
+            
+            # Add gap details
+            gaps = coverage_info.get('data_gaps', [])
+            if gaps:
+                report += "\nData Gaps:\n"
+                for gap in gaps:
+                    report += f"  - {gap['start_date'].strftime('%Y-%m-%d')} to {gap['end_date'].strftime('%Y-%m-%d')} ({gap['gap_days']} days)\n"
+            
+            # Add invalid rate details
+            invalid_rates = coverage_info.get('invalid_rates', [])
+            if invalid_rates:
+                report += "\nInvalid Rates:\n"
+                for rate in invalid_rates[:5]:  # Show first 5
+                    report += f"  - {rate['date'].strftime('%Y-%m-%d')}: {rate['rate']:.6f}\n"
+                if len(invalid_rates) > 5:
+                    report += f"  ... and {len(invalid_rates) - 5} more\n"
+            
+            return report
+            
+        except Exception as e:
+            return f"Error generating SELIC data report: {e}"
     
     def save_processed_data(self, df: pd.DataFrame, series_id: int, start_date: str, end_date: str) -> bool:
         """
