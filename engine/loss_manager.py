@@ -104,6 +104,10 @@ class EnhancedLossCarryforwardManager:
         self.monthly_swing_profits: Dict[str, float] = defaultdict(float)  # {YYYY-MM: total_profits}
         self.monthly_day_profits: Dict[str, float] = defaultdict(float)  # {YYYY-MM: total_profits}
         
+        # Daily asset profit tracking for day trades (Brazilian IRRF compliance)
+        # Structure: {YYYY-MM-DD: {asset: daily_profit}}
+        self.daily_asset_profits: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        
         # Audit trail
         self.loss_history: List[LossRecord] = []
         self.application_history: List[LossApplication] = []
@@ -204,6 +208,11 @@ class EnhancedLossCarryforwardManager:
                 if trade_profit > 0:
                     self.monthly_swing_profits[month_key] += trade_profit
             else:  # DAY
+                # Track daily asset profits for day trades (Brazilian IRRF compliance)
+                date_key = trade_date.strftime('%Y-%m-%d')
+                self.daily_asset_profits[date_key][ticker] += trade_profit
+                
+                # Also track monthly profits for backward compatibility
                 if trade_profit > 0:
                     self.monthly_day_profits[month_key] += trade_profit
             
@@ -375,7 +384,9 @@ class EnhancedLossCarryforwardManager:
             'total_applications': len(self.application_history),
             'person_type': self.person_type,
             'max_loss_offset_percentage': self.max_loss_offset_percentage,
-            'swing_exemption_limit': self.swing_exemption_limit
+            'swing_exemption_limit': self.swing_exemption_limit,
+            'daily_asset_tracking_enabled': True,
+            'total_daily_records': len(self.daily_asset_profits)
         }
     
     def get_monthly_swing_sales(self, month_ref: date) -> float:
@@ -416,6 +427,60 @@ class EnhancedLossCarryforwardManager:
         """
         month_key = month_ref.strftime('%Y-%m')
         return self.monthly_day_profits.get(month_key, 0.0)
+    
+    def calculate_day_trade_irrf(self, month_ref: date) -> float:
+        """
+        Calculate day trade IRRF according to Brazilian law (1% on daily net profit per asset).
+        
+        Brazilian IRRF Rules for Day Trades:
+        - 1% IRRF on daily net profit per asset (if positive)
+        - If daily net profit is negative, no IRRF is withheld
+        - IRRF is calculated per asset per day, then aggregated monthly
+        
+        Args:
+            month_ref: Reference month for IRRF calculation
+            
+        Returns:
+            float: Total IRRF amount for the month
+        """
+        total_irrf = 0.0
+        month_str = month_ref.strftime('%Y-%m')
+        
+        # Iterate through all days in the month
+        for date_key, asset_profits in self.daily_asset_profits.items():
+            # Check if this date belongs to the target month
+            if date_key.startswith(month_str):
+                # Calculate IRRF for each asset on this day
+                for asset, daily_profit in asset_profits.items():
+                    if daily_profit > 0:
+                        # Brazilian law: 1% IRRF on positive daily profit per asset
+                        asset_irrf = daily_profit * 0.01  # 1%
+                        total_irrf += asset_irrf
+                        
+                        logger.debug(f"Day trade IRRF for {asset} on {date_key}: "
+                                   f"R$ {daily_profit:.2f} × 1% = R$ {asset_irrf:.2f}")
+        
+        logger.info(f"Total day trade IRRF for {month_str}: R$ {total_irrf:.2f}")
+        return total_irrf
+    
+    def get_daily_asset_profits(self, month_ref: date) -> Dict[str, Dict[str, float]]:
+        """
+        Get daily asset profits for a specific month.
+        
+        Args:
+            month_ref: Reference month
+            
+        Returns:
+            Dict containing daily asset profits: {YYYY-MM-DD: {asset: daily_profit}}
+        """
+        month_str = month_ref.strftime('%Y-%m')
+        daily_profits = {}
+        
+        for date_key, asset_profits in self.daily_asset_profits.items():
+            if date_key.startswith(month_str):
+                daily_profits[date_key] = dict(asset_profits)
+        
+        return daily_profits
     
     def reset_monthly_tracking(self, current_month: int):
         """

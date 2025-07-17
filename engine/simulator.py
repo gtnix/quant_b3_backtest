@@ -31,6 +31,7 @@ from engine.portfolio import EnhancedPortfolio
 from engine.base_strategy import BaseStrategy, TradingSignal, SignalType, TradeType
 from engine.performance_metrics import PerformanceMetrics
 from engine.tca import TransactionCostAnalyzer
+from engine.sgs_data_loader import SELICDataError, SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -56,6 +57,17 @@ class SimulationResult:
     simulation_duration: float
     start_date: datetime
     end_date: datetime
+    # Benchmark metrics (optional)
+    benchmark_return: float = 0.0
+    excess_return: float = 0.0
+    information_ratio: float = 0.0
+    beta: float = 0.0
+    alpha: float = 0.0
+    tracking_error: float = 0.0
+    rolling_correlation: float = 0.0
+    benchmark_sharpe: float = 0.0
+    benchmark_max_drawdown: float = 0.0
+    benchmark_win_rate: float = 0.0
 
 
 @dataclass
@@ -179,14 +191,24 @@ class BacktestSimulator:
         self.simulation_start_time: Optional[datetime] = None
         self.simulation_end_time: Optional[datetime] = None
         
-        # Performance metrics
-        self.performance_metrics = PerformanceMetrics()
+        # Performance metrics (includes benchmark analysis)
+        self.performance_metrics = PerformanceMetrics(self.portfolio, config_path)
         
         # Setup logging
         self._setup_logging()
         
         logger.info(f"BacktestSimulator initialized with R$ {initial_capital:,.2f} initial capital")
         logger.info(f"Strategy: {self.strategy.strategy_name}")
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration with error handling."""
+        try:
+            with open(self.config_path, 'r') as file:
+                config = yaml.safe_load(file)
+            return config
+        except Exception as e:
+            logger.error(f"Error loading configuration: {str(e)}")
+            raise
         logger.info(f"Date range: {start_date} to {end_date}")
     
     def _setup_logging(self) -> None:
@@ -365,7 +387,7 @@ class BacktestSimulator:
             # Record simulation end time
             self.simulation_end_time = datetime.now()
             
-            # Calculate performance metrics
+            # Calculate all performance metrics (including benchmark)
             self._calculate_performance_metrics()
             
             # Create simulation result
@@ -433,7 +455,7 @@ class BacktestSimulator:
     
     def _load_sgs_data_for_date(self, current_date: datetime) -> Dict[str, float]:
         """
-        Load SGS data (interest rates, inflation) for the given date.
+        Load SGS data (interest rates, inflation) for the given date with strict validation.
         Returns a dictionary with keys like 'selic_daily_factor', 'cdi_interest_rate', etc.
         """
         try:
@@ -441,9 +463,37 @@ class BacktestSimulator:
             if not hasattr(self, 'sgs_loader'):
                 from engine.sgs_data_loader import SGSDataLoader
                 self.sgs_loader = SGSDataLoader()
+            
+            # Load configuration for strict mode
+            config = self._load_config()
+            strict_config = config.get('sgs', {}).get('strict_mode', {})
+            
             end_date = current_date.strftime('%d/%m/%Y')
             start_date = (current_date - timedelta(days=30)).strftime('%d/%m/%Y')
             sgs_data = {}
+            
+            # Special handling for SELIC (series 11) in strict mode
+            if strict_config.get('enabled', False):
+                try:
+                    # Validate SELIC data coverage for the period
+                    coverage_info = self.sgs_loader.validate_selic_data_coverage(start_date, end_date)
+                    
+                    if not coverage_info.get('meets_requirements', False):
+                        raise SELICDataInsufficientError(
+                            f"SELIC data coverage ({coverage_info.get('coverage_percentage', 0):.1f}%) "
+                            f"does not meet strict mode requirements for date {current_date.date()}"
+                        )
+                    
+                    logger.debug(f"SELIC data validation passed for {current_date.date()}: "
+                               f"{coverage_info.get('coverage_percentage', 0):.1f}% coverage")
+                except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
+                    if strict_config.get('fail_on_missing_data', False):
+                        logger.error(f"Critical SELIC data issue for {current_date.date()}: {e}")
+                        raise RuntimeError(f"Backtest cannot proceed due to SELIC data issues: {e}")
+                    else:
+                        logger.warning(f"SELIC data issue (non-strict mode) for {current_date.date()}: {e}")
+            
+            # Load all SGS series data
             for series_id in self.sgs_loader.SGS_SERIES.keys():
                 try:
                     series_data = self.sgs_loader.get_series_data(
@@ -472,7 +522,23 @@ class BacktestSimulator:
                 except Exception as e:
                     logger.warning(f"Failed to load SGS series {series_id}: {e}")
                     continue
+            
+            # In strict mode, ensure we have SELIC data
+            if strict_config.get('enabled', False) and 'selic_daily_factor' not in sgs_data:
+                if strict_config.get('fail_on_missing_data', False):
+                    raise SELICDataUnavailableError(f"No SELIC data available for {current_date.date()}")
+                else:
+                    logger.warning(f"No SELIC data available for {current_date.date()}, using fallback")
+            
             return sgs_data
+        except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
+            strict_config = config.get('sgs', {}).get('strict_mode', {})
+            if strict_config.get('fail_on_missing_data', False):
+                logger.error(f"Critical SELIC data issue: {e}")
+                raise RuntimeError(f"Backtest cannot proceed due to SELIC data issues: {e}")
+            else:
+                logger.error(f"SELIC data issue (non-strict mode): {e}")
+                return {}
         except Exception as e:
             logger.error(f"Error loading SGS data: {e}")
             return {}
@@ -691,120 +757,37 @@ class BacktestSimulator:
             logger.error(f"Error executing trade for signal {signal}: {str(e)}")
     
     def _calculate_performance_metrics(self) -> None:
-        """Calculate comprehensive performance metrics."""
+        """Calculate comprehensive performance metrics including benchmark analysis."""
         if not self.daily_portfolio_values:
             logger.warning("No portfolio values available for performance calculation")
             return
         
-        # Basic metrics
-        initial_value = self.daily_portfolio_values[0]
-        final_value = self.daily_portfolio_values[-1]
+        # Use the integrated performance metrics module
+        all_metrics = self.performance_metrics.calculate_all_metrics(
+            portfolio_values=self.daily_portfolio_values,
+            daily_returns=self.daily_returns,
+            start_date=self.start_date,
+            end_date=self.end_date
+        )
         
-        self.performance_metrics.total_return = (final_value / initial_value) - 1
-        self.performance_metrics.final_portfolio_value = final_value
-        self.performance_metrics.initial_capital = initial_value
-        
-        # Calculate annualized return
-        if self.simulation_start_time and self.simulation_end_time:
-            duration_days = (self.simulation_end_time - self.simulation_start_time).days
-            if duration_days > 0:
-                self.performance_metrics.annualized_return = (
-                    (final_value / initial_value) ** (365 / duration_days) - 1
-                )
-        
-        # Calculate Sharpe ratio (simplified - assuming risk-free rate of 0)
-        if len(self.daily_returns) > 1:
-            returns_array = np.array(self.daily_returns)
-            mean_return = np.mean(returns_array)
-            std_return = np.std(returns_array)
-            
-            if std_return > 0:
-                self.performance_metrics.sharpe_ratio = mean_return / std_return * np.sqrt(252)
-        
-        # Calculate maximum drawdown
-        peak = initial_value
-        max_drawdown = 0.0
-        
-        for value in self.daily_portfolio_values:
-            if value > peak:
-                peak = value
-            drawdown = (peak - value) / peak
-            max_drawdown = max(max_drawdown, drawdown)
-        
-        self.performance_metrics.max_drawdown = max_drawdown
-        
-        # Trade statistics
-        self.performance_metrics.total_trades = self.portfolio.total_trades
-        self.performance_metrics.total_commission = self.portfolio.total_commission
+        # Update the legacy performance metrics for backward compatibility
+        self.performance_metrics.total_return = all_metrics['total_return']
+        self.performance_metrics.annualized_return = all_metrics['annualized_return']
+        self.performance_metrics.sharpe_ratio = all_metrics['sharpe_ratio']
+        self.performance_metrics.max_drawdown = all_metrics['max_drawdown']
+        self.performance_metrics.total_trades = all_metrics['total_trades']
+        self.performance_metrics.winning_trades = all_metrics['winning_trades']
+        self.performance_metrics.losing_trades = all_metrics['losing_trades']
+        self.performance_metrics.total_commission = all_metrics['total_commission']
         self.performance_metrics.total_taxes = self.portfolio.total_taxes
+        self.performance_metrics.final_portfolio_value = self.daily_portfolio_values[-1]
+        self.performance_metrics.initial_capital = self.daily_portfolio_values[0]
+        self.performance_metrics.net_profit = self.daily_portfolio_values[-1] - self.daily_portfolio_values[0]
         
-        # Calculate win/loss ratio from trade history with Brazilian tax considerations
-        if self.portfolio.trade_history:
-            profits = []
-            taxable_profits = []
-            
-            for trade in self.portfolio.trade_history:
-                if trade['action'] == 'SELL':
-                    # Calculate profit/loss for sell trades
-                    buy_trades = [t for t in self.portfolio.trade_history 
-                                if t['action'] == 'BUY' and t['ticker'] == trade['ticker']]
-                    
-                    if buy_trades:
-                        # Enhanced profit calculation considering Brazilian tax rules
-                        buy_price = buy_trades[0]['price']
-                        sell_price = trade['price']
-                        quantity = trade['quantity']
-                        
-                        # Basic profit calculation
-                        gross_profit = (sell_price - buy_price) * quantity
-                        profits.append(gross_profit)
-                        
-                        # Apply Brazilian tax rules if loss carryforward manager is available
-                        try:
-                            if hasattr(self.portfolio, 'loss_manager') and self.portfolio.loss_manager is not None:
-                                # Get tax-adjusted profit considering loss carryforward
-                                tax_adjusted_profit = self.portfolio.loss_manager.calculate_taxable_profit(
-                                    ticker=trade['ticker'],
-                                    sell_price=sell_price,
-                                    sell_quantity=quantity,
-                                    sell_date=trade['date']
-                                )
-                                taxable_profits.append(tax_adjusted_profit)
-                            else:
-                                # Fallback to gross profit if loss manager not available
-                                taxable_profits.append(gross_profit)
-                        except Exception as e:
-                            logger.warning(f"Error calculating taxable profit: {str(e)}, using gross profit")
-                            taxable_profits.append(gross_profit)
-            
-            if profits:
-                # Use taxable profits for more accurate performance metrics
-                winning_trades = [p for p in taxable_profits if p > 0]
-                losing_trades = [p for p in taxable_profits if p < 0]
-                
-                self.performance_metrics.winning_trades = len(winning_trades)
-                self.performance_metrics.losing_trades = len(losing_trades)
-                
-                if losing_trades:
-                    self.performance_metrics.win_loss_ratio = len(winning_trades) / len(losing_trades)
-                
-                if winning_trades:
-                    self.performance_metrics.avg_win = np.mean(winning_trades)
-                    self.performance_metrics.largest_win = max(winning_trades)
-                
-                if losing_trades:
-                    self.performance_metrics.avg_loss = np.mean(losing_trades)
-                    self.performance_metrics.largest_loss = min(losing_trades)
-                
-                if taxable_profits:
-                    self.performance_metrics.profit_factor = (
-                        sum(winning_trades) / abs(sum(losing_trades)) if sum(losing_trades) != 0 else float('inf')
-                    )
+        # Store benchmark metrics for simulation result
+        self.benchmark_metrics = all_metrics
         
-        # Calculate net profit
-        self.performance_metrics.net_profit = final_value - initial_value
-        
-        logger.info("Performance metrics calculated successfully")
+        logger.info("All performance metrics (including benchmark) calculated successfully")
     
     def _create_simulation_result(self) -> SimulationResult:
         """
@@ -819,6 +802,18 @@ class BacktestSimulator:
         simulation_duration = (
             self.simulation_end_time - self.simulation_start_time
         ).total_seconds()
+        
+        # Prepare benchmark metrics from integrated performance metrics
+        benchmark_return = self.benchmark_metrics.get('benchmark_return', 0.0)
+        excess_return = self.benchmark_metrics.get('excess_return', 0.0)
+        information_ratio = self.benchmark_metrics.get('information_ratio', 0.0)
+        beta = self.benchmark_metrics.get('beta', 0.0)
+        alpha = self.benchmark_metrics.get('alpha', 0.0)
+        tracking_error = self.benchmark_metrics.get('tracking_error', 0.0)
+        rolling_correlation = self.benchmark_metrics.get('rolling_correlation', 0.0)
+        benchmark_sharpe = self.benchmark_metrics.get('benchmark_sharpe', 0.0)
+        benchmark_max_drawdown = self.benchmark_metrics.get('benchmark_max_drawdown', 0.0)
+        benchmark_win_rate = self.benchmark_metrics.get('benchmark_win_rate', 0.0)
         
         return SimulationResult(
             total_return=self.performance_metrics.total_return,
@@ -837,7 +832,18 @@ class BacktestSimulator:
             trade_log=self.trade_log.copy(),
             simulation_duration=simulation_duration,
             start_date=self.simulation_start_time,
-            end_date=self.simulation_end_time
+            end_date=self.simulation_end_time,
+            # Benchmark metrics
+            benchmark_return=benchmark_return,
+            excess_return=excess_return,
+            information_ratio=information_ratio,
+            beta=beta,
+            alpha=alpha,
+            tracking_error=tracking_error,
+            rolling_correlation=rolling_correlation,
+            benchmark_sharpe=benchmark_sharpe,
+            benchmark_max_drawdown=benchmark_max_drawdown,
+            benchmark_win_rate=benchmark_win_rate
         )
     
     def get_performance_summary(self) -> Dict[str, Any]:
@@ -847,7 +853,7 @@ class BacktestSimulator:
         Returns:
             Dictionary containing all performance metrics
         """
-        return {
+        summary = {
             'total_return': self.performance_metrics.total_return,
             'annualized_return': self.performance_metrics.annualized_return,
             'sharpe_ratio': self.performance_metrics.sharpe_ratio,
@@ -867,6 +873,24 @@ class BacktestSimulator:
             'final_portfolio_value': self.performance_metrics.final_portfolio_value,
             'initial_capital': self.performance_metrics.initial_capital
         }
+        
+        # Add benchmark metrics from integrated performance metrics
+        if self.benchmark_metrics is not None:
+            summary.update({
+                'benchmark_return': self.benchmark_metrics.get('benchmark_return', 0.0),
+                'excess_return': self.benchmark_metrics.get('excess_return', 0.0),
+                'information_ratio': self.benchmark_metrics.get('information_ratio', 0.0),
+                'beta': self.benchmark_metrics.get('beta', 0.0),
+                'alpha': self.benchmark_metrics.get('alpha', 0.0),
+                'tracking_error': self.benchmark_metrics.get('tracking_error', 0.0),
+                'rolling_correlation': self.benchmark_metrics.get('rolling_correlation', 0.0),
+                'benchmark_sharpe': self.benchmark_metrics.get('benchmark_sharpe', 0.0),
+                'benchmark_max_drawdown': self.benchmark_metrics.get('benchmark_max_drawdown', 0.0),
+                'benchmark_win_rate': self.benchmark_metrics.get('benchmark_win_rate', 0.0),
+                'benchmark_symbol': self.benchmark_metrics.get('benchmark_symbol', 'IBOV')
+            })
+        
+        return summary
     
     def export_results(self, filepath: str) -> None:
         """

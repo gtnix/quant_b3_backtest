@@ -25,7 +25,7 @@ import pytz
 from engine.portfolio import EnhancedPortfolio
 from engine.loss_manager import EnhancedLossCarryforwardManager
 from engine.tca import TransactionCostAnalyzer
-from engine.sgs_data_loader import SGSDataLoader
+from engine.sgs_data_loader import SGSDataLoader, SELICDataError, SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -84,6 +84,22 @@ class TradeMetrics:
     total_commission: float = 0.0
 
 
+@dataclass
+class BenchmarkMetrics:
+    """Benchmark comparison metrics."""
+    benchmark_return: float = 0.0
+    excess_return: float = 0.0
+    information_ratio: float = 0.0
+    beta: float = 0.0
+    alpha: float = 0.0
+    tracking_error: float = 0.0
+    rolling_correlation: float = 0.0
+    benchmark_sharpe: float = 0.0
+    benchmark_max_drawdown: float = 0.0
+    benchmark_win_rate: float = 0.0
+    benchmark_symbol: str = "IBOV"
+
+
 class PerformanceMetrics:
     """
     Base performance metrics calculator with Brazilian market compliance.
@@ -121,18 +137,121 @@ class PerformanceMetrics:
         self.risk_metrics = RiskMetrics()
         self.tax_metrics = TaxMetrics()
         self.trade_metrics = TradeMetrics()
+        self.benchmark_metrics = BenchmarkMetrics()
+        
+        # Initialize benchmark analyzer
+        self.benchmark_analyzer = None
+        self._initialize_benchmark_analyzer()
         
         logger.info("Performance Metrics initialized with Brazilian market parameters")
         logger.info(f"Static SELIC rate: {self.STATIC_RISK_FREE_RATE:.4f}")
     
+    def _initialize_benchmark_analyzer(self):
+        """Initialize benchmark analyzer based on configuration."""
+        try:
+            benchmark_config = self.config.get('benchmark', {})
+            enabled = benchmark_config.get('enabled', True)
+            
+            if not enabled:
+                logger.info("Benchmark analysis disabled in configuration")
+                return
+            
+            # Initialize benchmark analyzer
+            benchmark_symbol = benchmark_config.get('symbol', 'IBOV')
+            risk_free_rate_override = benchmark_config.get('risk_free_rate_override')
+            
+            self.benchmark_analyzer = BenchmarkAnalyzer(
+                config_path="config/settings.yaml",
+                benchmark_symbol=benchmark_symbol,
+                risk_free_rate=risk_free_rate_override
+            )
+            
+            # Load benchmark data if auto_load is enabled
+            auto_load = benchmark_config.get('auto_load', True)
+            if auto_load:
+                logger.info(f"Loading benchmark data for {benchmark_symbol}...")
+                if self.benchmark_analyzer.load_benchmark_data():
+                    logger.info("Benchmark data loaded successfully")
+                    self.benchmark_metrics.benchmark_symbol = benchmark_symbol
+                else:
+                    required = benchmark_config.get('required', False)
+                    if required:
+                        logger.error(f"Failed to load required benchmark data for {benchmark_symbol}")
+                    else:
+                        logger.warning(f"Failed to load benchmark data for {benchmark_symbol}, continuing without benchmark analysis")
+                        self.benchmark_analyzer = None
+            
+        except Exception as e:
+            logger.error(f"Error initializing benchmark analyzer: {e}")
+            self.benchmark_analyzer = None
+    
     def _initialize_sgs_integration(self):
-        """Initialize SGS data loader for dynamic risk-free rates."""
+        """Initialize SGS data loader for dynamic risk-free rates with strict validation."""
         try:
             self.sgs_loader = SGSDataLoader()
+            
+            # Check if strict mode is enabled
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            if strict_config.get('enabled', False):
+                logger.info("Strict mode enabled - SELIC data validation required")
+                self._validate_selic_data_requirements()
+            else:
+                logger.info("Strict mode disabled - fallback rates allowed")
+            
             logger.info("SGS data loader initialized for dynamic SELIC rates")
+        except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
+            # In strict mode, these exceptions should cause the system to fail
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            if strict_config.get('fail_on_missing_data', False):
+                logger.error(f"Critical SELIC data issue in strict mode: {e}")
+                raise RuntimeError(f"Backtest cannot proceed due to SELIC data issues: {e}")
+            else:
+                logger.warning(f"SELIC data issue (non-strict mode): {e}. Using static rates only.")
+                self.sgs_loader = None
         except Exception as e:
             logger.warning(f"Failed to initialize SGS loader: {e}. Using static rates only.")
             self.sgs_loader = None
+    
+    def _validate_selic_data_requirements(self):
+        """
+        Validate that SELIC data meets strict requirements.
+        This method is called during initialization when strict mode is enabled.
+        """
+        try:
+            # Get strict mode configuration
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            quality_config = self.config.get('sgs', {}).get('quality_thresholds', {})
+            
+            if not strict_config.get('enabled', False):
+                logger.info("Strict mode not enabled, skipping SELIC validation")
+                return
+            
+            logger.info("Validating SELIC data requirements for strict mode...")
+            
+            # For initialization, we'll validate with a reasonable test period
+            # (last 30 days to ensure current data availability)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
+            
+            # Format dates for validation
+            start_str = start_date.strftime("%d/%m/%Y")
+            end_str = end_date.strftime("%d/%m/%Y")
+            
+            # Validate SELIC data coverage
+            coverage_info = self.sgs_loader.validate_selic_data_coverage(start_str, end_str)
+            
+            if coverage_info.get('strict_mode_enabled', False):
+                logger.info(f"SELIC data validation passed: {coverage_info.get('coverage_percentage', 0):.1f}% coverage")
+                logger.info(f"Quality score: {coverage_info.get('quality_score', 0):.1f}%")
+            else:
+                logger.warning("SELIC data validation skipped - strict mode not enabled in SGS loader")
+                
+        except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
+            logger.error(f"SELIC data validation failed: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error during SELIC data validation: {e}")
+            raise SELICDataValidationError(f"Failed to validate SELIC data requirements: {e}")
     
     def _load_selic_data(self, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
         """
@@ -222,17 +341,57 @@ class PerformanceMetrics:
     
     def load_selic_data_for_period(self, start_date: datetime, end_date: datetime):
         """
-        Load SELIC data for a specific period.
+        Load SELIC data for a specific period with strict validation.
         
         Args:
             start_date: Start date for data retrieval
             end_date: End date for data retrieval
         """
-        selic_data = self._load_selic_data(start_date, end_date)
-        if selic_data is not None:
-            self.set_selic_data(selic_data)
-        else:
-            logger.info("Using static SELIC rate for the period")
+        try:
+            # Check if strict mode is enabled
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            
+            if strict_config.get('enabled', False) and self.sgs_loader is not None:
+                # Validate SELIC data coverage for the specific period
+                start_str = start_date.strftime("%d/%m/%Y")
+                end_str = end_date.strftime("%d/%m/%Y")
+                
+                logger.info(f"Validating SELIC data coverage for period {start_str} to {end_str}")
+                coverage_info = self.sgs_loader.validate_selic_data_coverage(start_str, end_str)
+                
+                if not coverage_info.get('meets_requirements', False):
+                    raise SELICDataInsufficientError(
+                        f"SELIC data coverage ({coverage_info.get('coverage_percentage', 0):.1f}%) "
+                        f"does not meet strict mode requirements"
+                    )
+                
+                logger.info(f"SELIC data validation passed: {coverage_info.get('coverage_percentage', 0):.1f}% coverage")
+            
+            # Load SELIC data
+            selic_data = self._load_selic_data(start_date, end_date)
+            
+            if selic_data is not None:
+                self.set_selic_data(selic_data)
+                logger.info(f"Successfully loaded SELIC data for period {start_date.date()} to {end_date.date()}")
+            else:
+                if strict_config.get('fail_on_missing_data', False):
+                    raise SELICDataUnavailableError(f"No SELIC data available for period {start_date.date()} to {end_date.date()}")
+                else:
+                    logger.warning("No SELIC data available, using static rate for the period")
+                    
+        except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
+            strict_config = self.config.get('sgs', {}).get('strict_mode', {})
+            if strict_config.get('fail_on_missing_data', False):
+                logger.error(f"Critical SELIC data issue: {e}")
+                raise RuntimeError(f"Backtest cannot proceed due to SELIC data issues: {e}")
+            else:
+                logger.warning(f"SELIC data issue (non-strict mode): {e}. Using static rate for the period.")
+        except Exception as e:
+            logger.error(f"Error loading SELIC data: {e}")
+            if strict_config.get('fail_on_missing_data', False):
+                raise RuntimeError(f"Backtest cannot proceed due to SELIC data loading error: {e}")
+            else:
+                logger.warning("Using static SELIC rate due to loading error")
     
     @property
     def RISK_FREE_RATE(self) -> float:
@@ -515,6 +674,704 @@ class PerformanceMetrics:
         
         logger.info(f"Trade metrics calculated: Total trades={total_trades}, Win rate={win_rate:.4f}")
         return self.trade_metrics
+    
+    def calculate_benchmark_metrics(self, daily_returns: List[float], start_date: Optional[datetime] = None) -> BenchmarkMetrics:
+        """
+        Calculate benchmark comparison metrics.
+        
+        Args:
+            daily_returns: List of daily returns
+            start_date: Start date for the analysis period
+            
+        Returns:
+            BenchmarkMetrics with comprehensive benchmark analysis
+        """
+        if self.benchmark_analyzer is None:
+            logger.warning("Benchmark analyzer not available, skipping benchmark metrics")
+            return self.benchmark_metrics
+        
+        try:
+            if not daily_returns:
+                logger.warning("No daily returns available for benchmark analysis")
+                return self.benchmark_metrics
+            
+            # Create datetime index for returns
+            if start_date:
+                date_range = pd.date_range(start=start_date, periods=len(daily_returns), freq='D')
+                strategy_returns = pd.Series(daily_returns, index=date_range)
+            else:
+                # Fallback: use simple integer index
+                strategy_returns = pd.Series(daily_returns)
+            
+            # Calculate all benchmark metrics
+            benchmark_result = self.benchmark_analyzer.calculate_all_metrics(
+                strategy_returns=strategy_returns
+            )
+            
+            # Update benchmark metrics
+            self.benchmark_metrics.benchmark_return = benchmark_result.benchmark_return
+            self.benchmark_metrics.excess_return = benchmark_result.excess_return
+            self.benchmark_metrics.information_ratio = benchmark_result.information_ratio
+            self.benchmark_metrics.beta = benchmark_result.beta
+            self.benchmark_metrics.alpha = benchmark_result.alpha
+            self.benchmark_metrics.tracking_error = benchmark_result.tracking_error
+            self.benchmark_metrics.rolling_correlation = benchmark_result.rolling_correlation
+            self.benchmark_metrics.benchmark_sharpe = benchmark_result.benchmark_sharpe
+            self.benchmark_metrics.benchmark_max_drawdown = benchmark_result.benchmark_max_drawdown
+            self.benchmark_metrics.benchmark_win_rate = benchmark_result.benchmark_win_rate
+            
+            logger.info("Benchmark metrics calculated successfully")
+            logger.info(f"Strategy vs {self.benchmark_metrics.benchmark_symbol} Return: {self.benchmark_metrics.benchmark_return:.4f}")
+            logger.info(f"Excess Return: {self.benchmark_metrics.excess_return:.4f}")
+            logger.info(f"Information Ratio: {self.benchmark_metrics.information_ratio:.4f}")
+            
+            return self.benchmark_metrics
+            
+        except Exception as e:
+            logger.error(f"Error calculating benchmark metrics: {e}")
+            return self.benchmark_metrics
+    
+    def calculate_all_metrics(self, portfolio_values: List[float], daily_returns: List[float], 
+                             start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict[str, Any]:
+        """
+        Calculate all performance metrics including benchmark analysis.
+        
+        Args:
+            portfolio_values: List of portfolio values over time
+            daily_returns: List of daily returns
+            start_date: Start date for the analysis period
+            end_date: End date for the analysis period
+            
+        Returns:
+            Dictionary containing all performance metrics
+        """
+        # Calculate all individual metrics
+        returns_metrics = self.calculate_returns(portfolio_values, start_date, end_date)
+        risk_metrics = self.calculate_risk_metrics(daily_returns, start_date)
+        tax_metrics = self.calculate_tax_metrics()
+        trade_metrics = self.calculate_trade_metrics()
+        benchmark_metrics = self.calculate_benchmark_metrics(daily_returns, start_date)
+        
+        # Combine all metrics
+        all_metrics = {
+            # Returns metrics
+            'total_return': returns_metrics.total_return,
+            'annualized_return': returns_metrics.annualized_return,
+            'logarithmic_return': returns_metrics.logarithmic_return,
+            
+            # Risk metrics
+            'sharpe_ratio': risk_metrics.sharpe_ratio,
+            'sortino_ratio': risk_metrics.sortino_ratio,
+            'calmar_ratio': risk_metrics.calmar_ratio,
+            'max_drawdown': risk_metrics.max_drawdown,
+            'volatility': risk_metrics.volatility,
+            'var_95': risk_metrics.var_95,
+            'cvar_95': risk_metrics.cvar_95,
+            
+            # Tax metrics
+            'total_taxes_paid': tax_metrics.total_taxes_paid,
+            'tax_efficiency': tax_metrics.tax_efficiency,
+            'effective_tax_rate': tax_metrics.effective_tax_rate,
+            
+            # Trade metrics
+            'total_trades': trade_metrics.total_trades,
+            'winning_trades': trade_metrics.winning_trades,
+            'losing_trades': trade_metrics.losing_trades,
+            'win_rate': trade_metrics.win_rate,
+            'profit_factor': trade_metrics.profit_factor,
+            'total_commission': trade_metrics.total_commission,
+            
+            # Benchmark metrics
+            'benchmark_return': benchmark_metrics.benchmark_return,
+            'excess_return': benchmark_metrics.excess_return,
+            'information_ratio': benchmark_metrics.information_ratio,
+            'beta': benchmark_metrics.beta,
+            'alpha': benchmark_metrics.alpha,
+            'tracking_error': benchmark_metrics.tracking_error,
+            'rolling_correlation': benchmark_metrics.rolling_correlation,
+            'benchmark_sharpe': benchmark_metrics.benchmark_sharpe,
+            'benchmark_max_drawdown': benchmark_metrics.benchmark_max_drawdown,
+            'benchmark_win_rate': benchmark_metrics.benchmark_win_rate,
+            'benchmark_symbol': benchmark_metrics.benchmark_symbol
+        }
+        
+        logger.info("All performance metrics calculated successfully")
+        return all_metrics
+
+
+class BenchmarkAnalyzer:
+    """
+    Benchmark analyzer for IBOV (Bovespa Index) integration.
+
+    This class provides benchmark analysis capabilities that are now a mandatory and fully integrated part of the backtesting workflow. Every strategy run will include benchmark analysis, ensuring that all performance metrics are evaluated relative to the benchmark (e.g., IBOV) in compliance with Brazilian market standards.
+
+    Features:
+    - IBOV benchmark data loading and preprocessing
+    - Rolling correlation analysis
+    - Excess returns calculation
+    - Information ratio computation
+    - Visualization capabilities
+    - Brazilian market compliance
+    """
+    
+    def __init__(
+        self, 
+        config_path: str = "config/settings.yaml",
+        benchmark_symbol: str = "IBOV",
+        risk_free_rate: Optional[float] = None
+    ):
+        """
+        Initialize the benchmark analyzer.
+        
+        Args:
+            config_path: Path to configuration file
+            benchmark_symbol: Benchmark symbol (default: IBOV)
+            risk_free_rate: Risk-free rate override (uses SELIC from config if None)
+        """
+        self.config = self._load_config(config_path)
+        self.benchmark_symbol = benchmark_symbol
+        self.timezone = self.config['market']['trading_hours']['timezone']
+        
+        # Brazilian market constants
+        self.TRADING_DAYS_PER_YEAR = self.config['market'].get('trading_days_per_year', 252)
+        
+        # Risk-free rate (SELIC from config or override)
+        if risk_free_rate is not None:
+            self.risk_free_rate = risk_free_rate
+        else:
+            self.risk_free_rate = self.config['market'].get('selic_rate', 0.15)
+        
+        # Data storage
+        self.benchmark_data: Optional[pd.DataFrame] = None
+        self.strategy_returns: Optional[pd.Series] = None
+        self.benchmark_returns: Optional[pd.Series] = None
+        
+        # Metrics storage
+        self.metrics = BenchmarkMetrics()
+        
+        logger.info(f"BenchmarkAnalyzer initialized for {benchmark_symbol}")
+        logger.info(f"Risk-free rate: {self.risk_free_rate:.4f}")
+        logger.info(f"Trading days per year: {self.TRADING_DAYS_PER_YEAR}")
+    
+    def _load_config(self, config_path: str) -> Dict[str, Any]:
+        """
+        Load configuration from YAML file.
+        
+        Args:
+            config_path: Path to configuration file
+            
+        Returns:
+            Configuration dictionary
+        """
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            return config
+        except Exception as e:
+            logger.warning(f"Failed to load config from {config_path}: {e}")
+            # Return default configuration
+            return {
+                'market': {
+                    'trading_hours': {'timezone': 'America/Sao_Paulo'},
+                    'selic_rate': 0.15,
+                    'trading_days_per_year': 252
+                }
+            }
+    
+    def load_benchmark_data(
+        self, 
+        start_date: Optional[Union[str, datetime]] = None,
+        end_date: Optional[Union[str, datetime]] = None,
+        data_path: str = "data"
+    ) -> bool:
+        """
+        Load benchmark data from various sources.
+        
+        Args:
+            start_date: Start date for data retrieval
+            end_date: End date for data retrieval
+            data_path: Path to data directory
+            
+        Returns:
+            True if data loaded successfully, False otherwise
+        """
+        try:
+            # Try multiple data sources in order of preference (CSV first, then parquet, then API)
+            data_sources = [
+                lambda: self._load_from_csv(data_path),
+                lambda: self._load_from_parquet(data_path),
+                lambda: self._load_from_downloader(start_date, end_date)
+            ]
+            
+            for source_func in data_sources:
+                try:
+                    data = source_func()
+                    if data is not None and not data.empty:
+                        self.benchmark_data = data
+                        logger.info(f"Loaded benchmark data: {len(data)} rows")
+                        logger.info(f"Date range: {data.index.min()} to {data.index.max()}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Data source failed: {e}")
+                    continue
+            
+            logger.error("Failed to load benchmark data from all sources")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error loading benchmark data: {e}")
+            return False
+    
+    def _load_from_parquet(self, data_path: str) -> Optional[pd.DataFrame]:
+        """Load benchmark data from parquet file."""
+        # Try IBOV-specific directory first
+        ibov_parquet_path = Path(data_path) / "IBOV" / f"{self.benchmark_symbol}.parquet"
+        if ibov_parquet_path.exists():
+            data = pd.read_parquet(ibov_parquet_path)
+            if 'close' in data.columns:
+                return data[['close']]
+        
+        # Fallback to general data directory
+        parquet_path = Path(data_path) / f"{self.benchmark_symbol}.parquet"
+        if parquet_path.exists():
+            data = pd.read_parquet(parquet_path)
+            if 'close' in data.columns:
+                return data[['close']]
+        return None
+    
+    def _load_from_csv(self, data_path: str) -> Optional[pd.DataFrame]:
+        """Load benchmark data from CSV file."""
+        # Try IBOV-specific directory first
+        ibov_csv_path = Path(data_path) / "IBOV" / f"{self.benchmark_symbol}_raw.csv"
+        if ibov_csv_path.exists():
+            data = pd.read_csv(ibov_csv_path, index_col=0, parse_dates=True)
+            if 'close' in data.columns:
+                return data[['close']]
+        
+        # Fallback to general data directory
+        csv_path = Path(data_path) / f"{self.benchmark_symbol}_raw.csv"
+        if csv_path.exists():
+            data = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+            if 'close' in data.columns:
+                return data[['close']]
+        return None
+    
+    def _load_from_downloader(self, start_date: Optional[Union[str, datetime]], 
+                             end_date: Optional[Union[str, datetime]]) -> Optional[pd.DataFrame]:
+        """Load benchmark data using Yahoo Finance downloader."""
+        try:
+            # Import here to avoid circular imports
+            import sys
+            from pathlib import Path
+            sys.path.append(str(Path(__file__).parent.parent / "scripts"))
+            
+            from download_ibov_yahoo import YahooIBOVDownloader
+            
+            downloader = YahooIBOVDownloader()
+            result = downloader.download_ibov_data(
+                start_date=start_date.strftime('%Y-%m-%d') if start_date else None,
+                end_date=end_date.strftime('%Y-%m-%d') if end_date else None,
+                period="max" if not start_date and not end_date else None
+            )
+            
+            if result.success:
+                # Load the downloaded data
+                data_path = Path("data") / "IBOV" / f"{self.benchmark_symbol}.parquet"
+                if data_path.exists():
+                    data = pd.read_parquet(data_path)
+                    if 'close' in data.columns:
+                        # Save as CSV for future use
+                        csv_path = Path("data") / "IBOV" / f"{self.benchmark_symbol}_raw.csv"
+                        csv_path.parent.mkdir(parents=True, exist_ok=True)
+                        data.to_csv(csv_path)
+                        logger.info(f"Saved benchmark data to CSV: {csv_path}")
+                        
+                        return data[['close']]
+            
+        except Exception as e:
+            logger.debug(f"Yahoo Finance downloader failed: {e}")
+        
+        return None
+    
+    def calculate_returns(
+        self, 
+        prices: pd.Series, 
+        frequency: str = 'daily',
+        method: str = 'log'
+    ) -> pd.Series:
+        """
+        Calculate returns from price series.
+        
+        Args:
+            prices: Price series with datetime index
+            frequency: Return frequency ('daily', 'monthly', 'annual')
+            method: Return calculation method ('log' or 'simple')
+            
+        Returns:
+            Returns series
+        """
+        if prices.empty:
+            return pd.Series(dtype=float)
+        
+        # Ensure datetime index
+        if not isinstance(prices.index, pd.DatetimeIndex):
+            prices.index = pd.to_datetime(prices.index)
+        
+        # Calculate returns based on method
+        if method == 'log':
+            returns = np.log(prices / prices.shift(1))
+        else:  # simple
+            returns = (prices / prices.shift(1)) - 1
+        
+        # Remove first row (NaN)
+        returns = returns.dropna()
+        
+        # Resample if frequency is specified
+        if frequency != 'daily':
+            if frequency == 'monthly':
+                returns = returns.resample('M').sum()
+            elif frequency == 'annual':
+                returns = returns.resample('Y').sum()
+        
+        return returns
+    
+    def rolling_correlation(
+        self, 
+        strategy_returns: pd.Series, 
+        window: int = 252,
+        min_periods: Optional[int] = None
+    ) -> pd.Series:
+        """
+        Calculate rolling correlation between strategy and benchmark returns.
+        
+        Args:
+            strategy_returns: Strategy returns series
+            window: Rolling window size (default: 252 trading days)
+            min_periods: Minimum periods for correlation calculation
+            
+        Returns:
+            Rolling correlation series
+        """
+        if self.benchmark_returns is None:
+            logger.error("Benchmark returns not available. Load benchmark data first.")
+            return pd.Series(dtype=float)
+        
+        if min_periods is None:
+            min_periods = max(30, window // 4)  # At least 30 days or 25% of window
+        
+        # Align data
+        aligned_data = pd.concat([strategy_returns, self.benchmark_returns], axis=1).dropna()
+        
+        if len(aligned_data) < min_periods:
+            logger.warning(f"Insufficient data for rolling correlation: {len(aligned_data)} < {min_periods}")
+            return pd.Series(dtype=float)
+        
+        # Calculate rolling correlation
+        correlation = aligned_data.iloc[:, 0].rolling(
+            window=window, 
+            min_periods=min_periods
+        ).corr(aligned_data.iloc[:, 1])
+        
+        return correlation
+    
+    def excess_returns(
+        self, 
+        strategy_returns: pd.Series,
+        risk_free_rate: Optional[float] = None
+    ) -> pd.Series:
+        """
+        Calculate excess returns (strategy returns minus benchmark returns).
+        
+        Args:
+            strategy_returns: Strategy returns series
+            risk_free_rate: Risk-free rate override
+            
+        Returns:
+            Excess returns series
+        """
+        if self.benchmark_returns is None:
+            logger.error("Benchmark returns not available. Load benchmark data first.")
+            return pd.Series(dtype=float)
+        
+        # Use provided risk-free rate or default
+        rf_rate = risk_free_rate if risk_free_rate is not None else self.risk_free_rate
+        
+        # Convert annual rate to daily if needed
+        if rf_rate > 0.1:  # Assume annual rate if > 10%
+            daily_rf = (1 + rf_rate) ** (1 / self.TRADING_DAYS_PER_YEAR) - 1
+        else:
+            daily_rf = rf_rate
+        
+        # Align data
+        aligned_data = pd.concat([strategy_returns, self.benchmark_returns], axis=1).dropna()
+        
+        if aligned_data.empty:
+            logger.warning("No aligned data for excess returns calculation")
+            return pd.Series(dtype=float)
+        
+        # Calculate excess returns
+        strategy_aligned = aligned_data.iloc[:, 0]
+        benchmark_aligned = aligned_data.iloc[:, 1]
+        
+        # Strategy excess over risk-free rate
+        strategy_excess = strategy_aligned - daily_rf
+        
+        # Benchmark excess over risk-free rate
+        benchmark_excess = benchmark_aligned - daily_rf
+        
+        # Strategy excess over benchmark
+        excess = strategy_excess - benchmark_excess
+        
+        return excess
+    
+    def information_ratio(
+        self, 
+        strategy_returns: pd.Series,
+        risk_free_rate: Optional[float] = None
+    ) -> float:
+        """
+        Calculate information ratio (excess return / tracking error).
+        
+        Args:
+            strategy_returns: Strategy returns series
+            risk_free_rate: Risk-free rate override
+            
+        Returns:
+            Information ratio
+        """
+        excess_returns = self.excess_returns(strategy_returns, risk_free_rate)
+        
+        if excess_returns.empty:
+            logger.warning("No excess returns available for information ratio calculation")
+            return 0.0
+        
+        # Calculate tracking error (standard deviation of excess returns)
+        tracking_error = excess_returns.std()
+        
+        if tracking_error == 0:
+            logger.warning("Zero tracking error, cannot calculate information ratio")
+            return 0.0
+        
+        # Annualize if using daily returns
+        if len(excess_returns) > 252:
+            # Assume daily returns, annualize
+            annualized_excess = excess_returns.mean() * self.TRADING_DAYS_PER_YEAR
+            annualized_tracking_error = tracking_error * np.sqrt(self.TRADING_DAYS_PER_YEAR)
+        else:
+            annualized_excess = excess_returns.mean()
+            annualized_tracking_error = tracking_error
+        
+        information_ratio = annualized_excess / annualized_tracking_error
+        
+        return information_ratio
+    
+    def calculate_beta_alpha(
+        self, 
+        strategy_returns: pd.Series,
+        risk_free_rate: Optional[float] = None
+    ) -> Tuple[float, float]:
+        """
+        Calculate beta and alpha using linear regression.
+        
+        Args:
+            strategy_returns: Strategy returns series
+            risk_free_rate: Risk-free rate override
+            
+        Returns:
+            Tuple of (beta, alpha)
+        """
+        if self.benchmark_returns is None:
+            logger.error("Benchmark returns not available. Load benchmark data first.")
+            return 0.0, 0.0
+        
+        # Use provided risk-free rate or default
+        rf_rate = risk_free_rate if risk_free_rate is not None else self.risk_free_rate
+        
+        # Convert annual rate to daily if needed
+        if rf_rate > 0.1:  # Assume annual rate if > 10%
+            daily_rf = (1 + rf_rate) ** (1 / self.TRADING_DAYS_PER_YEAR) - 1
+        else:
+            daily_rf = rf_rate
+        
+        # Align data
+        aligned_data = pd.concat([strategy_returns, self.benchmark_returns], axis=1).dropna()
+        
+        if len(aligned_data) < 30:
+            logger.warning("Insufficient data for beta/alpha calculation")
+            return 0.0, 0.0
+        
+        # Calculate excess returns
+        strategy_excess = aligned_data.iloc[:, 0] - daily_rf
+        benchmark_excess = aligned_data.iloc[:, 1] - daily_rf
+        
+        # Linear regression: strategy_excess = alpha + beta * benchmark_excess
+        try:
+            # Add constant for intercept (alpha)
+            X = np.column_stack([np.ones(len(benchmark_excess)), benchmark_excess])
+            y = strategy_excess
+            
+            # Solve using least squares
+            beta, alpha = np.linalg.lstsq(X, y, rcond=None)[0]
+            
+            return beta, alpha
+            
+        except Exception as e:
+            logger.error(f"Error calculating beta/alpha: {e}")
+            return 0.0, 0.0
+    
+    def calculate_all_metrics(
+        self, 
+        strategy_returns: pd.Series,
+        strategy_values: Optional[List[float]] = None,
+        risk_free_rate: Optional[float] = None
+    ) -> BenchmarkMetrics:
+        """
+        Calculate comprehensive benchmark analysis metrics.
+        
+        Args:
+            strategy_returns: Strategy returns series
+            strategy_values: Strategy portfolio values (optional, for drawdown calculation)
+            risk_free_rate: Risk-free rate override
+            
+        Returns:
+            BenchmarkMetrics object with all calculated metrics
+        """
+        if self.benchmark_data is None:
+            logger.error("Benchmark data not loaded. Call load_benchmark_data() first.")
+            return self.metrics
+        
+        # Calculate benchmark returns if not already done
+        if self.benchmark_returns is None:
+            self.benchmark_returns = self.calculate_returns(self.benchmark_data['close'])
+        
+        # Store strategy returns
+        self.strategy_returns = strategy_returns
+        
+        # Ensure both series have datetime index
+        if not isinstance(strategy_returns.index, pd.DatetimeIndex):
+            strategy_returns.index = pd.to_datetime(strategy_returns.index)
+        
+        if not isinstance(self.benchmark_returns.index, pd.DatetimeIndex):
+            self.benchmark_returns.index = pd.to_datetime(self.benchmark_returns.index)
+        
+        # Align data
+        aligned_data = pd.concat([strategy_returns, self.benchmark_returns], axis=1).dropna()
+        
+        if aligned_data.empty:
+            logger.warning("No aligned data for metrics calculation")
+            logger.debug(f"Strategy returns range: {strategy_returns.index.min()} to {strategy_returns.index.max()}")
+            logger.debug(f"Benchmark returns range: {self.benchmark_returns.index.min()} to {self.benchmark_returns.index.max()}")
+            return self.metrics
+        
+        strategy_aligned = aligned_data.iloc[:, 0]
+        benchmark_aligned = aligned_data.iloc[:, 1]
+        
+        # Calculate basic returns
+        strategy_total_return = (1 + strategy_aligned).prod() - 1
+        benchmark_total_return = (1 + benchmark_aligned).prod() - 1
+        
+        # Calculate excess returns and information ratio
+        excess_returns = self.excess_returns(strategy_returns, risk_free_rate)
+        information_ratio = self.information_ratio(strategy_returns, risk_free_rate)
+        
+        # Calculate beta and alpha
+        beta, alpha = self.calculate_beta_alpha(strategy_returns, risk_free_rate)
+        
+        # Calculate rolling correlation
+        rolling_corr = self.rolling_correlation(strategy_returns)
+        avg_correlation = rolling_corr.mean() if not rolling_corr.empty else 0.0
+        
+        # Calculate Sharpe ratios
+        strategy_sharpe = self._calculate_sharpe_ratio(strategy_aligned, risk_free_rate)
+        benchmark_sharpe = self._calculate_sharpe_ratio(benchmark_aligned, risk_free_rate)
+        
+        # Calculate tracking error
+        tracking_error = excess_returns.std() * np.sqrt(self.TRADING_DAYS_PER_YEAR) if not excess_returns.empty else 0.0
+        
+        # Calculate win rates
+        strategy_win_rate = (strategy_aligned > 0).mean()
+        benchmark_win_rate = (benchmark_aligned > 0).mean()
+        
+        # Calculate max drawdowns
+        strategy_max_dd = self._calculate_max_drawdown(strategy_values) if strategy_values else 0.0
+        benchmark_max_dd = self._calculate_max_drawdown_from_returns(benchmark_aligned)
+        
+        # Update metrics
+        self.metrics = BenchmarkMetrics(
+            benchmark_return=benchmark_total_return,
+            strategy_return=strategy_total_return,
+            excess_return=strategy_total_return - benchmark_total_return,
+            information_ratio=information_ratio,
+            rolling_correlation=avg_correlation,
+            beta=beta,
+            alpha=alpha,
+            tracking_error=tracking_error,
+            sharpe_ratio=strategy_sharpe,
+            benchmark_sharpe=benchmark_sharpe,
+            max_drawdown=strategy_max_dd,
+            benchmark_max_drawdown=benchmark_max_dd,
+            win_rate=strategy_win_rate,
+            benchmark_win_rate=benchmark_win_rate
+        )
+        
+        return self.metrics
+    
+    def _calculate_sharpe_ratio(
+        self, 
+        returns: pd.Series, 
+        risk_free_rate: Optional[float] = None
+    ) -> float:
+        """Calculate Sharpe ratio for a return series."""
+        if returns.empty:
+            return 0.0
+        
+        rf_rate = risk_free_rate if risk_free_rate is not None else self.risk_free_rate
+        
+        # Convert annual rate to daily if needed
+        if rf_rate > 0.1:  # Assume annual rate if > 10%
+            daily_rf = (1 + rf_rate) ** (1 / self.TRADING_DAYS_PER_YEAR) - 1
+        else:
+            daily_rf = rf_rate
+        
+        excess_returns = returns - daily_rf
+        
+        if excess_returns.std() == 0:
+            return 0.0
+        
+        # Annualize
+        sharpe = (excess_returns.mean() / excess_returns.std()) * np.sqrt(self.TRADING_DAYS_PER_YEAR)
+        
+        return sharpe
+    
+    def _calculate_max_drawdown(self, values: List[float]) -> float:
+        """Calculate maximum drawdown from portfolio values."""
+        if not values or len(values) < 2:
+            return 0.0
+        
+        peak = values[0]
+        max_dd = 0.0
+        
+        for value in values:
+            if value > peak:
+                peak = value
+            dd = (peak - value) / peak
+            max_dd = max(max_dd, dd)
+        
+        return max_dd
+    
+    def _calculate_max_drawdown_from_returns(self, returns: pd.Series) -> float:
+        """Calculate maximum drawdown from return series."""
+        if returns.empty:
+            return 0.0
+        
+        # Convert returns to cumulative values
+        cumulative = (1 + returns).cumprod()
+        
+        # Calculate drawdown
+        rolling_max = cumulative.expanding().max()
+        drawdown = (cumulative - rolling_max) / rolling_max
+        
+        return abs(drawdown.min())
 
 
 class RiskAdjustedMetrics:

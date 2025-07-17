@@ -1,0 +1,34 @@
+{
+  "version": "1.3",
+  "ticker": "SOJA3",
+  "currency": "BRL",
+  "data_type": "adjusted",
+  "price_type": {
+    "open": "raw",
+    "high": "raw",
+    "low": "raw",
+    "close": "raw",
+    "adjusted_close": "adjusted",
+    "dividend_amount": "raw",
+    "split_coefficient": "adjustment_factor"
+  },
+  "data_sources": "Alpha Vantage TIME_SERIES_DAILY_ADJUSTED",
+  "download_date": "2025-07-15T18:00:32.198946",
+  "data_points": 1057,
+  "date_range": {
+    "start": "2021-04-29T00:00:00",
+    "end": "2025-07-14T00:00:00"
+  },
+  "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "adjusted_close",
+    "volume",
+    "dividend_amount",
+    "split_coefficient",
+    "ticker"
+  ],
+  "note": "OHLC prices are raw BRL values from B3. adjusted_close incorporates corporate actions."
+}

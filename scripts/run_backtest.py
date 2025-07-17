@@ -342,6 +342,22 @@ def main():
     print(f"Max Drawdown: {report_data.max_drawdown * 100:.2f}%")
     print(f"Total Trades: {report_data.total_trades}")
     print(f"Win Rate: {report_data.winning_trades / report_data.total_trades * 100:.1f}%" if report_data.total_trades > 0 else "Win Rate: N/A")
+    
+    # Print benchmark metrics if available
+    if report_data.benchmark_return != 0.0 or report_data.excess_return != 0.0:
+        print("\n" + "-" * 40)
+        print("BENCHMARK ANALYSIS")
+        print("-" * 40)
+        print(f"Benchmark Return: {report_data.benchmark_return * 100:.2f}%")
+        print(f"Excess Return: {report_data.excess_return * 100:.2f}%")
+        print(f"Information Ratio: {report_data.information_ratio:.4f}")
+        print(f"Beta: {report_data.beta:.4f}")
+        print(f"Alpha: {report_data.alpha:.6f}")
+        print(f"Tracking Error: {report_data.tracking_error:.4f}")
+        print(f"Rolling Correlation: {report_data.rolling_correlation:.4f}")
+        print(f"Benchmark Sharpe: {report_data.benchmark_sharpe:.4f}")
+        print(f"Benchmark Max Drawdown: {report_data.benchmark_max_drawdown * 100:.2f}%")
+    
     print("=" * 60)
 
 

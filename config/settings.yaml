@@ -117,6 +117,15 @@ advanced:
   lazy_loading: true               # Enable lazy loading for large datasets
   compression_enabled: true        # Enable data compression for storage
 
+# Benchmark Configuration
+benchmark:
+  enabled: true                    # Enable benchmark analysis for all backtests
+  symbol: "IBOV"                   # Default benchmark symbol (Bovespa Index)
+  auto_load: true                  # Automatically load benchmark data
+  required: true                   # Require benchmark data for backtest completion
+  data_sources: ["csv", "parquet", "yahoo_finance"]  # Priority order for data sources (Yahoo Finance preferred)
+  risk_free_rate_override: null    # Override SELIC rate if needed (null = use SELIC from market config)
+
 # SGS Data Configuration
 sgs:
   # Banco Central SGS Series Configuration
@@ -146,4 +155,20 @@ sgs:
     interest_rate_range: [0, 100]  # Valid range for interest rates (%)
     inflation_range: [-50, 100]    # Valid range for inflation (%)
     min_data_points: 10            # Minimum required data points
+  
+  # Strict Mode Configuration - No Fallbacks for SELIC Data
+  strict_mode:
+    enabled: true                  # Enable strict mode (no fallback rates)
+    require_selic_data: true       # Require SELIC data for backtest execution
+    minimum_coverage_percentage: 95.0  # Require 95% data coverage
+    fail_on_missing_data: true     # Fail backtest if data is missing
+    allow_partial_data: false      # Do not allow partial data usage
+    
+  # Data Quality Thresholds for Strict Mode
+  quality_thresholds:
+    minimum_data_points: 100       # Minimum SELIC data points required
+    maximum_gap_days: 5            # Maximum consecutive days without data
+    rate_validity_range: [0.001, 100.0]  # Valid SELIC rate range (0.1% to 10,000%)
+    outlier_threshold: 3.0         # Standard deviations for outlier detection
+    minimum_coverage_days: 30      # Minimum days of data required for validation
 

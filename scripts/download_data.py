@@ -34,7 +34,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 # Add import for IBRA tickers
-from ibra_tickers import IBRA_TICKERS
+try:
+    from .ibra_tickers import IBRA_TICKERS
+except ImportError:
+    # Fallback for when running as script
+    import sys
+    sys.path.append('.')
+    from ibra_tickers import IBRA_TICKERS
 
 # Configure comprehensive logging
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
