@@ -71,8 +71,8 @@ class SimulationResult:
 
 
 @dataclass
-class PerformanceMetrics:
-    """Detailed performance metrics for simulation analysis."""
+class SimulationMetrics:
+    """Detailed simulation metrics for analysis."""
     total_return: float = 0.0
     annualized_return: float = 0.0
     sharpe_ratio: float = 0.0
@@ -123,13 +123,11 @@ class BacktestSimulator:
         if not isinstance(strategy, BaseStrategy):
             raise ValueError("Strategy must be a BaseStrategy instance")
         
-        # Validate required strategy methods
+        # Validate required strategy methods - only check abstract methods
         required_methods = [
-            'validate_market_data',
-            'check_brazilian_market_constraints', 
-            'calculate_position_size',
             'generate_signals',
-            'reset_strategy'
+            'manage_risk',
+            'execute_trade'
         ]
         
         missing_methods = []
@@ -138,8 +136,23 @@ class BacktestSimulator:
                 missing_methods.append(method)
         
         if missing_methods:
-            raise ValueError(f"Strategy missing required methods: {missing_methods}. "
+            raise ValueError(f"Strategy missing required abstract methods: {missing_methods}. "
                            f"Ensure BaseStrategy is properly implemented with all abstract methods.")
+        
+        # Validate optional methods that should be available
+        optional_methods = [
+            'validate_market_data',
+            'reset_strategy'
+        ]
+        
+        missing_optional = []
+        for method in optional_methods:
+            if not hasattr(strategy, method):
+                missing_optional.append(method)
+        
+        if missing_optional:
+            logger.warning(f"Strategy missing optional methods: {missing_optional}. "
+                          f"These methods are recommended for full functionality.")
         
         if initial_capital <= 0:
             raise ValueError("Initial capital must be positive")
@@ -194,6 +207,9 @@ class BacktestSimulator:
         # Performance metrics (includes benchmark analysis)
         self.performance_metrics = PerformanceMetrics(self.portfolio, config_path)
         
+        # Simulation-specific metrics
+        self.simulation_metrics = SimulationMetrics()
+        
         # Setup logging
         self._setup_logging()
         
@@ -209,7 +225,6 @@ class BacktestSimulator:
         except Exception as e:
             logger.error(f"Error loading configuration: {str(e)}")
             raise
-        logger.info(f"Date range: {start_date} to {end_date}")
     
     def _setup_logging(self) -> None:
         """Setup simulation-specific logging."""
@@ -337,8 +352,11 @@ class BacktestSimulator:
             self.portfolio.total_commission = 0.0
             self.portfolio.total_taxes = 0.0
             
-            # Reset strategy
-            self.strategy.reset_strategy()
+            # Reset strategy if method exists
+            if hasattr(self.strategy, 'reset_strategy'):
+                self.strategy.reset_strategy()
+            else:
+                logger.warning("Strategy does not have reset_strategy method")
             
             # Process each trading day
             for date, daily_data in data.iterrows():
@@ -638,34 +656,26 @@ class BacktestSimulator:
             price_data: Current day's price data
         """
         try:
-            # Defensive check for strategy methods
-            if not hasattr(self.strategy, 'validate_market_data'):
-                logger.error("Strategy missing required method: validate_market_data")
-                return
-            
-            if not hasattr(self.strategy, 'check_brazilian_market_constraints'):
-                logger.error("Strategy missing required method: check_brazilian_market_constraints")
-                return
-            
-            if not hasattr(self.strategy, 'calculate_position_size'):
-                logger.error("Strategy missing required method: calculate_position_size")
-                return
-            
-            # Validate signal
-            try:
-                if not self.strategy.validate_market_data({
-                    'price_data': pd.DataFrame([price_data]),
-                    'timestamp': signal.timestamp
-                }):
-                    logger.warning(f"Invalid market data for signal: {signal}")
+            # Validate market data (optional method)
+            if hasattr(self.strategy, 'validate_market_data'):
+                try:
+                    market_data_valid = self.strategy.validate_market_data({
+                        'price_data': pd.DataFrame([price_data]),
+                        'timestamp': signal.timestamp
+                    })
+                    if not market_data_valid:
+                        logger.warning(f"Invalid market data for signal: {signal}")
+                        return
+                except Exception as e:
+                    logger.error(f"Error in validate_market_data: {str(e)}")
                     return
-            except Exception as e:
-                logger.error(f"Error in validate_market_data: {str(e)}")
-                return
+            else:
+                logger.debug("Strategy does not implement validate_market_data - skipping validation")
             
-            # Check Brazilian market constraints
+            # Check Brazilian market constraints (now available by default)
             try:
-                if not self.strategy.check_brazilian_market_constraints(signal):
+                constraints_ok = self.strategy.check_brazilian_market_constraints(signal)
+                if not constraints_ok:
                     logger.warning(f"Signal violates Brazilian market constraints: {signal}")
                     return
             except Exception as e:
@@ -685,11 +695,22 @@ class BacktestSimulator:
                 logger.error(f"Error getting available cash: {str(e)}")
                 return
             
-            # Calculate position size
-            try:
-                quantity = self.strategy.calculate_position_size(signal, available_cash)
-            except Exception as e:
-                logger.error(f"Error in calculate_position_size: {str(e)}")
+            # Use strategy's position sizing (from signal)
+            quantity = signal.quantity
+            
+            # Optional: Apply risk management if strategy provides it
+            if hasattr(self.strategy, 'calculate_position_size'):
+                try:
+                    risk_adjusted_quantity = self.strategy.calculate_position_size(signal, available_cash)
+                    # Use the smaller of strategy's choice or risk-adjusted
+                    quantity = min(quantity, risk_adjusted_quantity)
+                    logger.debug(f"Strategy wanted {signal.quantity}, risk allows {risk_adjusted_quantity}, using {quantity}")
+                except Exception as e:
+                    logger.warning(f"Error in calculate_position_size: {str(e)}, using strategy's quantity")
+            
+            # Final validation
+            if quantity <= 0:
+                logger.debug(f"Insufficient quantity for signal: {signal}")
                 return
             
             if quantity <= 0:

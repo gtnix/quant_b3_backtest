@@ -308,6 +308,92 @@ class BaseStrategy(ABC):
         """
         pass
     
+    def calculate_position_size(self, signal: TradingSignal, 
+                              available_cash: float) -> int:
+        """
+        Calculate optimal position size based on risk metrics.
+        
+        This is a default implementation that strategies can override
+        if they need custom position sizing logic.
+        
+        Args:
+            signal: Trading signal
+            available_cash: Available cash for trading
+            
+        Returns:
+            Calculated position size (quantity)
+        """
+        # Get current portfolio value
+        portfolio_value = self.portfolio.total_value
+        
+        # Calculate maximum position value
+        max_position_value = portfolio_value * self.risk_metrics.max_position_size
+        
+        # Calculate position value based on signal
+        position_value = min(
+            signal.price * signal.quantity,
+            max_position_value,
+            available_cash
+        )
+        
+        # Calculate quantity
+        quantity = int(position_value / signal.price)
+        
+        # Ensure minimum quantity
+        if quantity < 1:
+            quantity = 0
+        
+        logger.debug(f"Calculated position size: {quantity} shares (value: R$ {position_value:,.2f})")
+        return quantity
+    
+    def check_brazilian_market_constraints(self, signal: TradingSignal) -> bool:
+        """
+        Check Brazilian market-specific constraints.
+        
+        This is a default implementation that strategies can override
+        if they need custom constraint checking logic.
+        
+        Args:
+            signal: Trading signal to validate
+            
+        Returns:
+            True if constraints are satisfied, False otherwise
+        """
+        # Check trading hours (simplified - in real implementation, check actual market hours)
+        current_time = signal.timestamp.time()
+        market_open = datetime.strptime(self.trading_hours['open'], "%H:%M").time()
+        market_close = datetime.strptime(self.trading_hours['close'], "%H:%M").time()
+        
+        if not (market_open <= current_time <= market_close):
+            logger.warning(f"Trade outside market hours: {current_time}")
+            return False
+        
+        # Check day trade constraints
+        if signal.trade_type == TradeType.DAY_TRADE:
+            # Check day trade exposure limits
+            current_day_trade_exposure = self._calculate_day_trade_exposure()
+            if current_day_trade_exposure > self.risk_metrics.max_day_trade_exposure:
+                logger.warning(f"Day trade exposure limit exceeded: {current_day_trade_exposure:.2%}")
+                return False
+        
+        return True
+    
+    def _calculate_day_trade_exposure(self) -> float:
+        """
+        Calculate current day trade exposure as percentage of portfolio.
+        
+        Returns:
+            Day trade exposure percentage
+        """
+        # This is a simplified calculation
+        # In a real implementation, you would track actual day trade positions
+        portfolio_value = self.portfolio.total_value
+        if portfolio_value == 0:
+            return 0.0
+        
+        # For now, return a conservative estimate
+        return 0.0
+    
     def update_parameters(self, new_parameters: Dict[str, Any]) -> None:
         """
         Update strategy parameters dynamically.
@@ -450,86 +536,6 @@ class BaseStrategy(ABC):
         """
         market_conditions = market_data.get('market_conditions', {})
         return market_conditions.get('inflation_environment', 'unknown')
-    
-    def calculate_position_size(self, signal: TradingSignal, 
-                              available_cash: float) -> int:
-        """
-        Calculate optimal position size based on risk metrics.
-        
-        Args:
-            signal: Trading signal
-            available_cash: Available cash for trading
-            
-        Returns:
-            Calculated position size (quantity)
-        """
-        # Get current portfolio value
-        portfolio_value = self.portfolio.total_value
-        
-        # Calculate maximum position value
-        max_position_value = portfolio_value * self.risk_metrics.max_position_size
-        
-        # Calculate position value based on signal
-        position_value = min(
-            signal.price * signal.quantity,
-            max_position_value,
-            available_cash
-        )
-        
-        # Calculate quantity
-        quantity = int(position_value / signal.price)
-        
-        # Ensure minimum quantity
-        if quantity < 1:
-            quantity = 0
-        
-        logger.debug(f"Calculated position size: {quantity} shares (value: R$ {position_value:,.2f})")
-        return quantity
-    
-    def check_brazilian_market_constraints(self, signal: TradingSignal) -> bool:
-        """
-        Check Brazilian market-specific constraints.
-        
-        Args:
-            signal: Trading signal to validate
-            
-        Returns:
-            True if constraints are satisfied, False otherwise
-        """
-        # Check trading hours (simplified - in real implementation, check actual market hours)
-        current_time = signal.timestamp.time()
-        market_open = datetime.strptime(self.trading_hours['open'], "%H:%M").time()
-        market_close = datetime.strptime(self.trading_hours['close'], "%H:%M").time()
-        
-        if not (market_open <= current_time <= market_close):
-            logger.warning(f"Trade outside market hours: {current_time}")
-            return False
-        
-        # Check day trade constraints
-        if signal.trade_type == TradeType.DAY_TRADE:
-            # Check day trade exposure limits
-            current_day_trade_exposure = self._calculate_day_trade_exposure()
-            if current_day_trade_exposure > self.risk_metrics.max_day_trade_exposure:
-                logger.warning(f"Day trade exposure limit exceeded: {current_day_trade_exposure:.2%}")
-                return False
-        
-        return True
-    
-    def _calculate_day_trade_exposure(self) -> float:
-        """
-        Calculate current day trade exposure as percentage of portfolio.
-        
-        Returns:
-            Day trade exposure percentage
-        """
-        # This is a simplified calculation
-        # In a real implementation, you would track actual day trade positions
-        portfolio_value = self.portfolio.total_value
-        if portfolio_value == 0:
-            return 0.0
-        
-        # For now, return a conservative estimate
-        return 0.0
     
     def log_signal(self, signal: TradingSignal) -> None:
         """
