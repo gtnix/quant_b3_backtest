@@ -24,7 +24,6 @@ Create `requirements.txt`:
 ```
 pandas==2.0.3
 numpy==1.24.3
-yfinance==0.2.28  # For B3 data (use .SA suffix)
 alpha_vantage==2.3.1
 pyyaml==6.0
 matplotlib==3.7.1
@@ -77,47 +76,58 @@ Create `scripts/download_data.py`:
 ```python
 """
 Download B3 stock data with proper suffix handling
-Uses yfinance for simplicity (Alpha Vantage has limited B3 support)
+Uses Alpha Vantage API for B3 market data
 """
-import yfinance as yf
 import pandas as pd
 from pathlib import Path
 import yaml
+import requests
+import time
 
 class B3DataDownloader:
-    def __init__(self):
+    def __init__(self, api_key):
+        self.api_key = api_key
         self.data_path = Path("data/raw")
         self.data_path.mkdir(exist_ok=True)
+        self.base_url = "https://www.alphavantage.co/query"
 
     def download_stock(self, ticker, start_date, end_date):
         """
-        Download B3 stock data
-        Example: PETR4 becomes PETR4.SA
+        Download B3 stock data using Alpha Vantage
         """
-        b3_ticker = f"{ticker}.SA"
-
         try:
-            data = yf.download(
-                b3_ticker,
-                start=start_date,
-                end=end_date,
-                auto_adjust=False  # Keep raw prices for accuracy
-            )
+            # Alpha Vantage API call
+            params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': f"{ticker}.SAO",  # B3 suffix for Alpha Vantage
+                'apikey': self.api_key,
+                'outputsize': 'full'
+            }
+            
+            response = requests.get(self.base_url, params=params)
+            data = response.json()
+            
+            if 'Time Series (Daily)' not in data:
+                print(f"Error downloading {ticker}: {data.get('Note', 'API limit exceeded')}")
+                return None
+
+            # Convert to DataFrame
+            df = pd.DataFrame.from_dict(data['Time Series (Daily)'], orient='index')
+            df.index = pd.to_datetime(df.index)
+            df.columns = ['open', 'high', 'low', 'close', 'volume']
+            
+            # Convert to numeric
+            for col in df.columns:
+                df[col] = pd.to_numeric(df[col])
+
+            # Filter date range
+            df = df[(df.index >= start_date) & (df.index <= end_date)]
 
             # Save with metadata
             filename = self.data_path / f"{ticker}_raw.csv"
-            data.to_csv(filename)
+            df.to_csv(filename)
 
-            # Save metadata
-            info = yf.Ticker(b3_ticker).info
-            metadata = {
-                'ticker': ticker,
-                'company': info.get('longName', ''),
-                'sector': info.get('sector', ''),
-                'download_date': pd.Timestamp.now().strftime('%Y-%m-%d')
-            }
-
-            return data
+            return df
 
         except Exception as e:
             print(f"Error downloading {ticker}: {e}")
@@ -864,7 +874,7 @@ Edit `config/settings.yaml` to adjust:
 - Position sizing rules
 
 ## Important Notes for B3
-- All tickers need ".SA" suffix for yfinance
+- All tickers need ".SAO" suffix for Alpha Vantage
 - Market hours: 10:00 - 17:00 São Paulo time
 - Minimum lot size: 100 shares
 - Settlement: T+2
