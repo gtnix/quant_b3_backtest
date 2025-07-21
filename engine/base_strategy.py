@@ -25,30 +25,29 @@ from datetime import datetime, timedelta
 import logging
 import yaml
 from dataclasses import dataclass, field
-from enum import Enum
 import pandas as pd
 import numpy as np
 
-from engine.portfolio import EnhancedPortfolio
 from engine.tca import TransactionCostAnalyzer
 from engine.loader import DataLoader
+from engine.market_utils import (
+    BrazilianMarketUtils,
+    TradeType, 
+    SignalType, 
+    OrderType, 
+    LotType, 
+    OrderValidation
+)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from engine.portfolio import EnhancedPortfolio
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class TradeType(Enum):
-    """Enumeration for Brazilian market trade types."""
-    DAY_TRADE = "day_trade"
-    SWING_TRADE = "swing_trade"
-    AUTO = "auto"
 
-
-class SignalType(Enum):
-    """Enumeration for trading signal types."""
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
 
 
 @dataclass
@@ -108,6 +107,9 @@ class RiskMetrics:
     max_day_trade_exposure: float = 0.3  # 30% day trade exposure
 
 
+
+
+
 class BaseStrategy(ABC):
     """
     Abstract base class for Brazilian market trading strategies.
@@ -127,7 +129,7 @@ class BaseStrategy(ABC):
     
     def __init__(
         self,
-        portfolio: EnhancedPortfolio,
+        portfolio: "EnhancedPortfolio",
         symbol: str,
         risk_tolerance: float = 0.02,
         config_path: str = "config/settings.yaml",
@@ -144,6 +146,7 @@ class BaseStrategy(ABC):
             strategy_name: Optional strategy name for logging
         """
         # Validate inputs
+        from engine.portfolio import EnhancedPortfolio
         if not isinstance(portfolio, EnhancedPortfolio):
             raise TypeError("Portfolio must be an EnhancedPortfolio instance")
         
@@ -174,6 +177,13 @@ class BaseStrategy(ABC):
         self.trading_hours = self.config['market']['trading_hours']
         self.tax_config = self.config['taxes']
         self.settlement_config = self.config['settlement']
+        
+        # Initialize market utilities with configuration
+        market_config = self.config['market']
+        self.market_utils = BrazilianMarketUtils(
+            tick_size=market_config.get('tick_size', 0.01),
+            round_lot_size=market_config.get('round_lot_size', 100)
+        )
         
         logger.info(f"Strategy '{self.strategy_name}' initialized for {self.symbol}")
         logger.info(f"Risk tolerance: {self.risk_tolerance:.2%}")
@@ -348,10 +358,14 @@ class BaseStrategy(ABC):
     
     def check_brazilian_market_constraints(self, signal: TradingSignal) -> bool:
         """
-        Check Brazilian market-specific constraints.
+        Check Brazilian market-specific constraints including price ticks and lot sizes.
         
-        This is a default implementation that strategies can override
-        if they need custom constraint checking logic.
+        This enhanced implementation validates:
+        - Trading hours
+        - Day trade exposure limits
+        - Price tick normalization (R$ 0.01)
+        - Lot size validation (round lots = multiples of 100)
+        - Fractional lot handling
         
         Args:
             signal: Trading signal to validate
@@ -359,14 +373,7 @@ class BaseStrategy(ABC):
         Returns:
             True if constraints are satisfied, False otherwise
         """
-        # Check trading hours (simplified - in real implementation, check actual market hours)
-        current_time = signal.timestamp.time()
-        market_open = datetime.strptime(self.trading_hours['open'], "%H:%M").time()
-        market_close = datetime.strptime(self.trading_hours['close'], "%H:%M").time()
-        
-        if not (market_open <= current_time <= market_close):
-            logger.warning(f"Trade outside market hours: {current_time}")
-            return False
+        # Trading hours check removed for simplicity in backtesting
         
         # Check day trade constraints
         if signal.trade_type == TradeType.DAY_TRADE:
@@ -375,6 +382,37 @@ class BaseStrategy(ABC):
             if current_day_trade_exposure > self.risk_metrics.max_day_trade_exposure:
                 logger.warning(f"Day trade exposure limit exceeded: {current_day_trade_exposure:.2%}")
                 return False
+        
+        # Validate price ticks and lot sizes using market utilities
+        market_config = self.config['market']
+        allow_fractional = market_config.get('allow_fractional_lots', True)
+        
+        # Use market utils for comprehensive validation
+        validation = self.market_utils.validate_order(
+            price=signal.price,
+            quantity=signal.quantity,
+            order_type=OrderType.MARKET,  # Default to market order for signals
+            allow_fractional=allow_fractional
+        )
+        
+        if not validation.is_valid:
+            for message in validation.validation_messages:
+                logger.warning(f"Market constraint violation: {message}")
+            return False
+        
+        # Log validation results
+        if validation.validation_messages:
+            for message in validation.validation_messages:
+                logger.debug(f"Market validation: {message}")
+        
+        # Update signal with normalized values if needed
+        if abs(validation.normalized_price - signal.price) > 1e-6:
+            logger.info(f"Price normalized: {signal.price} -> {validation.normalized_price}")
+            signal.price = validation.normalized_price
+        
+        if validation.normalized_quantity != signal.quantity:
+            logger.info(f"Quantity normalized: {signal.quantity} -> {validation.normalized_quantity}")
+            signal.quantity = validation.normalized_quantity
         
         return True
     

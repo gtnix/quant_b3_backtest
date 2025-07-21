@@ -8,6 +8,14 @@ market:
   # Market parameters
   selic_rate: 0.15         # Current Brazilian SELIC rate (15.0% - 2025)
   trading_days_per_year: 252  # Brazilian market standard
+  
+  # Price and lot size conventions
+  tick_size: 0.01          # Minimum price increment (R$ 0.01)
+  round_lot_size: 100      # Standard lot size (multiples of 100 shares)
+  min_quantity: 1          # Minimum order quantity
+  allow_fractional_lots: true  # Allow odd lot orders (fractional book)
+  enforce_price_ticks: true    # Enforce price tick normalization
+  enforce_lot_sizes: true      # Enforce lot size validation
 
   # Transaction costs
   costs:
@@ -80,6 +88,9 @@ loss_carryforward:
     application_history: true           # Track loss application history
     regulatory_reporting: true          # Enable regulatory reporting
     compliance_validation: true         # Validate compliance with Brazilian law
+
+# Order Management Configuration - Simplified for Backtesting
+# Only essential market utilities are used (price ticks, lot sizes)
 
 # Performance & Monitoring Configuration
 performance:

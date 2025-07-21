@@ -26,6 +26,7 @@ import pytz
 from engine.loss_manager import EnhancedLossCarryforwardManager
 from engine.settlement_manager import AdvancedSettlementManager
 from engine.tca import TransactionCostAnalyzer
+from engine.market_utils import BrazilianMarketUtils, OrderType, LotType
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -98,6 +99,13 @@ class EnhancedPortfolio:
         
         # Initialize Transaction Cost Analyzer
         self.tca = TransactionCostAnalyzer(config_path)
+        
+        # Initialize market utilities
+        market_config = self.config['market']
+        self.market_utils = BrazilianMarketUtils(
+            tick_size=market_config.get('tick_size', 0.01),
+            round_lot_size=market_config.get('round_lot_size', 100)
+        )
         
         # Portfolio state
         self.positions: Dict[str, Position] = {}
@@ -501,10 +509,35 @@ class EnhancedPortfolio:
         try:
             self._validate_trade_inputs(ticker, quantity, price, trade_date, trade_type)
             
+            # Validate and normalize price/quantity using Brazilian market conventions
+            market_config = self.config['market']
+            allow_fractional = market_config.get('allow_fractional_lots', True)
+            
+            validation = self.market_utils.validate_order(
+                price=price,
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                allow_fractional=allow_fractional
+            )
+            
+            if not validation.is_valid:
+                for message in validation.validation_messages:
+                    logger.warning(f"Buy order validation failed: {message}")
+                return False
+            
+            # Use normalized values
+            normalized_price = validation.normalized_price
+            normalized_quantity = validation.normalized_quantity
+            
+            # Log validation results
+            if validation.validation_messages:
+                for message in validation.validation_messages:
+                    logger.debug(f"Buy order validation: {message}")
+            
             # Resolve trade type (handle auto-detection)
             resolved_trade_type = self._resolve_trade_type(ticker, trade_date, trade_type, 'BUY')
             
-            trade_value = quantity * price
+            trade_value = normalized_quantity * normalized_price
             
             # Use TCA for buy order costs
             cost_breakdown = self.tca.calculate_costs(
@@ -535,19 +568,19 @@ class EnhancedPortfolio:
             if ticker in self.positions:
                 # Update existing position
                 pos = self.positions[ticker]
-                total_quantity = pos.quantity + quantity
+                total_quantity = pos.quantity + normalized_quantity
                 total_cost_basis = (pos.quantity * pos.avg_price) + trade_value
                 pos.quantity = total_quantity
                 pos.avg_price = total_cost_basis / total_quantity
-                pos.current_price = price
+                pos.current_price = normalized_price
                 pos.last_update = trade_date
             else:
                 # Create new position
                 self.positions[ticker] = Position(
                     ticker=ticker,
-                    quantity=quantity,
-                    avg_price=price,
-                    current_price=price,
+                    quantity=normalized_quantity,
+                    avg_price=normalized_price,
+                    current_price=normalized_price,
                     last_update=trade_date,
                     trade_type=resolved_trade_type,
                     position_id=trade_id,
@@ -574,18 +607,22 @@ class EnhancedPortfolio:
                 'date': trade_date,
                 'ticker': ticker,
                 'action': 'BUY',
-                'quantity': quantity,
-                'price': price,
+                'quantity': normalized_quantity,
+                'price': normalized_price,
                 'value': trade_value,
                 'costs': costs,
                 'trade_type': resolved_trade_type,
                 'trade_id': trade_id,
-                'description': description
+                'description': description,
+                'lot_type': validation.lot_type.value,
+                'is_fractional': validation.is_fractional,
+                'original_quantity': quantity,
+                'original_price': price
             }
             self.trade_history.append(trade_record)
             
-            logger.info(f"Buy executed: {quantity} {ticker} @ R$ {price:.2f} "
-                       f"(costs: R$ {costs['total_costs']:.2f})")
+            logger.info(f"Buy executed: {normalized_quantity} {ticker} @ R$ {normalized_price:.2f} "
+                       f"(costs: R$ {costs['total_costs']:.2f}, lot_type: {validation.lot_type.value})")
             
             return True
             
@@ -614,6 +651,31 @@ class EnhancedPortfolio:
         try:
             self._validate_trade_inputs(ticker, quantity, price, trade_date, trade_type)
             
+            # Validate and normalize price/quantity using Brazilian market conventions
+            market_config = self.config['market']
+            allow_fractional = market_config.get('allow_fractional_lots', True)
+            
+            validation = self.market_utils.validate_order(
+                price=price,
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                allow_fractional=allow_fractional
+            )
+            
+            if not validation.is_valid:
+                for message in validation.validation_messages:
+                    logger.warning(f"Sell order validation failed: {message}")
+                return False
+            
+            # Use normalized values
+            normalized_price = validation.normalized_price
+            normalized_quantity = validation.normalized_quantity
+            
+            # Log validation results
+            if validation.validation_messages:
+                for message in validation.validation_messages:
+                    logger.debug(f"Sell order validation: {message}")
+            
             # Resolve trade type (handle auto-detection)
             resolved_trade_type = self._resolve_trade_type(ticker, trade_date, trade_type, 'SELL')
             
@@ -623,13 +685,13 @@ class EnhancedPortfolio:
                 return False
             
             position = self.positions[ticker]
-            if position.quantity < quantity:
+            if position.quantity < normalized_quantity:
                 logger.warning(f"Insufficient shares in {ticker}: "
-                             f"have {position.quantity}, trying to sell {quantity}")
+                             f"have {position.quantity}, trying to sell {normalized_quantity}")
                 return False
             
             # Calculate trade details
-            trade_value = quantity * price
+            trade_value = normalized_quantity * normalized_price
             
             # Use TCA for sell order costs
             cost_breakdown = self.tca.calculate_costs(
@@ -678,8 +740,8 @@ class EnhancedPortfolio:
             final_profit = net_profit - taxes['total_taxes']
             
             # Update position
-            position.quantity -= quantity
-            position.current_price = price
+            position.quantity -= normalized_quantity
+            position.current_price = normalized_price
             position.last_update = trade_date
             
             # Remove position if empty
@@ -696,7 +758,7 @@ class EnhancedPortfolio:
                 trade_type='SELL',
                 ticker=ticker,
                 trade_id=trade_id,
-                description=f"Sell {quantity} {ticker} @ R$ {price:.2f}"
+                description=f"Sell {normalized_quantity} {ticker} @ R$ {normalized_price:.2f}"
             )
             
             # Update tracking
@@ -724,8 +786,8 @@ class EnhancedPortfolio:
                 'date': trade_date,
                 'ticker': ticker,
                 'action': 'SELL',
-                'quantity': quantity,
-                'price': price,
+                'quantity': normalized_quantity,
+                'price': normalized_price,
                 'value': trade_value,
                 'costs': costs,
                 'taxes': taxes,
@@ -734,12 +796,16 @@ class EnhancedPortfolio:
                 'final_profit': final_profit,
                 'trade_type': resolved_trade_type,
                 'trade_id': trade_id,
-                'description': description
+                'description': description,
+                'lot_type': validation.lot_type.value,
+                'is_fractional': validation.is_fractional,
+                'original_quantity': quantity,
+                'original_price': price
             }
             self.trade_history.append(trade_record)
             
-            logger.info(f"Sell executed: {quantity} {ticker} @ R$ {price:.2f} "
-                       f"(profit: R$ {final_profit:.2f}, taxes: R$ {taxes['total_taxes']:.2f})")
+            logger.info(f"Sell executed: {normalized_quantity} {ticker} @ R$ {normalized_price:.2f} "
+                       f"(profit: R$ {final_profit:.2f}, taxes: R$ {taxes['total_taxes']:.2f}, lot_type: {validation.lot_type.value})")
             
             return True
             

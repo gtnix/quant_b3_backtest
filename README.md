@@ -16,6 +16,38 @@ A comprehensive backtesting engine for Brazilian stocks (B3) with support for re
 - **Security**: Secure API key management for safe GitHub uploads
 - **Comprehensive Testing**: Extensive test suites for all advanced modules
 
+## Brazilian Market Conventions
+
+The backtesting engine enforces Brazilian market (B3) conventions to ensure realistic simulation:
+
+### Price Tick Normalization
+- **Tick Size**: R$ 0.01 (minimum price increment)
+- **Normalization**: All prices are automatically rounded to the nearest centavo
+- **Example**: R$ 12.3456 → R$ 12.35, R$ 12.344 → R$ 12.34
+
+### Lot Size Validation
+- **Round Lots**: Multiples of 100 shares (100, 200, 300, etc.)
+- **Odd Lots**: Non-multiples of 100 (50, 150, 250, etc.)
+- **Order Routing**: Round lots go to main book, odd lots to fractional book
+- **Configuration**: Can disable fractional lots via `allow_fractional_lots: false`
+
+### Order Validation
+- **Automatic Validation**: All orders are validated against market conventions
+- **Price Normalization**: Prices are automatically normalized to valid ticks
+- **Lot Classification**: Orders are classified as round lot or odd lot
+- **Trade History**: Original and normalized values are tracked for audit
+
+### Configuration
+```yaml
+market:
+  tick_size: 0.01              # Price tick size
+  round_lot_size: 100          # Standard lot size
+  min_quantity: 1              # Minimum order quantity
+  allow_fractional_lots: true  # Allow odd lot orders
+  enforce_price_ticks: true    # Enforce price normalization
+  enforce_lot_sizes: true      # Enforce lot size validation
+```
+
 ## Project Structure
 
 ```
@@ -30,6 +62,7 @@ quant_backtest/
 ├── engine/
 │   ├── loader.py              # Data loading utilities
 │   ├── portfolio.py           # Portfolio management (uses advanced managers)
+│   ├── base_strategy.py  # Base strategy with Brazilian market utilities
 │   ├── tca.py                 # Transaction Cost Analysis (TCA) module
 │   ├── loss_manager.py        # Enhanced Loss Carryforward Manager
 │   ├── settlement_manager.py  # Advanced Settlement Manager (T+2)
@@ -40,6 +73,8 @@ quant_backtest/
 ├── strategies/                # User trading strategies (currently empty)
 ├── reports/                   # Backtest reports (NOT shared)
 ├── tests/                     # Comprehensive test suites
+│   ├── test_market_utils.py   # Market utilities tests
+│   ├── test_market_integration.py # Integration tests
 │   ├── test_tca.py            # Transaction Cost Analysis tests
 │   ├── test_enhanced_managers.py # Loss carryforward and settlement manager tests
 │   └── test_simulator.py      # Backtest simulator tests
@@ -49,6 +84,7 @@ quant_backtest/
 
 ## Advanced Features
 
+- **Brazilian Market Conventions**: Enforces B3 market rules including price tick normalization (R$ 0.01), lot size validation (round lots = multiples of 100), and order routing to main/fractional books.
 - **Transaction Cost Analysis (TCA)**: Modular, accurate calculation of all trading costs, including brokerage, emolument, settlement, and ISS. Fully configurable and tested.
 - **Enhanced Loss Carryforward Manager**: Tracks losses per asset and globally, supports indefinite carryforward, and provides audit trails for compliance.
 - **Advanced Settlement Manager**: Models T+2 settlement with business day handling, cash flow simulation, and robust error handling.
@@ -98,6 +134,89 @@ pip install -r requirements.txt
 
 1. Visit [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
 2. Sign up for a free account
+
+## Usage Examples
+
+### Market Utilities Usage
+
+```python
+from engine.base_strategy import BrazilianMarketUtils
+
+# Initialize market utilities
+utils = BrazilianMarketUtils()
+
+# Price normalization
+normalized_price = utils.normalize_price_tick(12.3456)  # Returns 12.35
+
+# Lot size validation
+is_valid, lot_type, is_fractional = utils.validate_lot_size(150)
+# Returns: (True, LotType.ODD_LOT, True)
+
+# Order validation
+validation = utils.validate_order(
+    price=12.3456,
+    quantity=150,
+    allow_fractional=True
+)
+# Returns OrderValidation with normalized values and lot classification
+```
+
+### Portfolio with Market Conventions
+
+```python
+from engine.portfolio import EnhancedPortfolio
+
+# Initialize portfolio (automatically uses market conventions)
+portfolio = EnhancedPortfolio("config/settings.yaml")
+
+# Buy with price normalization
+success = portfolio.buy(
+    ticker="PETR4",
+    quantity=100,
+    price=12.3456,  # Automatically normalized to 12.35
+    trade_date=datetime.now(),
+    trade_type="swing_trade"
+)
+
+# Trade history includes original and normalized values
+trade = portfolio.trade_history[0]
+print(f"Original price: {trade['original_price']}")  # 12.3456
+print(f"Normalized price: {trade['price']}")         # 12.35
+print(f"Lot type: {trade['lot_type']}")              # round_lot
+```
+
+### Strategy with Market Constraints
+
+```python
+from engine.base_strategy import BaseStrategy, TradingSignal, SignalType
+
+class MyStrategy(BaseStrategy):
+    def generate_signals(self, market_data):
+        # Your signal generation logic
+        signal = TradingSignal(
+            signal_type=SignalType.BUY,
+            ticker="PETR4",
+            price=12.3456,  # Will be normalized automatically
+            quantity=150,    # Will be classified as odd lot
+            confidence=1.0,
+            trade_type=TradeType.SWING_TRADE
+        )
+        return [signal]
+    
+    def execute_trade(self, signal):
+        # Market constraints are automatically validated
+        constraints_ok = self.check_brazilian_market_constraints(signal)
+        if constraints_ok:
+            # Signal price and quantity are automatically normalized
+            return self.portfolio.buy(
+                ticker=signal.ticker,
+                quantity=signal.quantity,  # Already normalized
+                price=signal.price,        # Already normalized
+                trade_date=signal.timestamp,
+                trade_type=signal.trade_type.value
+            )
+        return False
+```
 3. Get your API key
 4. Add it to `config/secrets.yaml`
 
