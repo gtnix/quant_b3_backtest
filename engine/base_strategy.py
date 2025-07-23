@@ -1,21 +1,16 @@
 """
-Abstract Base Strategy for Brazilian Market Backtesting
+Abstract Base Strategy for Brazilian Market Backtesting with FuzzyFajuto Implementation
 
-This module provides an abstract base class for implementing trading strategies
-in the Brazilian stock market (B3) with comprehensive integration to the existing
-backtesting engine components.
+This module provides the FuzzyFajuto trading strategy for the Brazilian stock market (B3).
 
-Features:
-- Abstract interface for strategy implementation
-- Integration with EnhancedPortfolio for position management
-- Transaction Cost Analysis (TCA) integration
-- Brazilian market-specific considerations (T+2 settlement, tax rules)
-- Comprehensive logging and error handling
-- Type hints and documentation
+The FuzzyFajuto Strategy:
+- Compares stock returns against IBOV index
+- Uses 5 EMAs (3, 5, 10, 15, 20 days) for trend assessment
+- RSI(10) for overbought/oversold conditions
+- Generates score-based signals: BUY >= 1.50, SELL <= -1.50
+- ATR-based entry levels for volatility adaptation
 
-Compliance: Brazilian market regulations, B3 trading rules
-
-Author: Your Name
+Author: Quantitative Trading Specialist
 Date: 2024
 """
 
@@ -27,6 +22,7 @@ import yaml
 from dataclasses import dataclass, field
 import pandas as pd
 import numpy as np
+import ta  # Technical analysis library for indicators
 
 from engine.tca import TransactionCostAnalyzer
 from engine.loader import DataLoader
@@ -107,6 +103,41 @@ class RiskMetrics:
     max_day_trade_exposure: float = 0.3  # 30% day trade exposure
 
 
+@dataclass
+class FuzzyFajutoVectors:
+    """
+    Vectors used by the FuzzyFajuto strategy.
+    
+    Attributes:
+        dates_ibov: Dates for IBOV returns
+        returns_ibov: Daily returns of IBOV index
+        dates_stock: Dates for stock returns
+        returns_stock: Daily returns of the stock
+        ema_3: 3-day exponential moving average
+        ema_5: 5-day exponential moving average
+        ema_10: 10-day exponential moving average
+        ema_15: 15-day exponential moving average
+        ema_20: 20-day exponential moving average
+        rsi_10: 10-day RSI indicator
+        close_prices: Daily closing prices
+        fuzzy_fajuto_score: FuzzyFajuto score vector
+        atr: Average True Range (optional for limit orders)
+    """
+    dates_ibov: pd.DatetimeIndex = field(default_factory=pd.DatetimeIndex)
+    returns_ibov: pd.Series = field(default_factory=pd.Series)
+    dates_stock: pd.DatetimeIndex = field(default_factory=pd.DatetimeIndex)
+    returns_stock: pd.Series = field(default_factory=pd.Series)
+    ema_3: pd.Series = field(default_factory=pd.Series)
+    ema_5: pd.Series = field(default_factory=pd.Series)
+    ema_10: pd.Series = field(default_factory=pd.Series)
+    ema_15: pd.Series = field(default_factory=pd.Series)
+    ema_20: pd.Series = field(default_factory=pd.Series)
+    rsi_10: pd.Series = field(default_factory=pd.Series)
+    close_prices: pd.Series = field(default_factory=pd.Series)
+    fuzzy_fajuto_score: pd.Series = field(default_factory=pd.Series)
+    atr: pd.Series = field(default_factory=pd.Series)
+
+
 
 
 
@@ -172,6 +203,9 @@ class BaseStrategy(ABC):
         self.signals_history: List[TradingSignal] = []
         self.trades_history: List[Dict[str, Any]] = []
         self.performance_metrics: Dict[str, Any] = {}
+        
+        # FuzzyFajuto vectors
+        self.fuzzy_vectors = FuzzyFajutoVectors()
         
         # Brazilian market specific
         self.trading_hours = self.config['market']['trading_hours']
@@ -321,10 +355,7 @@ class BaseStrategy(ABC):
     def calculate_position_size(self, signal: TradingSignal, 
                               available_cash: float) -> int:
         """
-        Calculate optimal position size based on risk metrics.
-        
-        This is a default implementation that strategies can override
-        if they need custom position sizing logic.
+        Calculate position size based on risk metrics.
         
         Args:
             signal: Trading signal
@@ -503,6 +534,15 @@ class BaseStrategy(ABC):
             logger.error("Timestamp must be a datetime object")
             return False
         
+        # Validate IBOV data for FuzzyFajuto strategy
+        if self.strategy_name == 'FuzzyFajuto' or 'fuzzy' in self.strategy_name.lower():
+            ibov_data = market_data.get('ibov_data')
+            if ibov_data is None:
+                logger.warning("FuzzyFajuto strategy requires IBOV data for optimal performance")
+            elif not isinstance(ibov_data, dict):
+                logger.error("IBOV data must be a dictionary")
+                return False
+        
         # Validate SGS data if present (optional but recommended)
         sgs_data = market_data.get('sgs_data')
         if sgs_data is not None:
@@ -575,6 +615,218 @@ class BaseStrategy(ABC):
         market_conditions = market_data.get('market_conditions', {})
         return market_conditions.get('inflation_environment', 'unknown')
     
+    def calculate_technical_indicators(self, price_data: pd.DataFrame) -> None:
+        """
+        Calculate technical indicators for the FuzzyFajuto strategy.
+        
+        Args:
+            price_data: DataFrame with OHLCV data
+        """
+        if price_data.empty:
+            logger.warning("Empty price data, cannot calculate indicators")
+            return
+        
+        # Calculate EMAs
+        self.fuzzy_vectors.ema_3 = price_data['close'].ewm(span=3, adjust=False).mean()
+        self.fuzzy_vectors.ema_5 = price_data['close'].ewm(span=5, adjust=False).mean()
+        self.fuzzy_vectors.ema_10 = price_data['close'].ewm(span=10, adjust=False).mean()
+        self.fuzzy_vectors.ema_15 = price_data['close'].ewm(span=15, adjust=False).mean()
+        self.fuzzy_vectors.ema_20 = price_data['close'].ewm(span=20, adjust=False).mean()
+        
+        # Calculate RSI using ta library
+        self.fuzzy_vectors.rsi_10 = ta.momentum.RSIIndicator(close=price_data['close'], window=10).rsi()
+        
+        # Calculate ATR using ta library
+        self.fuzzy_vectors.atr = ta.volatility.AverageTrueRange(
+            high=price_data['high'],
+            low=price_data['low'],
+            close=price_data['close'],
+            window=14
+        ).average_true_range()
+        
+        # Store close prices and dates
+        self.fuzzy_vectors.close_prices = price_data['close'].copy()
+        self.fuzzy_vectors.dates_stock = price_data.index
+        
+        # Calculate stock returns
+        self.fuzzy_vectors.returns_stock = price_data['close'].pct_change()
+        
+        logger.debug(f"Technical indicators calculated for {len(price_data)} periods")
+    
+    def calculate_fuzzy_fajuto_score(self, market_data: Dict[str, Any]) -> pd.Series:
+        """
+        Calculate the FuzzyFajuto score based on the strategy rules.
+        
+        Args:
+            market_data: Market data including IBOV returns
+            
+        Returns:
+            Series with FuzzyFajuto scores
+        """
+        # Get IBOV returns from market data
+        ibov_data = market_data.get('ibov_data', {})
+        ibov_returns = ibov_data.get('returns', pd.Series())
+        
+        # Initialize score series
+        score = pd.Series(0.0, index=self.fuzzy_vectors.dates_stock)
+        
+        # Align IBOV returns with stock dates
+        if not ibov_returns.empty:
+            # Reindex IBOV returns to match stock dates
+            aligned_ibov_returns = ibov_returns.reindex(self.fuzzy_vectors.dates_stock, method='ffill')
+            
+            # 3.1 - Força Relativa contra o IBOV
+            stock_returns = self.fuzzy_vectors.returns_stock
+            score[stock_returns > aligned_ibov_returns] += 1.0
+            score[stock_returns < aligned_ibov_returns] -= 1.0
+        
+        # 3.2 - Comparação Preço x Médias Móveis Exponenciais
+        close_prices = self.fuzzy_vectors.close_prices
+        
+        # EMA comparisons
+        ema_list = [
+            self.fuzzy_vectors.ema_3,
+            self.fuzzy_vectors.ema_5,
+            self.fuzzy_vectors.ema_10,
+            self.fuzzy_vectors.ema_15,
+            self.fuzzy_vectors.ema_20
+        ]
+        
+        for ema in ema_list:
+            score[close_prices > ema] += 0.25
+            score[close_prices < ema] -= 0.25
+        
+        # 3.3 - Indicador de Excesso (RSI)
+        rsi = self.fuzzy_vectors.rsi_10
+        score[rsi > 65] += 0.25  # Sobrecompra
+        score[rsi < 35] -= 0.25  # Sobrevenda
+        
+        # Store the score
+        self.fuzzy_vectors.fuzzy_fajuto_score = score
+        
+        return score
+    
+    def generate_fuzzy_fajuto_signals(self, market_data: Dict[str, Any]) -> List[TradingSignal]:
+        """
+        Generate trading signals based on FuzzyFajuto score.
+        
+        Args:
+            market_data: Current market data
+            
+        Returns:
+            List of trading signals
+        """
+        signals = []
+        
+        # Calculate indicators and score
+        price_data = market_data.get('price_data', pd.DataFrame())
+        if price_data.empty:
+            return signals
+        
+        self.calculate_technical_indicators(price_data)
+        fuzzy_score = self.calculate_fuzzy_fajuto_score(market_data)
+        
+        if fuzzy_score.empty:
+            return signals
+        
+        # Get current timestamp
+        current_timestamp = market_data.get('timestamp', datetime.now())
+        
+        # Get the latest score
+        latest_score = fuzzy_score.iloc[-1]
+        latest_close = self.fuzzy_vectors.close_prices.iloc[-1]
+        
+        # 4.1 - Sinal de Compra
+        if latest_score >= 1.50:
+            # Calculate optimized entry limits
+            entry_limits = self.calculate_entry_limits(latest_close, is_buy=True, use_atr=True)
+            
+            # Generate buy signal
+            signal = TradingSignal(
+                signal_type=SignalType.BUY,
+                ticker=self.symbol,
+                price=latest_close,
+                quantity=100,  # Default quantity, will be adjusted by position sizing
+                confidence=min(latest_score / 3.0, 1.0),  # Normalize confidence
+                trade_type=TradeType.SWING_TRADE,
+                timestamp=current_timestamp,
+                metadata={
+                    'fuzzy_score': latest_score,
+                    'entry_type': 'fuzzy_fajuto_buy',
+                    'limit_prices': entry_limits,
+                    'current_atr': self.fuzzy_vectors.atr.iloc[-1] if not self.fuzzy_vectors.atr.empty else None
+                }
+            )
+            signals.append(signal)
+            
+        # 4.2 - Sinal de Venda/Short
+        elif latest_score <= -1.50:
+            # Calculate optimized entry limits
+            entry_limits = self.calculate_entry_limits(latest_close, is_buy=False, use_atr=True)
+            
+            # Generate sell signal
+            signal = TradingSignal(
+                signal_type=SignalType.SELL,
+                ticker=self.symbol,
+                price=latest_close,
+                quantity=100,  # Default quantity, will be adjusted by position sizing
+                confidence=min(abs(latest_score) / 3.0, 1.0),  # Normalize confidence
+                trade_type=TradeType.SWING_TRADE,
+                timestamp=current_timestamp,
+                metadata={
+                    'fuzzy_score': latest_score,
+                    'entry_type': 'fuzzy_fajuto_sell',
+                    'limit_prices': entry_limits,
+                    'current_atr': self.fuzzy_vectors.atr.iloc[-1] if not self.fuzzy_vectors.atr.empty else None
+                }
+            )
+            signals.append(signal)
+        
+        return signals
+    
+    def calculate_entry_limits(self, base_price: float, is_buy: bool, use_atr: bool = False) -> List[float]:
+        """
+        Calculate entry limit prices using ATR-based approach.
+        
+        Args:
+            base_price: Base price (usually closing price)
+            is_buy: True for buy orders, False for sell orders
+            use_atr: Whether to use ATR for limits
+            
+        Returns:
+            List of limit prices
+        """
+        if use_atr and not self.fuzzy_vectors.atr.empty:
+            # Get current ATR value
+            current_atr = self.fuzzy_vectors.atr.iloc[-1]
+            
+            # ATR multipliers for entry levels
+            atr_multipliers = [0.5, 1.0, 1.5]
+            
+            if is_buy:
+                limits = [base_price - (mult * current_atr) for mult in atr_multipliers]
+            else:
+                limits = [base_price + (mult * current_atr) for mult in atr_multipliers]
+        else:
+            # Fallback to percentage-based limits
+            if is_buy:
+                limits = [
+                    base_price * (1 - 0.005),
+                    base_price * (1 - 0.010),
+                    base_price * (1 - 0.015)
+                ]
+            else:
+                limits = [
+                    base_price * (1 + 0.005),
+                    base_price * (1 + 0.010),
+                    base_price * (1 + 0.015)
+                ]
+        
+        # Normalize prices to valid tick size
+        normalized_limits = [self.market_utils.normalize_price(price) for price in limits]
+        
+        return normalized_limits
+    
     def log_signal(self, signal: TradingSignal) -> None:
         """
         Log trading signal with comprehensive metadata.
@@ -634,6 +886,19 @@ class BaseStrategy(ABC):
             'parameters': self.parameters.copy()
         }
         
+        # Add FuzzyFajuto specific metrics if available
+        if hasattr(self, 'fuzzy_vectors') and not self.fuzzy_vectors.fuzzy_fajuto_score.empty:
+            fuzzy_scores = self.fuzzy_vectors.fuzzy_fajuto_score
+            performance['fuzzy_fajuto_metrics'] = {
+                'average_score': fuzzy_scores.mean(),
+                'max_score': fuzzy_scores.max(),
+                'min_score': fuzzy_scores.min(),
+                'std_score': fuzzy_scores.std(),
+                'buy_signals': (fuzzy_scores >= 1.50).sum(),
+                'sell_signals': (fuzzy_scores <= -1.50).sum(),
+                'neutral_periods': ((fuzzy_scores > -1.50) & (fuzzy_scores < 1.50)).sum()
+            }
+        
         return performance
     
     def reset_strategy(self) -> None:
@@ -643,6 +908,10 @@ class BaseStrategy(ABC):
         self.signals_history.clear()
         self.trades_history.clear()
         self.performance_metrics.clear()
+        
+        # Reset FuzzyFajuto vectors
+        self.fuzzy_vectors = FuzzyFajutoVectors()
+        
         logger.info(f"Strategy '{self.strategy_name}' state reset")
     
     def __str__(self) -> str:
