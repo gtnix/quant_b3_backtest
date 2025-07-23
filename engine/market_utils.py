@@ -129,7 +129,7 @@ class BrazilianMarketUtils:
         Returns:
             Tuple of (is_valid, lot_type, is_fractional)
             
-        Examples:
+        Examples:   
             >>> utils = BrazilianMarketUtils()
             >>> utils.validate_lot_size(100)
             (True, <LotType.ROUND_LOT: 'round_lot'>, False)

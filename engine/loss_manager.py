@@ -1,27 +1,29 @@
 """
-Enhanced Loss Carryforward Manager for Brazilian Individual Taxpayers
+Enhanced Loss Carryforward Manager for Brazilian Market Backtesting
 
-Advanced loss tracking with individual taxpayer compliance:
+Advanced loss tracking with comprehensive Brazilian tax compliance:
 - Per-modality FIFO loss tracking (SWING/DAY)
 - 100% loss offset capability (no 30% limit)
 - Monthly exemption handling for swing trades
-- Comprehensive audit trail for regulatory compliance
-- Performance optimization with memoization and lazy loading
-- Robust error handling and defensive programming
+- Comprehensive audit trail
+- Performance optimization
+- Robust error handling
 
 Author: Your Name
 Date: 2024
 """
 
-import logging
-from typing import Dict, Optional, List, Tuple, Any, Literal
-from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta, date
 from collections import defaultdict, deque
-import functools
+from typing import Dict, List, Tuple, Optional, Literal, Any
+from dataclasses import dataclass, field
+import logging
+import yaml
 import pytz
-import json
 
+# Configure logging
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +62,19 @@ class LossApplication:
     asset: str
     modality: str
     remaining_loss: float
+    application_reason: str = ""
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'original_loss_date': self.original_loss_date.isoformat(),
+            'applied_amount': self.applied_amount,
+            'application_date': self.application_date.isoformat(),
+            'asset': self.asset,
+            'modality': self.modality,
+            'remaining_loss': self.remaining_loss,
+            'application_reason': self.application_reason
+        }
 
 
 class EnhancedLossCarryforwardManager:
@@ -82,7 +97,7 @@ class EnhancedLossCarryforwardManager:
         Brazilian Individual Taxpayer Compliance (2025):
         - 100% loss offset against capital gains (no 30% limit)
         - Per-modality loss tracking (SWING/DAY)
-        - Monthly exemption for swing trades ≤ R$ 20,000
+        - Monthly exemption for swing trades ≤ R$ 20,000 (STOCK assets only)
         - Perpetual loss carryforward
         - IN RFB 1.585/2015 compliance
         
@@ -101,6 +116,7 @@ class EnhancedLossCarryforwardManager:
         
         # Monthly tracking for exemption and aggregation
         self.monthly_swing_sales: Dict[str, float] = defaultdict(float)  # {YYYY-MM: total_sales}
+        self.monthly_swing_sales_by_asset_type: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))  # {YYYY-MM: {asset_type: sales}}
         self.monthly_swing_profits: Dict[str, float] = defaultdict(float)  # {YYYY-MM: total_profits}
         self.monthly_day_profits: Dict[str, float] = defaultdict(float)  # {YYYY-MM: total_profits}
         
@@ -138,18 +154,7 @@ class EnhancedLossCarryforwardManager:
             return {}
     
     def _validate_inputs(self, ticker: str, trade_profit: float, trade_date: datetime, modality: str) -> None:
-        """
-        Validate input parameters with comprehensive error checking.
-        
-        Args:
-            ticker: Trading asset identifier
-            trade_profit: Net profit/loss from trade
-            trade_date: Date of trade
-            modality: Trade modality (SWING/DAY)
-            
-        Raises:
-            ValueError: If inputs are invalid
-        """
+        """Validate input parameters."""
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
         
@@ -161,14 +166,55 @@ class EnhancedLossCarryforwardManager:
         
         if modality not in ["SWING", "DAY"]:
             raise ValueError("Modality must be 'SWING' or 'DAY'")
-        
-        # Ensure timezone awareness
-        if trade_date.tzinfo is None:
-            trade_date = self.timezone.localize(trade_date)
     
     def _generate_loss_id(self, ticker: str, date: datetime, modality: str) -> str:
-        """Generate unique loss record ID."""
+        """Generate unique loss ID."""
         return f"{ticker}_{date.strftime('%Y%m%d_%H%M%S')}_{modality}"
+    
+    def is_exempt_eligible_asset_type(self, asset_type: str) -> bool:
+        """
+        Check if asset type is eligible for R$ 20,000 monthly exemption.
+        
+        Brazilian Tax Law: Only STOCK assets are eligible for the exemption.
+        ETFs, FIIs, BDRs, options, futures, and bonds are NOT eligible.
+        
+        Args:
+            asset_type: Asset type string
+            
+        Returns:
+            bool: True if eligible for exemption, False otherwise
+        """
+        return asset_type == "STOCK"
+    
+    def calculate_exemption_eligible_sales(self, month_ref: date) -> float:
+        """
+        Calculate total swing trade sales for exempt-eligible assets in a month.
+        
+        This method centralizes the exemption logic - only STOCK assets
+        are eligible for the R$ 20,000 monthly exemption.
+        
+        Args:
+            month_ref: Reference month
+            
+        Returns:
+            float: Total swing trade sales for exempt-eligible assets
+        """
+        return self.get_monthly_swing_sales_by_asset_type(month_ref, "STOCK")
+    
+    def is_exemption_applicable(self, month_ref: date) -> bool:
+        """
+        Check if R$ 20,000 exemption is applicable for the month.
+        
+        Brazilian Tax Law: Exemption applies when total STOCK sales ≤ R$ 20,000/month.
+        
+        Args:
+            month_ref: Reference month
+            
+        Returns:
+            bool: True if exemption applies, False otherwise
+        """
+        exempt_eligible_sales = self.calculate_exemption_eligible_sales(month_ref)
+        return exempt_eligible_sales <= self.swing_exemption_limit
     
     def record_trade_result(self, 
                            ticker: str, 
@@ -177,24 +223,23 @@ class EnhancedLossCarryforwardManager:
                            modality: Literal["SWING", "DAY"],
                            trade_id: Optional[str] = None,
                            description: str = "",
-                           gross_sales: float = 0.0) -> float:
+                           gross_sales: float = 0.0,
+                           asset_type: str = "STOCK") -> float:
         """
-        Record trade result and handle loss carryforward for individual taxpayers.
+        Record trade result for loss carryforward and monthly tracking.
         
         Args:
             ticker: Trading asset identifier
-            trade_profit: Net profit/loss from trade (negative = loss)
+            trade_profit: Net trade profit (can be negative for losses)
             trade_date: Date of trade
             modality: Trade modality (SWING/DAY)
-            trade_id: Optional trade identifier for audit trail
-            description: Optional description for the trade
-            gross_sales: Gross sales amount for monthly tracking (swing trades only)
+            trade_id: Optional trade identifier
+            description: Trade description
+            gross_sales: Gross sales amount (for swing trade exemption)
+            asset_type: Asset type for exemption filtering (STOCK, ETF, FII, etc.)
             
         Returns:
-            float: Taxable profit after applying loss carryforward
-            
-        Raises:
-            ValueError: If inputs are invalid
+            float: Taxable profit after loss offset (0.0 for losses)
         """
         try:
             self._validate_inputs(ticker, trade_profit, trade_date, modality)
@@ -205,6 +250,7 @@ class EnhancedLossCarryforwardManager:
             if modality == "SWING":
                 if gross_sales > 0:
                     self.monthly_swing_sales[month_key] += gross_sales
+                    self.monthly_swing_sales_by_asset_type[month_key][asset_type] += gross_sales
                 if trade_profit > 0:
                     self.monthly_swing_profits[month_key] += trade_profit
             else:  # DAY
@@ -282,9 +328,12 @@ class EnhancedLossCarryforwardManager:
         if gross_profit < 0:
             return 0.0, []
         
-        # Check swing trade exemption
-        if modality == "SWING" and gross_sales <= self.swing_exemption_limit:
-            logger.info(f"Swing trade exemption applied: sales R$ {gross_sales:,.2f} ≤ R$ {self.swing_exemption_limit:,.2f}")
+        # Check swing trade exemption - centralized logic
+        if modality == "SWING" and self.is_exemption_applicable(month_ref):
+            exempt_eligible_sales = self.calculate_exemption_eligible_sales(month_ref)
+            logger.info(f"Swing trade exemption applied: STOCK sales R$ {exempt_eligible_sales:,.2f} ≤ R$ {self.swing_exemption_limit:,.2f}")
+            # CRITICAL: Lucros isentos não consomem prejuízo (Brazilian tax law)
+            # If profit is exempt due to R$ 20,000 limit, no loss carryforward is applied
             return 0.0, []  # Tax exempt, no loss consumption
         
         # Apply loss carryforward using FIFO with month boundary checking
@@ -388,6 +437,23 @@ class EnhancedLossCarryforwardManager:
             'daily_asset_tracking_enabled': True,
             'total_daily_records': len(self.daily_asset_profits)
         }
+    
+    def get_monthly_swing_sales_by_asset_type(self, month_ref: date, asset_type: str = "STOCK") -> float:
+        """
+        Get total swing trade sales for a specific month and asset type.
+        
+        This method is used for exemption calculation - only STOCK assets
+        are eligible for the R$ 20,000 monthly exemption.
+        
+        Args:
+            month_ref: Reference month
+            asset_type: Asset type to filter by (default: STOCK)
+            
+        Returns:
+            float: Total swing trade sales for the month and asset type
+        """
+        month_key = month_ref.strftime('%Y-%m')
+        return self.monthly_swing_sales_by_asset_type.get(month_key, {}).get(asset_type, 0.0)
     
     def get_monthly_swing_sales(self, month_ref: date) -> float:
         """
@@ -517,7 +583,7 @@ class EnhancedLossCarryforwardManager:
         }
         
         with open(filepath, 'w') as f:
-            json.dump(audit_data, f, indent=2)
+            yaml.dump(audit_data, f, indent=2)
         
         logger.info(f"Audit trail exported to {filepath}")
     

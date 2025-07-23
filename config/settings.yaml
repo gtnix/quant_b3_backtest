@@ -5,6 +5,18 @@ market:
     close: "16:55"         # continuous session ends; closing auction 16:55-17:00
     timezone: "America/Sao_Paulo"
   
+  # After-hours trading session configuration
+  after_hours:
+    enabled: true          # Enable after-hours trading detection
+    start: "17:00"         # After-hours session start time
+    end: "18:25"           # After-hours session end time (varies by auction/season)
+    # Note: B3 after-hours varies by auction type and daylight saving time
+    # Typical range: 17:00-18:25, but can extend to 19:00+ for special auctions
+    # This configuration allows for flexible time windows
+    classification_override: "swing_trade"  # Force after-hours trades to be swing trades
+    # Brazilian tax law: After-hours trades are typically treated as swing trades
+    # regardless of same-day activity, unless explicitly marked as day trades
+  
   # Market parameters
   selic_rate: 0.15         # Current Brazilian SELIC rate (15.0% - 2025)
   trading_days_per_year: 252  # Brazilian market standard
@@ -29,23 +41,44 @@ market:
     min_brokerage: 0.0                 # no minimum charge
     iss_rate: 0.05                     # up to 5 % ISS on brokerage (currently 0 because brokerage = 0)
 
-# Tax Configuration - Brazilian PF Rules (July 2025)
+# Tax Configuration - Brazilian PF Rules (Versioned)
+tax_rules:
+  # Versioned tax rules with date ranges
+  - start: "2015-08-31"
+    end: "2025-12-31"
+    swing_rate: 0.15        # 15% on monthly net profit from common operations
+    daytrade_rate: 0.20     # 20% on monthly net profit from day trading
+    swing_exemption_brl: 20000   # R$ 20,000/month - sales ≤ this amount are tax exempt
+    dt_same_broker_required: false  # Day trade can be across different brokers
+    irrf_swing_rate: 0.00005 # 0.005% IRRF on gross sales (swing trade) - credit only
+    irrf_day_rate: 0.01      # 1% IRRF on net profit per operation (day trade) - credit only
+    person_type: "individual"         # individual = individual taxpayer, corporate = corporate taxpayer
+    max_loss_offset_percentage: 1.0  # 100% - individuals can offset up to 100% of profit
+    loss_carryforward_perpetual: true # Losses are carried forward indefinitely
+  
+  # Future rule change example (for testing)
+  - start: "2026-07-01"
+    end: "2099-12-31"
+    swing_rate: 0.15
+    daytrade_rate: 0.20
+    swing_exemption_brl: 25000   # Increased exemption to R$ 25,000
+    dt_same_broker_required: false
+    irrf_swing_rate: 0.00005
+    irrf_day_rate: 0.01
+    person_type: "individual"
+    max_loss_offset_percentage: 1.0
+    loss_carryforward_perpetual: true
+
+# Legacy tax configuration (for backward compatibility)
 taxes:
-  # Tax rates for individual taxpayers
-  swing_trade: 0.15        # 15% on monthly net profit from common operations
-  day_trade: 0.20          # 20% on monthly net profit from day trading
-  
-  # Exemption for individual taxpayers (swing trade only)
-  swing_exemption_limit: 20000   # R$ 20,000/month - sales ≤ this amount are tax exempt
-  
-  # IRRF (withholding tax) - Credit against final tax liability
-  irrf_swing_rate: 0.00005 # 0.005% IRRF on gross sales (swing trade) - credit only
-  irrf_day_rate: 0.01      # 1% IRRF on net profit per operation (day trade) - credit only
-  
-  # Individual taxpayer settings (no 30% limit)
-  person_type: "individual"         # individual = individual taxpayer, corporate = corporate taxpayer
-  max_loss_offset_percentage: 1.0  # 100% - individuals can offset up to 100% of profit
-  loss_carryforward_perpetual: true # Losses are carried forward indefinitely
+  swing_trade: 0.15
+  day_trade: 0.20
+  swing_exemption_limit: 20000
+  irrf_swing_rate: 0.00005
+  irrf_day_rate: 0.01
+  person_type: "individual"
+  max_loss_offset_percentage: 1.0
+  loss_carryforward_perpetual: true
 
 # Portfolio Settings
 portfolio:
