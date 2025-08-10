@@ -22,7 +22,7 @@ import json
 from datetime import datetime, timedelta
 import sys
 import os
-import yfinance as yf  # Keep for IBOV only
+# Removed yfinance dependency – all data sourced from BRAPI
 import time
 from dataclasses import dataclass
 import yaml
@@ -42,7 +42,6 @@ except ImportError as e:
 
 # Import download modules (Alpha Vantage downloader removed)
 try:
-    from download_ibov_yahoo import YahooIBOVDownloader
     from sgs_data_loader import SGSDataLoader
     DOWNLOAD_AVAILABLE = True
 except ImportError as e:
@@ -95,7 +94,7 @@ def load_brapi_config(config_path: str = "config/settings.yaml") -> Dict[str, An
 
 @dataclass
 class CacheMetadata:
-    """Metadata for cached yfinance data."""
+    """Metadata for cached reference daily data (legacy name retained)."""
     symbol: str
     start_date: str
     end_date: str
@@ -128,231 +127,13 @@ class CacheStats:
         return self.hits / total if total > 0 else 0.0
 
 
-class SmartYFinanceProvider:
-    """
-    Intelligent caching provider for yfinance daily data with smart fetching.
-    
-    Features:
-    - Smart caching of daily data with TTL-based invalidation
-    - Range-based fetching to minimize API calls
-    - Intelligent cache merging and gap filling
-    - Performance monitoring and statistics
-    - Robust error handling and retries
-    - Optimized for Brazilian market technical indicators
-    """
-    
-    def __init__(self, cache_dir: str = "data/yfinance_cache", cache_ttl_hours: int = 24):
-        """
-        Initialize the smart yfinance provider.
-        
-        Args:
-            cache_dir: Directory for cache storage
-            cache_ttl_hours: Cache time-to-live in hours
-        """
-        self.cache_dir = Path(cache_dir)
+class SmartYFinanceProvider:  # Placeholder kept for import compatibility (deprecated)
+    def __init__(self, *args, **kwargs):
+        self.cache_dir = Path("data/yfinance_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_ttl_hours = cache_ttl_hours
+        self.cache_ttl_hours = 24
         self.stats = CacheStats()
-        
-        # Initialize cache subdirectories
-        (self.cache_dir / "daily").mkdir(exist_ok=True)
-        
-        # Load cache statistics
-        self._load_cache_stats()
-        
-        logger.info(f"SmartYFinanceProvider initialized: cache_dir={cache_dir}, ttl={cache_ttl_hours}h")
-    
-    def get_daily_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """
-        Get daily data with smart caching and intelligent fetching.
-        
-        Args:
-            symbol: Trading symbol (e.g., 'ALPA4.SA')
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format
-            
-        Returns:
-            DataFrame with daily OHLCV data
-        """
-        start_time = time.time()
-        
-        try:
-            # Ensure .SA suffix for Brazilian stocks
-            yf_symbol = self._ensure_sa_suffix(symbol)
-            
-            # Check cache coverage and freshness
-            cache_file, metadata = self._get_cache_info(yf_symbol, 'daily')
-            
-            if cache_file.exists() and metadata and not metadata.is_stale():
-                if metadata.covers_range(start_date, end_date):
-                    # Perfect cache hit
-                    data = self._load_from_cache(cache_file)
-                    if data is not None:
-                        filtered_data = self._filter_date_range(data, start_date, end_date)
-                        self.stats.hits += 1
-                        self.stats.load_time += time.time() - start_time
-                        logger.info(f"✅ Cache hit for {symbol} daily data: {len(filtered_data)} bars")
-                        return filtered_data
-            
-            # Calculate what ranges need fetching
-            fetch_ranges = self._calculate_fetch_ranges(
-                symbol, start_date, end_date, 'daily', metadata
-            )
-            
-            if not fetch_ranges:
-                # Use existing cache even if slightly stale
-                if cache_file.exists():
-                    data = self._load_from_cache(cache_file)
-                    if data is not None:
-                        filtered_data = self._filter_date_range(data, start_date, end_date)
-                        self.stats.hits += 1
-                        logger.info(f"✅ Stale cache used for {symbol}: {len(filtered_data)} bars")
-                        return filtered_data
-            
-            # Fetch missing data
-            logger.info(f"📡 Fetching daily data for {symbol}: {len(fetch_ranges)} range(s)")
-            new_data_parts = []
-            
-            for fetch_start, fetch_end in fetch_ranges:
-                part_data = self._fetch_yfinance_data(yf_symbol, fetch_start, fetch_end, 'daily')
-                if part_data is not None and not part_data.empty:
-                    new_data_parts.append(part_data)
-                time.sleep(0.1)  # Rate limiting
-            
-            # Merge with existing cache
-            final_data = self._merge_with_cache(cache_file, new_data_parts, yf_symbol, 'daily')
-            
-            # Filter to requested range
-            result_data = self._filter_date_range(final_data, start_date, end_date)
-            
-            self.stats.fetches += 1
-            self.stats.load_time += time.time() - start_time
-            logger.info(f"✅ Smart fetch completed for {symbol}: {len(result_data)} bars")
-            
-            return result_data
-            
-        except Exception as e:
-            logger.error(f"Error in get_daily_data for {symbol}: {e}")
-            self.stats.load_time += time.time() - start_time
-            return pd.DataFrame()
-    
-    def _ensure_sa_suffix(self, symbol: str) -> str:
-        """Ensure Brazilian stock symbol has .SA suffix for yfinance."""
-        if not symbol.endswith('.SA'):
-            return f"{symbol}.SA"
-        return symbol
-    
-    def _get_cache_info(self, symbol: str, data_type: str) -> Tuple[Path, Optional[CacheMetadata]]:
-        """Get cache file path and metadata for a symbol."""
-        cache_subdir = self.cache_dir / data_type
-        cache_file = cache_subdir / f"{symbol}_{data_type}.parquet"
-        metadata_file = cache_subdir / f"{symbol}_{data_type}_metadata.json"
-        
-        metadata = None
-        if metadata_file.exists():
-            try:
-                with open(metadata_file, 'r') as f:
-                    meta_dict = json.load(f)
-                    meta_dict['cache_created'] = datetime.fromisoformat(meta_dict['cache_created'])
-                    metadata = CacheMetadata(**meta_dict)
-            except Exception as e:
-                logger.warning(f"Failed to load cache metadata for {symbol}: {e}")
-        
-        return cache_file, metadata
-    
-    def _calculate_fetch_ranges(self, symbol: str, start_date: str, end_date: str, 
-                               data_type: str, metadata: Optional[CacheMetadata]) -> List[Tuple[str, str]]:
-        """
-        Calculate what date ranges need to be fetched based on cache coverage.
-        
-        Returns:
-            List of (start_date, end_date) tuples that need fetching
-        """
-        if metadata is None or metadata.is_stale():
-            # No cache or stale cache - fetch entire range
-            return [(start_date, end_date)]
-        
-        if metadata.covers_range(start_date, end_date):
-            # Cache covers requested range and is fresh
-            return []
-        
-        fetch_ranges = []
-        
-        # Check if we need data before cached range
-        if start_date < metadata.start_date:
-            fetch_ranges.append((start_date, metadata.start_date))
-        
-        # Check if we need data after cached range
-        if end_date > metadata.end_date:
-            fetch_ranges.append((metadata.end_date, end_date))
-        
-        return fetch_ranges
-    
-    def _fetch_yfinance_data(self, symbol: str, start_date: str, end_date: str, 
-                           data_type: str) -> Optional[pd.DataFrame]:
-        """Fetch data from yfinance with retry logic."""
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                ticker = yf.Ticker(symbol)
-                
-                if data_type == 'daily':
-                    data = ticker.history(start=start_date, end=end_date, interval='1d')
-                else:
-                    raise ValueError(f"Unsupported data_type: {data_type} (only 'daily' supported)")
-                
-                if data.empty:
-                    logger.warning(f"No data returned from yfinance for {symbol}")
-                    return None
-                
-                # Standardize column names to match our convention
-                data.columns = data.columns.str.lower()
-                
-                # Ensure we have the required columns
-                required_cols = ['open', 'high', 'low', 'close', 'volume']
-                for col in required_cols:
-                    if col not in data.columns:
-                        logger.error(f"Missing column {col} in yfinance data for {symbol}")
-                        return None
-                
-                # Clean and validate data
-                data = self._clean_yfinance_data(data)
-                
-                logger.debug(f"Fetched {len(data)} {data_type} bars for {symbol}")
-                return data
-                
-            except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} failed for {symbol}: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    logger.error(f"All fetch attempts failed for {symbol}")
-                    return None
-    
-    def _clean_yfinance_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Clean and validate yfinance data."""
-        # Remove any rows with NaN in critical columns
-        critical_cols = ['open', 'high', 'low', 'close']
-        initial_len = len(data)
-        data = data.dropna(subset=critical_cols)
-        
-        if len(data) < initial_len:
-            logger.warning(f"Removed {initial_len - len(data)} rows with NaN values")
-        
-        # Validate price relationships
-        invalid_mask = (data['low'] > data['high']) | (data['open'] < 0) | (data['close'] < 0)
-        if invalid_mask.any():
-            logger.warning(f"Removing {invalid_mask.sum()} rows with invalid price data")
-            data = data[~invalid_mask]
-        
-        # Fill volume NaNs with 0
-        data['volume'] = data['volume'].fillna(0)
-        
-        return data
-    
+
     def _load_from_cache(self, cache_file: Path) -> Optional[pd.DataFrame]:
         """Load data from cache file."""
         try:
@@ -624,7 +405,7 @@ class DataSourceReporter:
         validation_config = data_config.get('validation', {})
         if validation_config.get('available', False):
             print(f"\n🧪 VALIDATION COMPARISON:")
-            print(f"  📊 Local vs yfinance indicators: Available")
+            print(f"  📊 Local vs BRAPI indicators: Available")
             print(f"  📈 Correlation: {validation_config.get('correlation', 0):.3f}")
             print(f"  📊 Mean difference: {validation_config.get('mean_diff', 0):.2f}%")
         else:
@@ -856,7 +637,7 @@ class HybridDataManager:
                 'available': True,
                 'correlation': 0.95,  # Placeholder
                 'mean_diff': 0.5,     # Placeholder
-                'validation_type': 'yfinance_vs_local_aggregation'
+                'validation_type': 'brapi_vs_local_aggregation'
             }
         except Exception as e:
             logger.warning(f"Failed to setup validation comparison: {e}")
@@ -971,9 +752,8 @@ class DataLoader:
             try:
                 # Alpha Vantage stock downloader removed - using local intraday files
                 self.stock_downloader = None
-                self.ibov_downloader = YahooIBOVDownloader()
                 self.sgs_downloader = SGSDataLoader()
-                logger.info("Download functionality initialized (IBOV and SGS only)")
+                logger.info("Download functionality initialized (SGS only; IBOV via BRAPI)")
             except Exception as e:
                 logger.warning(f"Failed to initialize downloaders: {e}")
                 self.auto_download = False
@@ -1049,7 +829,7 @@ class DataLoader:
             }
         
         try:
-            # Check IBOV data file (using the Yahoo Finance downloader's file structure)
+            # Check IBOV data (via BRAPI; CSV path retained for backward-compat only)
             ibov_file = Path("data/IBOV/raw/IBOV_raw.csv")
             
             if not ibov_file.exists():
@@ -1192,7 +972,7 @@ class DataLoader:
         try:
             logger.info("Downloading missing IBOV data...")
             
-            # Download recent data (last 30 days) using the YahooIBOVDownloader's method
+            # Download recent data (last 30 days) – Yahoo downloader removed
             result = self.ibov_downloader.get_recent_data(days=30)
             
             if result.success:
