@@ -388,8 +388,8 @@ class FuzzyFajutoStrategy(BaseStrategy):
         self.daily_exposure = 0.0
         
         # Performance metrics - All attempts are now daily (once per trading day)
-        self.daily_execution_counts = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0}
-        self.daily_fill_rates = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0}
+        self.daily_execution_counts = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0, 'limit_gamma': 0}
+        self.daily_fill_rates = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0, 'limit_gamma': 0}
         
         # Legacy tracking (for backward compatibility)
         self.fill_rates = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0}
@@ -1349,7 +1349,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 lots = 1
             return lots * self.min_lot_size
     
-    def _calculate_order_quantities(self, symbol: str, bar: Bar) -> Tuple[int, int, int]:
+    def _calculate_order_quantities(self, symbol: str, bar: Bar) -> Tuple[int, int, int, int]:
         """
         Calculate quantities for the three execution attempts with robust validation.
         
@@ -1358,33 +1358,33 @@ class FuzzyFajutoStrategy(BaseStrategy):
             bar: Current market data bar
             
         Returns:
-            Tuple of (qty1, qty2, qty3) for market, limit_alpha, limit_beta orders
+            Tuple of (qty1, qty2, qty3, qty4) for market, limit_alpha, limit_beta, limit_gamma orders
         """
         # Validate bar data first
         if pd.isna(bar.open) or bar.open <= 0:
             self.context.logger.warning(f"Invalid bar data for {symbol}: open={bar.open}")
-            return 0, 0, 0
+            return 0, 0, 0, 0
         
         # Get portfolio value
         portfolio_value = self.context.portfolio.get_portfolio_value()
         if portfolio_value <= 0:
             self.context.logger.warning(f"Invalid portfolio value for {symbol}: {portfolio_value}")
-            return 0, 0, 0
+            return 0, 0, 0, 0
         
         # Calculate total exposure for this asset
         total_exposure = portfolio_value * self.asset_exposure_pct
         if total_exposure <= 0:
             self.context.logger.warning(f"Invalid total exposure for {symbol}: {total_exposure}")
-            return 0, 0, 0
+            return 0, 0, 0, 0
         
-        # Split exposure equally among three attempts
-        exposure_per_attempt = total_exposure / 3
+        # Per-order notional fixed at 15k BRL across 4 attempts (cap by asset exposure)
+        exposure_per_attempt = min(15000.0, total_exposure / 4.0)
         
         # Get ATR and validate
         atr = self._get_daily_atr(symbol)
         if pd.isna(atr) or atr <= 0:
             self.context.logger.warning(f"Invalid ATR for {symbol}: {atr}, skipping trade")
-            return 0, 0, 0
+            return 0, 0, 0, 0
         
         # Market order quantity (at open price)
         qty1_raw = exposure_per_attempt / bar.open
@@ -1417,27 +1417,36 @@ class FuzzyFajutoStrategy(BaseStrategy):
             limit_price_alpha = bar.open + alpha_offset
             limit_price_beta = bar.open + beta_offset
         
+        # Third limit (gamma) further from beta
+        gamma_dist = max(self.beta_factor * 1.5 * atr, self.min_beta_pct * 1.5 * bar.open)
+        if side_for_sizing == OrderSide.BUY:
+            limit_price_gamma = max(bar.open - gamma_dist, 0.01)
+        else:
+            limit_price_gamma = bar.open + gamma_dist
+
         qty2_raw = exposure_per_attempt / limit_price_alpha
         qty3_raw = exposure_per_attempt / limit_price_beta
+        qty4_raw = exposure_per_attempt / limit_price_gamma
         
         # Validate quantities before conversion
         if pd.isna(qty2_raw) or pd.isna(qty3_raw):
             self.context.logger.warning(f"Invalid quantity calculation for {symbol}: qty2_raw={qty2_raw}, qty3_raw={qty3_raw}")
-            return 0, 0, 0
+            return 0, 0, 0, 0
         
-        if qty2_raw <= 0 or qty3_raw <= 0:
-            self.context.logger.warning(f"Non-positive quantities for {symbol}: qty2_raw={qty2_raw}, qty3_raw={qty3_raw}")
-            return 0, 0, 0
+        if qty2_raw <= 0 or qty3_raw <= 0 or pd.isna(qty4_raw) or qty4_raw <= 0:
+            self.context.logger.warning(f"Non-positive quantities for {symbol}: qty2_raw={qty2_raw}, qty3_raw={qty3_raw}, qty4_raw={qty4_raw}")
+            return 0, 0, 0, 0
         
         # Apply conservative rounding for limit orders
         qty2 = self._round_to_lot_size(qty2_raw)
         qty3 = self._round_to_lot_size(qty3_raw)
+        qty4 = self._round_to_lot_size(qty4_raw)
             
         # Log calculation details for debugging
         self.context.logger.debug(f"Quantity calculation for {symbol}: exposure_per_attempt={exposure_per_attempt:.2f}, open={bar.open:.2f}")
-        self.context.logger.debug(f"Raw quantities: qty1_raw={qty1_raw:.2f}, qty2_raw={qty2_raw:.2f}, qty3_raw={qty3_raw:.2f}")
+        self.context.logger.debug(f"Raw quantities: qty1_raw={qty1_raw:.2f}, qty2_raw={qty2_raw:.2f}, qty3_raw={qty3_raw:.2f}, qty4_raw={qty4_raw:.2f}")
         self.context.logger.debug(f"Conservative rounding: threshold={self.min_lot_size * self.min_exposure_threshold:.0f} shares")
-        self.context.logger.debug(f"Final quantities: qty1={qty1}, qty2={qty2}, qty3={qty3}")
+        self.context.logger.debug(f"Final quantities: qty1={qty1}, qty2={qty2}, qty3={qty3}, qty4={qty4}")
         
         # Emit lightweight sizing event and append fuzzy row (no rule changes)
         try:
@@ -1454,14 +1463,17 @@ class FuzzyFajutoStrategy(BaseStrategy):
                     'pre_round_qty_P1': float(exposure_per_attempt / max(bar.open, 1e-9)),
                     'pre_round_qty_P2': float(qty2_raw),
                     'pre_round_qty_P3': float(qty3_raw),
+                    'pre_round_qty_P4': float(qty4_raw),
                     'price_P1': float(bar.open),
                     'price_P2': float(limit_price_alpha),
                     'price_P3': float(limit_price_beta),
+                    'price_P4': float(limit_price_gamma),
                     'post_round_qty_P1': int(qty1),
                     'post_round_qty_P2': int(qty2),
                     'post_round_qty_P3': int(qty3),
-                    'dropped': bool(qty1==0 and qty2==0 and qty3==0),
-                    'reason_if_dropped': '<1 lot after rounding' if (qty1==0 and qty2==0 and qty3==0) else None
+                    'post_round_qty_P4': int(qty4),
+                    'dropped': bool(qty1==0 and qty2==0 and qty3==0 and qty4==0),
+                    'reason_if_dropped': '<1 lot after rounding' if (qty1==0 and qty2==0 and qty3==0 and qty4==0) else None
                 })
         except Exception:
             pass
@@ -1472,17 +1484,18 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 'symbol': symbol,
                 'side': getattr(self, 'current_signal_side', OrderSide.SELL).name if hasattr(self, 'current_signal_side') else 'SELL',
                 'fuzzy_score': float(abs(getattr(self, '_last_signal_strength', 0.0))),
-                'eligible': bool(qty1>0 or qty2>0 or qty3>0),
-                'reason_if_not': None if (qty1>0 or qty2>0 or qty3>0) else 'below_min_lot',
+                'eligible': bool(qty1>0 or qty2>0 or qty3>0 or qty4>0),
+                'reason_if_not': None if (qty1>0 or qty2>0 or qty3>0 or qty4>0) else 'below_min_lot',
                 'exposure_cap_brl': float(self.context.portfolio.get_portfolio_value() * self.asset_exposure_pct),
                 'notional_P1': float(bar.open * qty1),
                 'notional_P2': float(limit_price_alpha * qty2),
                 'notional_P3': float(limit_price_beta * qty3),
+                'notional_P4': float(limit_price_gamma * qty4),
             })
         except Exception:
             pass
 
-        return qty1, qty2, qty3
+        return qty1, qty2, qty3, qty4
     
     def _is_market_order_executed_today(self, trading_date: date) -> bool:
         """Check if market order has been executed today."""
@@ -1769,10 +1782,17 @@ class FuzzyFajutoStrategy(BaseStrategy):
             alpha_price = open_price + alpha_offset
             beta_price = open_price + beta_offset
         
+        # Derive gamma price further than beta (1.5x beta offset from open)
+        if side == OrderSide.BUY:
+            gamma_price = max(open_price - (beta_offset * 1.5), 0.01)
+        else:
+            gamma_price = open_price + (beta_offset * 1.5)
+
         self.daily_order_prices[symbol][trading_date] = {
             'market_price': open_price,
             'alpha_price': alpha_price,
             'beta_price': beta_price,
+            'gamma_price': gamma_price,
             'atr_value': atr,
             'side': side
         }
@@ -1809,10 +1829,12 @@ class FuzzyFajutoStrategy(BaseStrategy):
             return price_data['alpha_price']
         elif attempt_type == 'limit_beta':
             return price_data['beta_price']
+        elif attempt_type == 'limit_gamma':
+            return price_data['gamma_price']
         
         return None
 
-    def _store_daily_order_quantities(self, symbol: str, trading_date: date, qty_market: int, qty_alpha: int, qty_beta: int) -> None:
+    def _store_daily_order_quantities(self, symbol: str, trading_date: date, qty_market: int, qty_alpha: int, qty_beta: int, qty_gamma: int) -> None:
         """
         Store immutable order quantities for the day. Quantities are calculated once at
         the start of the trading day and must not change intraday.
@@ -1834,6 +1856,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
         self.daily_order_prices[symbol][trading_date]['market_qty'] = int(qty_market)
         self.daily_order_prices[symbol][trading_date]['alpha_qty'] = int(qty_alpha)
         self.daily_order_prices[symbol][trading_date]['beta_qty'] = int(qty_beta)
+        self.daily_order_prices[symbol][trading_date]['gamma_qty'] = int(qty_gamma)
 
     def _get_stored_order_quantity(self, symbol: str, trading_date: date, attempt_type: str) -> Optional[int]:
         """
@@ -1861,6 +1884,8 @@ class FuzzyFajutoStrategy(BaseStrategy):
             return price_data.get('alpha_qty')
         elif attempt_type == 'limit_beta':
             return price_data.get('beta_qty')
+        elif attempt_type == 'limit_gamma':
+            return price_data.get('gamma_qty')
 
         return None
     
@@ -1880,7 +1905,8 @@ class FuzzyFajutoStrategy(BaseStrategy):
             self.daily_orders_emitted[symbol][trading_date] = {
                 'market': False,
                 'limit_alpha': False,
-                'limit_beta': False
+                'limit_beta': False,
+                'limit_gamma': False
             }
         
         for order_type in emitted_types:
@@ -1916,7 +1942,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
         
         Args:
             order_type: Order type ('MARKET' or 'LIMIT')
-            attempt_type: Attempt type ('market', 'limit_alpha', 'limit_beta')
+            attempt_type: Attempt type ('market', 'limit_alpha', 'limit_beta', 'limit_gamma')
             symbol: Trading symbol
             trading_date: Trading date
             bar: Current market data bar
@@ -2027,24 +2053,24 @@ class FuzzyFajutoStrategy(BaseStrategy):
         self.context.logger.info(f"🎯 Trading signal: {side.value} for {bar.symbol} (signal={signal:.2f})")
         
         # Rule 3: Calculate order quantities
-        qty1, qty2, qty3 = self._calculate_order_quantities(bar.symbol, bar)
-        if qty1 == 0 and qty2 == 0 and qty3 == 0:
+        qty1, qty2, qty3, qty4 = self._calculate_order_quantities(bar.symbol, bar)
+        if qty1 == 0 and qty2 == 0 and qty3 == 0 and qty4 == 0:
             self.context.logger.warning(f"All quantities are zero for {bar.symbol}, skipping trade")
             return []
         
         # Rule 4: Store immutable order prices and quantities (calculated once per day)
         self._store_daily_order_prices(bar.symbol, current_date, bar.open, atr, side)
-        self._store_daily_order_quantities(bar.symbol, current_date, qty1, qty2, qty3)
+        self._store_daily_order_quantities(bar.symbol, current_date, qty1, qty2, qty3, qty4)
         
         # Rule 5: Emit orders only on first bar if we have a signal
         if is_first_bar:
-            return self._emit_daily_orders(bar, current_date, side, qty1, qty2, qty3, atr, signal)
+            return self._emit_daily_orders(bar, current_date, side, qty1, qty2, qty3, qty4, atr, signal)
         else:
             # Not first bar, but still process any pending limit orders
             return self._process_existing_orders(bar, current_date)
     
     def _emit_daily_orders(self, bar: Bar, trading_date: date, side: OrderSide, 
-                          qty1: int, qty2: int, qty3: int, atr: float, signal: float) -> Iterable[OrderIntent]:
+                         qty1: int, qty2: int, qty3: int, qty4: int, atr: float, signal: float) -> Iterable[OrderIntent]:
         """
         Emit the three daily orders (market + 2 limit) on first bar of day.
         Orders are emitted with immutable prices and tracked to prevent re-emission.
@@ -2062,7 +2088,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 'side': side,
                 'fuzzy': float(abs(signal)),
                 'prices': {'market': market_price, 'limit_alpha': alpha_price, 'limit_beta': beta_price},
-                'qty': {'market': int(qty1), 'limit_alpha': int(qty2), 'limit_beta': int(qty3)},
+            'qty': {'market': int(qty1), 'limit_alpha': int(qty2), 'limit_beta': int(qty3), 'limit_gamma': int(qty4)},
                 'lot_size': int(self.min_lot_size),
                 'bar': bar,
                 'atr': float(atr),
@@ -2219,6 +2245,38 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 yield intent
             else:
                 self.context.logger.info(f"📋 Limit beta order emitted (not filled): {side.value} {qty3} {bar.symbol} @ {beta_price:.2f}")
+
+        # 4) Limit gamma attempt
+        if qty4 > 0:
+            gamma_price = self._get_stored_order_price(bar.symbol, trading_date, 'limit_gamma')
+            if gamma_price is None:
+                # derive from daily_order_prices distances
+                price_data = self.daily_order_prices.get(bar.symbol, {}).get(trading_date, {})
+                if price_data:
+                    # Approximate gamma further from beta by same ratio used in sizing
+                    beta_price = price_data.get('beta_price', bar.open)
+                    side_mult = 1 if side == OrderSide.SELL else -1
+                    gamma_price = max(0.01, beta_price + side_mult * abs(beta_price - price_data.get('alpha_price', bar.open)) * 0.5)
+                else:
+                    gamma_price = bar.open
+            attempt = {
+                'order_type': OrderType.LIMIT,
+                'quantity': qty4,
+                'price': gamma_price,
+                'execution_price': gamma_price,
+                'attempt_name': 'Limit Order Passive-3',
+                'attempt_type': 'limit_gamma'
+            }
+            filled = self._simulate_fill_with_stored_prices(OrderType.LIMIT, 'limit_gamma', bar.symbol, trading_date, bar)
+            self._track_daily_execution(bar.symbol, attempt, filled, bar, side)
+            if filled:
+                yield OrderIntent(
+                    symbol=bar.symbol, side=side, quantity=qty4, order_type=OrderType.LIMIT, price=gamma_price, timestamp=bar.timestamp,
+                    metadata={'attempt_number': 4,'attempt_name': 'Limit Order Passive-3','attempt_type': 'limit_gamma','atr_value': atr,'execution_price': gamma_price,'signal': signal,'emission_type': 'first_bar_neutralized'}
+                )
+                self.context.logger.info(f"✅ Limit gamma order filled: {side.value} {qty4} {bar.symbol} @ {gamma_price:.2f}")
+            else:
+                self.context.logger.info(f"📋 Limit gamma order emitted (not filled): {side.value} {qty4} {bar.symbol} @ {gamma_price:.2f}")
         
         # Mark orders as emitted to prevent re-emission
         self._mark_orders_emitted(bar.symbol, trading_date, orders_emitted)

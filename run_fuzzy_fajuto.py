@@ -936,6 +936,31 @@ def main():
                             }
                         }
                         REPORT_JSON = _json.dumps(report_payload, ensure_ascii=False)
+                        # Server-side render of fuzzy table for graceful no-JS viewing
+                        def _fmt_brl(x):
+                            try:
+                                return f"{float(x):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            except Exception:
+                                return ''
+                        fuzzy_rows_sorted = sorted(fuzzy_rows, key=lambda r: (str(r.get('date','')), str(r.get('symbol',''))))
+                        fuzzy_table_html = "\n".join(
+                            [
+                                f"<tr align='right'>"
+                                f"<td>{_html_escape(str(r.get('date','')))}</td>"
+                                f"<td>{_html_escape(str(r.get('symbol','')))}</td>"
+                                f"<td>{_html_escape(str(r.get('side','')))}</td>"
+                                f"<td>{(float(r.get('fuzzy_score',0.0))):.4f}</td>"
+                                f"<td>{'Yes' if r.get('eligible') else 'No'}</td>"
+                                f"<td>{_html_escape(str(r.get('reason_if_not','') or ''))}</td>"
+                                f"<td>{_fmt_brl(r.get('exposure_cap_brl',0.0))}</td>"
+                                f"<td>{_fmt_brl(r.get('notional_P1',0.0))}</td>"
+                                f"<td>{_fmt_brl(r.get('notional_P2',0.0))}</td>"
+                                f"<td>{_fmt_brl(r.get('notional_P3',0.0))}</td>"
+                                f"<td>{_fmt_brl(r.get('notional_P4',0.0))}</td>"
+                                f"</tr>"
+                                for r in fuzzy_rows_sorted
+                            ]
+                        )
                         # Build HTML
                         rows_daily = []
                         for _, r in grouped.iterrows():
@@ -1020,6 +1045,9 @@ def main():
     .btn {{ padding:6px 10px; background:var(--accent); color:#fff; border:none; border-radius:4px; cursor:pointer; }}
     .btn.secondary {{ background:#6c757d; }}
     .muted {{ color:var(--muted); font-size:10pt; }}
+    tbody.zebra tr:nth-child(odd) {{ background-color:#f9fbfd; }}
+    [data-theme="dark"] tbody.zebra tr:nth-child(odd) {{ background-color:#0f141a; }}
+    thead.sticky th {{ position:sticky; top:0; z-index:2; }}
   </style>
   <meta name='generator' content='quant_b3_backtest'>
   <meta name='report-class' content='A'>
@@ -1106,10 +1134,14 @@ def main():
     <br>
     <div class='section-title'>Fuzzy por Data e Ativo</div>
     <table cellspacing='1' cellpadding='3' border='0'>
-      <tr align='center'>
-        <th>Data</th><th>Ativo</th><th>Lado</th><th>Fuzzy</th><th>Elegível</th><th>Motivo (se não)</th><th>Capex (BRL)</th><th>P1</th><th>P2</th><th>P3</th>
-      </tr>
-      %%FUZZY_TABLE%%
+      <thead class='sticky'>
+        <tr align='center'>
+          <th>Data</th><th>Ativo</th><th>Lado</th><th>Fuzzy</th><th>Elegível</th><th>Motivo (se não)</th><th>Capex (BRL)</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th>
+        </tr>
+      </thead>
+      <tbody id='fuzzyTableBody' class='zebra'>
+        %%FUZZY_TABLE%%
+      </tbody>
     </table>
   </div>
   <script>
@@ -1178,13 +1210,9 @@ def main():
 
       // Render fuzzy table (no filters except date/symbol/side)
       const fz = (REPORT_DATA.fuzzyByDate||[]).filter(r=> fitDate(r.date) && fitSymbol(r.symbol) && fitSide(r.side));
-      const fzRows = fz.map(r=>`<tr align='right'><td>${r.date||''}</td><td>${r.symbol||''}</td><td>${r.side||''}</td><td>${(r.fuzzy_score??'').toFixed ? r.fuzzy_score.toFixed(4) : (r.fuzzy_score||'')}</td><td>${r.eligible? 'Yes':'No'}</td><td>${r.reason_if_not||''}</td><td>${brl(r.exposure_cap_brl||0)}</td><td>${brl(r.notional_P1||0)}</td><td>${brl(r.notional_P2||0)}</td><td>${brl(r.notional_P3||0)}</td></tr>`).join('\n');
-      const tbl = document.querySelectorAll('table')[2];
-      if (tbl) {{
-        // Replace placeholder rows
-        const html = tbl.innerHTML;
-        tbl.innerHTML = html.replace('%%FUZZY_TABLE%%', fzRows || '');
-      }}
+      const fzRows = fz.map(r=>`<tr align='right'><td>${r.date||''}</td><td>${r.symbol||''}</td><td>${r.side||''}</td><td>${(r.fuzzy_score??'').toFixed ? Number(r.fuzzy_score).toFixed(4) : (r.fuzzy_score||'')}</td><td>${r.eligible? 'Yes':'No'}</td><td>${r.reason_if_not||''}</td><td>${brl(r.exposure_cap_brl||0)}</td><td>${brl(r.notional_P1||0)}</td><td>${brl(r.notional_P2||0)}</td><td>${brl(r.notional_P3||0)}</td><td>${brl(r.notional_P4||0)}</td></tr>`).join('\n');
+      const body = document.getElementById('fuzzyTableBody');
+      if (body) body.innerHTML = fzRows || '';
     }}
     document.addEventListener('DOMContentLoaded', ()=>{ initControls(); applyFilters(); });
   </script>
@@ -1199,6 +1227,7 @@ def main():
                             .replace('%%TOTAL_PNL%%', fmt_money(total_pnl))
                             .replace('%%DAILY_TABLE%%', daily_table)
                             .replace('%%ORDERS_TABLE%%', orders_table)
+                            .replace('%%FUZZY_TABLE%%', fuzzy_table_html)
                             .replace('%%REPORT_JSON%%', REPORT_JSON)
                         )
                         t0_report = time.perf_counter()
