@@ -1330,7 +1330,8 @@ class BenchmarkAnalyzer:
             # Fetch daily IBOV via BRAPI
             s = start_date.strftime('%Y-%m-%d') if start_date else (datetime.now() - timedelta(days=1825)).strftime('%Y-%m-%d')
             e = end_date.strftime('%Y-%m-%d') if end_date else datetime.now().strftime('%Y-%m-%d')
-            df = brapi.get_daily_data('IBOV', s, e)
+            # Use BRAPI Yahoo symbol for Bovespa index
+            df = brapi.get_daily_data('^BVSP', s, e)
             if df is not None and not df.empty and 'close' in df.columns:
                 if df.index.tz is not None:
                     df.index = df.index.tz_localize(None)
