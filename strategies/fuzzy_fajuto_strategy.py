@@ -2308,87 +2308,128 @@ class FuzzyFajutoStrategy(BaseStrategy):
     
     def _generate_signal(self, bar: Bar) -> int:
         """
-        Generate trading signal based on technical analysis.
-        
-        This is a simplified signal generation using daily aggregated data.
-        Maintains the original approach but uses daily indicators instead of intraday.
-        
-        Args:
-            bar: Current market data bar
-            
-        Returns:
-            1 for buy signal, -1 for sell signal, 0 for no signal
+        FuzzyFajuto signal per business rules (daily):
+        - +1 / -1: today's stock return vs IBOV (^BVSP) return
+        - For each EMA(3,5,10,15,20): +0.25 if close > EMA, -0.25 if close < EMA
+        - RSI: +0.25 if RSI > 65, -0.25 if RSI < 35
+        Thresholds: buy if fuzzy >= 1.50, sell if fuzzy <= -1.50
+        Portfolio/position sizing logic remains unchanged.
         """
-        # Check if we have daily indicators available
-        if bar.symbol not in self.daily_indicators_data:
-            self.context.logger.debug(f"No daily indicators for {bar.symbol} in signal generation")
+        symbol = bar.symbol
+        current_date = bar.timestamp.date()
+        buy_threshold = self.buy_threshold
+        sell_threshold = self.sell_threshold
+
+        # Ensure indicators exist
+        if symbol not in self.daily_indicators_data:
+            self.context.logger.debug(f"No daily indicators for {symbol} in signal generation")
             return 0
-        
-        indicators = self.daily_indicators_data[bar.symbol]
-        
-        # Check if we have sufficient indicator data for simple momentum
-        if 'ema_5' not in indicators or indicators['ema_5'].empty:
-            self.context.logger.debug(f"Missing EMA data for {bar.symbol}, skipping signal generation")
+        indicators = self.daily_indicators_data[symbol]
+
+        # Get daily data up to current date for the symbol
+        try:
+            daily_df = self._get_daily_data_up_to_date(symbol, current_date)
+        except Exception:
+            daily_df = self.daily_data.get(symbol)
+        if daily_df is None or daily_df.empty or len(daily_df) < 2:
+            self.context.logger.debug(f"Insufficient daily data for {symbol} to compute returns")
             return 0
-        
-        # Get enough data points for simple momentum calculation
-        if len(indicators['ema_5']) < 5:
-            self.context.logger.debug(f"Insufficient EMA history for signal generation: {len(indicators['ema_5'])} < 5 bars for {bar.symbol}")
+
+        # Align "today" as last available daily bar up to current date
+        today_idx = daily_df.index.max()
+        prev_idx = daily_df.index.sort_values()[-2]
+        close_today = float(daily_df.loc[today_idx, 'close'])
+        close_prev = float(daily_df.loc[prev_idx, 'close'])
+        if close_prev == 0 or np.isnan(close_prev) or np.isnan(close_today):
             return 0
-        
-        # Use daily EMA values instead of raw prices for momentum calculation
-        ema_values = indicators['ema_5'].iloc[-5:].values  # Last 5 daily EMA values
-        
-        # Simple momentum: if EMA is trending up, buy; if down, sell
-        if len(ema_values) >= 3:
-            short_ma = ema_values[-3:].mean()  # Average of last 3 EMA values
-            long_ma = ema_values.mean()       # Average of all 5 EMA values
-            
-            # Use configured thresholds directly (no fallback needed since config is loaded)
-            buy_threshold = self.buy_threshold
-            sell_threshold = self.sell_threshold
-            
-            # Calculate percentage change and scale to match original threshold system
-            pct_change = (short_ma - long_ma) / long_ma * 100  # Convert to percentage
-            signal_strength = pct_change * 10  # Reduced scale factor from 30 to 10 for more balanced signals
-            
-            # Add comprehensive debugging for signal generation (debug-only)
-            if self.context.logger.isEnabledFor(logging.DEBUG):
-                self.context.logger.debug("Signal calculation for %s:", bar.symbol)
-                self.context.logger.debug("  EMA values (last 5): %s", ema_values)
-                self.context.logger.debug("  Short MA (last 3): %.6f", short_ma)
-                self.context.logger.debug("  Long MA (all 5): %.6f", long_ma)
-                self.context.logger.debug("  Pct change: %.4f%%", pct_change)
-                self.context.logger.debug("  Signal strength: %.4f", signal_strength)
-                self.context.logger.debug("  Thresholds: buy=%.2f, sell=%.2f", buy_threshold, sell_threshold)
-            
-            # Validate signal quality to prevent static signals
-            if not self._validate_signal_quality(signal_strength, ema_values, bar.symbol, bar.timestamp.date()):
-                # Deduplicate warning: log at most once per symbol per date
-                trade_date = bar.timestamp.date()
-                warned_dates = self._ema_nonconverged_reported_dates.get(bar.symbol)
-                if warned_dates is None:
-                    warned_dates = set()
-                    self._ema_nonconverged_reported_dates[bar.symbol] = warned_dates
-                if trade_date not in warned_dates:
-                    self.context.logger.warning(
-                        "⚠️ Poor signal quality for %s on %s: EMAs not converged",
-                        bar.symbol,
-                        trade_date,
-                    )
-                    warned_dates.add(trade_date)
-                return 0  # No signal due to poor quality
-            
-            if signal_strength > buy_threshold:
-                self.context.logger.info(f"✅ BUY signal generated for {bar.symbol}: strength={signal_strength:.4f}")
-                return 1  # Buy signal
-            elif signal_strength < sell_threshold:
-                self.context.logger.info(f"✅ SELL signal generated for {bar.symbol}: strength={signal_strength:.4f}")
-                return -1  # Sell signal
-            else:
-                self.context.logger.info(f"⚪ No signal for {bar.symbol}: strength={signal_strength:.4f} within neutral zone")
-        
-        return 0  # No signal
+        stock_ret = (close_today / close_prev) - 1.0
+
+        # Ensure IBOV (^BVSP) daily data cached and aligned
+        ibov_symbol = '^BVSP'
+        if ibov_symbol not in self.daily_data or self.daily_data[ibov_symbol].empty:
+            try:
+                ibov_df = self._get_daily_data_for_date(ibov_symbol, current_date)
+                if ibov_df is not None and not ibov_df.empty:
+                    self.daily_data[ibov_symbol] = ibov_df
+                    self.daily_data_last_update[ibov_symbol] = current_date
+            except Exception as e:
+                self.context.logger.error(f"Failed to fetch ^BVSP daily data: {e}")
+                return 0
+        ibov_df = self._get_daily_data_up_to_date(ibov_symbol, current_date)
+        if ibov_df is None or ibov_df.empty or len(ibov_df) < 2:
+            self.context.logger.debug("Insufficient ^BVSP data to compute benchmark return")
+            return 0
+        # Align benchmark to the same dates if possible
+        if today_idx not in ibov_df.index:
+            # Fallback to last available date
+            ibov_today_idx = ibov_df.index.max()
+        else:
+            ibov_today_idx = today_idx
+        ibov_prev_idx = ibov_df.index[ibov_df.index.get_loc(ibov_today_idx) - 1] if ibov_df.index.get_loc(ibov_today_idx) > 0 else None
+        if ibov_prev_idx is None:
+            self.context.logger.debug("Not enough ^BVSP history for return comparison")
+            return 0
+        ibov_close_today = float(ibov_df.loc[ibov_today_idx, 'close'])
+        ibov_close_prev = float(ibov_df.loc[ibov_prev_idx, 'close'])
+        if ibov_close_prev == 0 or np.isnan(ibov_close_prev) or np.isnan(ibov_close_today):
+            return 0
+        ibov_ret = (ibov_close_today / ibov_close_prev) - 1.0
+
+        fuzzy = 0.0
+        # Rule 1: stock return vs IBOV return (+1 / -1)
+        if stock_ret > ibov_ret:
+            fuzzy += 1.0
+        elif stock_ret < ibov_ret:
+            fuzzy -= 1.0
+
+        # Rule 2: EMA comparisons (+/- 0.25 each)
+        ema_periods = getattr(self, 'ema_periods', [3, 5, 10, 15, 20])
+        for period in ema_periods:
+            key = f'ema_{period}'
+            if key in indicators and not indicators[key].empty:
+                try:
+                    ema_today = float(indicators[key].loc[today_idx])
+                except Exception:
+                    continue
+                if not np.isnan(ema_today):
+                    if close_today > ema_today:
+                        fuzzy += 0.25
+                    elif close_today < ema_today:
+                        fuzzy -= 0.25
+
+        # Rule 3: RSI bands (+0.25 if >65, -0.25 if <35)
+        if 'rsi' in indicators and not indicators['rsi'].empty:
+            try:
+                rsi_today = float(indicators['rsi'].loc[today_idx])
+                if not np.isnan(rsi_today):
+                    overbought = getattr(self, 'rsi_overbought', 65)
+                    oversold = getattr(self, 'rsi_oversold', 35)
+                    if rsi_today > overbought:
+                        fuzzy += 0.25
+                    elif rsi_today < oversold:
+                        fuzzy -= 0.25
+            except Exception:
+                pass
+
+        # Persist last strength for diagnostics/sizing
+        self._last_signal_strength = float(fuzzy)
+
+        # Optional: basic quality validation using EMA series for stability
+        ema5_series = indicators.get('ema_5', pd.Series(dtype=float))
+        ema_slice = ema5_series.dropna().iloc[-5:].values if not ema5_series.empty else np.array([])
+        if len(ema_slice) >= 3:
+            if not self._validate_signal_quality(fuzzy, ema_slice, symbol, current_date):
+                return 0
+
+        # Decide
+        if fuzzy >= buy_threshold:
+            self.context.logger.info(f"✅ BUY signal (fuzzy={fuzzy:.2f}) for {symbol}")
+            return 1
+        if fuzzy <= sell_threshold:
+            self.context.logger.info(f"✅ SELL signal (fuzzy={fuzzy:.2f}) for {symbol}")
+            return -1
+        self.context.logger.info(f"⚪ No signal (fuzzy={fuzzy:.2f}) for {symbol}")
+        return 0
     
     def _validate_signal_quality(self, signal_strength: float, ema_values: np.ndarray, symbol: str = None, current_date: date = None) -> bool:
         """
