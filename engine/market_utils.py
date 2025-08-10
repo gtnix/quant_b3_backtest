@@ -619,7 +619,7 @@ class DataValidationComparator:
     Compare and validate data from different sources for educational insights.
     
     Features:
-    - Compare yfinance daily vs local intraday aggregation
+    - Compare external daily vs local intraday aggregation
     - Statistical analysis of differences
     - Data quality assessment
     - Educational insights for data source selection
@@ -631,14 +631,14 @@ class DataValidationComparator:
         # DailyAggregator removed - using Brapi.dev daily data directly
         self.indicators_calculator = DailyTechnicalIndicators()
     
-    def compare_data_sources(self, symbol: str, yfinance_daily: pd.DataFrame, 
+    def compare_data_sources(self, symbol: str, reference_daily: pd.DataFrame, 
                            local_intraday: pd.DataFrame, date_range: Tuple[str, str] = None) -> Dict[str, Any]:
         """
-        Compare yfinance daily data vs local intraday aggregation.
+        Compare external daily data vs local intraday aggregation.
         
         Args:
             symbol: Trading symbol
-            yfinance_daily: Daily data from yfinance
+            reference_daily: Daily data from external provider
             local_intraday: Intraday data for aggregation
             date_range: Optional (start_date, end_date) tuple to filter comparison
             
@@ -654,9 +654,9 @@ class DataValidationComparator:
                 start_dt = pd.to_datetime(start_date)
                 end_dt = pd.to_datetime(end_date)
                 
-                if not yfinance_daily.empty:
-                    mask_yf = (yfinance_daily.index >= start_dt) & (yfinance_daily.index <= end_dt)
-                    yfinance_daily = yfinance_daily.loc[mask_yf]
+                if not reference_daily.empty:
+                    mask_yf = (reference_daily.index >= start_dt) & (reference_daily.index <= end_dt)
+                    reference_daily = reference_daily.loc[mask_yf]
                 
                 if not local_intraday.empty:
                     mask_local = (local_intraday.index >= start_dt) & (local_intraday.index <= end_dt)
@@ -666,33 +666,33 @@ class DataValidationComparator:
             # Using Brapi.dev daily data directly instead of aggregation
             local_daily = pd.DataFrame()  # Empty DataFrame to indicate no local aggregation
             
-            if yfinance_daily.empty or local_daily.empty:
+            if reference_daily.empty or local_daily.empty:
                 return {
                     'comparison_possible': False,
                     'reason': 'Insufficient data for comparison',
-                    'yfinance_bars': len(yfinance_daily),
+                    'reference_bars': len(reference_daily),
                     'local_bars': len(local_daily),
                     'recommendations': ['Ensure both data sources have sufficient data for comparison']
                 }
             
             # Align data by common dates
-            aligned_data = self._align_datasets(yfinance_daily, local_daily)
+            aligned_data = self._align_datasets(reference_daily, local_daily)
             
             if aligned_data['common_dates'] == 0:
                 return {
                     'comparison_possible': False,
                     'reason': 'No overlapping dates between data sources',
-                    'yfinance_range': f"{yfinance_daily.index.min().date()} to {yfinance_daily.index.max().date()}",
+                    'reference_range': f"{reference_daily.index.min().date()} to {reference_daily.index.max().date()}",
                     'local_range': f"{local_daily.index.min().date()} to {local_daily.index.max().date()}",
                     'recommendations': ['Check data date ranges for overlap']
                 }
             
             # Perform OHLCV comparison
-            ohlcv_comparison = self._compare_ohlcv_data(aligned_data['yfinance'], aligned_data['local'])
+            ohlcv_comparison = self._compare_ohlcv_data(aligned_data['reference'], aligned_data['local'])
             
             # Perform technical indicators comparison
             indicators_comparison = self._compare_technical_indicators(
-                aligned_data['yfinance'], aligned_data['local'], symbol
+                aligned_data['reference'], aligned_data['local'], symbol
             )
             
             # Generate overall assessment
@@ -704,8 +704,8 @@ class DataValidationComparator:
                 'comparison_possible': True,
                 'symbol': symbol,
                 'comparison_period': {
-                    'start_date': aligned_data['yfinance'].index.min().strftime('%Y-%m-%d'),
-                    'end_date': aligned_data['yfinance'].index.max().strftime('%Y-%m-%d'),
+                'start_date': aligned_data['reference'].index.min().strftime('%Y-%m-%d'),
+                'end_date': aligned_data['reference'].index.max().strftime('%Y-%m-%d'),
                     'common_trading_days': aligned_data['common_dates']
                 },
                 'ohlcv_comparison': ohlcv_comparison,
@@ -733,44 +733,44 @@ class DataValidationComparator:
                 'recommendations': ['Check data quality and format consistency']
             }
     
-    def _align_datasets(self, yfinance_data: pd.DataFrame, local_data: pd.DataFrame) -> Dict[str, Any]:
+    def _align_datasets(self, reference_data: pd.DataFrame, local_data: pd.DataFrame) -> Dict[str, Any]:
         """Align datasets by common trading dates."""
         # Find common dates
-        yf_dates = set(yfinance_data.index.date)
+        yf_dates = set(reference_data.index.date)
         local_dates = set(local_data.index.date)
         common_dates = yf_dates.intersection(local_dates)
         
         if not common_dates:
             return {
-                'yfinance': pd.DataFrame(),
+                'reference': pd.DataFrame(),
                 'local': pd.DataFrame(),
                 'common_dates': 0
             }
         
         # Filter to common dates
-        yf_mask = yfinance_data.index.date.isin(common_dates)
+        yf_mask = reference_data.index.date.isin(common_dates)
         local_mask = local_data.index.date.isin(common_dates)
         
-        aligned_yf = yfinance_data.loc[yf_mask].sort_index()
+        aligned_yf = reference_data.loc[yf_mask].sort_index()
         aligned_local = local_data.loc[local_mask].sort_index()
         
         return {
-            'yfinance': aligned_yf,
+            'reference': aligned_yf,
             'local': aligned_local,
             'common_dates': len(common_dates)
         }
     
-    def _compare_ohlcv_data(self, yfinance_data: pd.DataFrame, local_data: pd.DataFrame) -> Dict[str, Any]:
+    def _compare_ohlcv_data(self, reference_daily: pd.DataFrame, local_data: pd.DataFrame) -> Dict[str, Any]:
         """Compare OHLCV data between sources."""
         comparison = {}
         
         # Align by exact dates for point-to-point comparison
-        aligned_index = yfinance_data.index.intersection(local_data.index)
+        aligned_index = reference_daily.index.intersection(local_data.index)
         
         if len(aligned_index) == 0:
             return {'error': 'No aligned data points for OHLCV comparison'}
         
-        yf_aligned = yfinance_data.loc[aligned_index]
+        yf_aligned = reference_daily.loc[aligned_index]
         local_aligned = local_data.loc[aligned_index]
         
         # Compare each OHLCV component
@@ -798,13 +798,13 @@ class DataValidationComparator:
         
         return comparison
     
-    def _compare_technical_indicators(self, yfinance_data: pd.DataFrame, 
+    def _compare_technical_indicators(self, reference_daily: pd.DataFrame, 
                                     local_data: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """Compare technical indicators calculated from both data sources."""
         try:
             # Calculate indicators for both datasets
             yf_indicators = self.indicators_calculator.calculate_all_indicators(
-                yfinance_data, atr_period=14, ema_periods=[10, 20], rsi_period=14
+                reference_daily, atr_period=14, ema_periods=[10, 20], rsi_period=14
             )
             
             local_indicators = self.indicators_calculator.calculate_all_indicators(
@@ -932,7 +932,7 @@ class DataValidationComparator:
         
         if overall_correlation > 0.95:
             recommendations.append("✅ Data sources show excellent agreement - either can be used confidently")
-            recommendations.append("💡 Consider using yfinance for indicators and local data for execution precision")
+            recommendations.append("💡 Consider using BRAPI daily for indicators and local data for execution precision")
         elif overall_correlation > 0.85:
             recommendations.append("👍 Data sources show good agreement with minor differences")
             recommendations.append("🔍 Monitor differences in critical periods or volatile markets")

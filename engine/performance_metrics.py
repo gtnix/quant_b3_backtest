@@ -1323,39 +1323,20 @@ class BenchmarkAnalyzer:
     
     def _load_from_downloader(self, start_date: Optional[Union[str, datetime]], 
                              end_date: Optional[Union[str, datetime]]) -> Optional[pd.DataFrame]:
-        """Load benchmark data using Yahoo Finance downloader."""
+        """Load benchmark data using BRAPI provider (no Yahoo dependency)."""
         try:
-            # Import here to avoid circular imports
-            import sys
-            from pathlib import Path
-            sys.path.append(str(Path(__file__).parent.parent / "scripts"))
-            
-            from download_ibov_yahoo import YahooIBOVDownloader
-            
-            downloader = YahooIBOVDownloader()
-            result = downloader.download_ibov_data(
-                start_date=start_date.strftime('%Y-%m-%d') if start_date else None,
-                end_date=end_date.strftime('%Y-%m-%d') if end_date else None,
-                period="max" if not start_date and not end_date else None
-            )
-            
-            if result.success:
-                # Load the downloaded data
-                data_path = Path("data") / "IBOV" / f"{self.benchmark_symbol}.parquet"
-                if data_path.exists():
-                    data = pd.read_parquet(data_path)
-                    if 'close' in data.columns:
-                        # Ensure timezone-naive datetime index
-                        if data.index.tz is not None:
-                            data.index = data.index.tz_localize(None)
-                        
-                        # Do not emit CSV reports; keep in memory
-                        
-                        return data[['close']]
-            
+            from .brapi_provider import BrapiProvider
+            brapi = BrapiProvider(api_token=os.getenv('BRAPI_API_TOKEN', ''), cache_dir="data/brapi_cache")
+            # Fetch daily IBOV via BRAPI
+            s = start_date.strftime('%Y-%m-%d') if start_date else (datetime.now() - timedelta(days=1825)).strftime('%Y-%m-%d')
+            e = end_date.strftime('%Y-%m-%d') if end_date else datetime.now().strftime('%Y-%m-%d')
+            df = brapi.get_daily_data('IBOV', s, e)
+            if df is not None and not df.empty and 'close' in df.columns:
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+                return df[['close']]
         except Exception as e:
-            logger.debug(f"Yahoo Finance downloader failed: {e}")
-        
+            logger.debug(f"BRAPI benchmark load failed: {e}")
         return None
     
     def calculate_returns(

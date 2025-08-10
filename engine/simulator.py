@@ -1690,12 +1690,25 @@ class BacktestSimulator:
             # Load IBOV data once and cache (avoid per-bar CSV read)
             ibov_file = Path("data/IBOV/IBOV_raw.csv")
             if self._ibov_df_cached is None:
-                if not ibov_file.exists():
-                    logger.error(f"IBOV data file not found: {ibov_file}")
-                    return {}
-                ibov_df = pd.read_csv(ibov_file, index_col=0)
-                if ibov_df.empty:
-                    logger.error("IBOV data file is empty")
+                # Load benchmark from BRAPI daily if CSV not present
+                ibov_df = None
+                if ibov_file.exists():
+                    try:
+                        ibov_df = pd.read_csv(ibov_file, index_col=0)
+                    except Exception:
+                        ibov_df = None
+                if ibov_df is None or ibov_df.empty:
+                    try:
+                        from .brapi_provider import BrapiProvider
+                        end_dt = current_date
+                        start_dt = end_dt - timedelta(days=365)
+                        brapi = BrapiProvider(api_token=os.getenv('BRAPI_API_TOKEN', ''), cache_dir="data/brapi_cache")
+                        ibov_df = brapi.get_daily_data('IBOV', start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
+                    except Exception as _e:
+                        logger.error(f"Failed to load IBOV via BRAPI: {_e}")
+                        return {}
+                if ibov_df is None or ibov_df.empty:
+                    logger.error("IBOV data unavailable")
                     return {}
                 # Normalize time index once
                 ibov_df.index = pd.to_datetime(ibov_df.index, utc=True).tz_localize(None)
