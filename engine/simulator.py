@@ -21,6 +21,7 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime, timedelta, date
+import os
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1703,7 +1704,8 @@ class BacktestSimulator:
                         end_dt = current_date
                         start_dt = end_dt - timedelta(days=365)
                         brapi = BrapiProvider(api_token=os.getenv('BRAPI_API_TOKEN', ''), cache_dir="data/brapi_cache")
-                        ibov_df = brapi.get_daily_data('IBOV', start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
+                        # BRAPI index ticker mapping: IBOV -> ^BVSP
+                        ibov_df = brapi.get_daily_data('^BVSP', start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
                     except Exception as _e:
                         logger.error(f"Failed to load IBOV via BRAPI: {_e}")
                         return {}
