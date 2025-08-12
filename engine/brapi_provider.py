@@ -602,15 +602,14 @@ class BrapiProvider:
                                     valid_timestamps.append(ts)
                                 else:
                                     logger.warning(f"Invalid timestamp detected: {ts} for {symbol}, skipping")
-                            
+
                             if valid_timestamps:
-                                # Convert timestamps directly - Brapi data is already in UTC 
-                                # which matches Brazilian market hours (13:00-20:00 UTC = 10:00-17:00 BRT)
+                                # Convert to tz-naive UTC timestamps (canonical throughout the engine)
                                 df.index = pd.to_datetime(valid_timestamps, unit='s')
-                                
+
                                 # Filter DataFrame to only include rows with valid timestamps
                                 df = df.iloc[:len(valid_timestamps)]
-                                
+
                                 if logger.isEnabledFor(logging.DEBUG):
                                     logger.debug("Processed %d timestamps for %s", len(valid_timestamps), symbol)
                                     logger.debug("Sample timestamp: %s (hour: %d)", df.index[0], df.index[0].hour)
@@ -620,6 +619,16 @@ class BrapiProvider:
                     
                     # Clean and validate data
                     df = self._clean_brapi_data(df)
+
+                    # Enforce B3 session hours in UTC for hourly data
+                    # BRAPI delivers UTC; B3 continuous session maps to 13:00-20:00 UTC (10:00-17:00 BRT)
+                    if data_type == 'hourly':
+                        try:
+                            mask_session = (df.index.hour >= 13) & (df.index.hour <= 20)
+                            df = df.loc[mask_session]
+                        except Exception:
+                            # If index is not datetime for any reason, leave as-is
+                            pass
                     
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug("Fetched %d %s bars for %s", len(df), data_type, symbol)

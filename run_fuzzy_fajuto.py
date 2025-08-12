@@ -47,17 +47,19 @@ sys.path.insert(0, engine_dir)
 strategies_dir = os.path.join(current_dir, 'strategies')
 sys.path.insert(0, strategies_dir)
 
-# Setup logging (raise to ERROR to reduce I/O during performance runs)
+# Setup logging with env override (default ERROR)
+_lvl = os.environ.get('LOG_LEVEL', 'ERROR').upper()
+_lvl_num = getattr(logging, _lvl, logging.ERROR)
 logging.basicConfig(
-    level=logging.ERROR,
+    level=_lvl_num,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 logger = logging.getLogger(__name__)
 
-# Force critical logs only across our modules for this run
-logging.getLogger().setLevel(logging.ERROR)
+# Apply module logger levels based on env override
+logging.getLogger().setLevel(_lvl_num)
 for noisy in (
     'FuzzyFajutoStrategy',
     'engine.simulator',
@@ -71,7 +73,7 @@ for noisy in (
     'engine.loss_manager',
 ):
     try:
-        logging.getLogger(noisy).setLevel(logging.ERROR)
+        logging.getLogger(noisy).setLevel(_lvl_num)
     except Exception:
         pass
 
@@ -81,163 +83,23 @@ try:
 except Exception:
     pass
 
-class AsyncJsonlLogger:
-    """Minimal async JSONL writer with batching and background thread."""
-    def __init__(self, base_dir: Path, batch_size: int = 256, flush_ms: int = 200):
-        self.base_dir = Path(base_dir)
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.batch_size = int(batch_size)
-        self.flush_ms = int(flush_ms)
-        self._q: 'queue.Queue[tuple[str,str]]' = queue.Queue(maxsize=10000)
-        self._buffers: dict[str, list[str]] = {}
-        self._files: dict[str, any] = {}
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="JsonlWriter", daemon=True)
-        self._thread.start()
-
-    def emit(self, stream: str, event: dict):
-        try:
-            if 'type' not in event:
-                event['type'] = stream
-            line = json.dumps(event, ensure_ascii=True, separators=(",", ":")) + "\n"
-            self._q.put_nowait((stream, line))
-        except Exception:
-            pass
-
-    def _run(self):
-        last = time.time()
-        while not self._stop.is_set() or not self._q.empty():
-            try:
-                stream, line = self._q.get(timeout=0.05)
-                buf = self._buffers.setdefault(stream, [])
-                buf.append(line)
-                if len(buf) >= self.batch_size:
-                    self._flush(stream)
-            except queue.Empty:
-                pass
-            now = time.time()
-            if (now - last) * 1000.0 >= self.flush_ms:
-                for s in list(self._buffers.keys()):
-                    if self._buffers[s]:
-                        self._flush(s)
-                last = now
-        for s in list(self._buffers.keys()):
-            if self._buffers[s]:
-                self._flush(s)
-        for f in self._files.values():
-            try:
-                f.flush(); f.close()
-            except Exception:
-                pass
-
-    def _flush(self, stream: str):
-        try:
-            fh = self._files.get(stream)
-            if fh is None:
-                path = self.base_dir / f"{stream}.jsonl"
-                fh = open(path, 'a', encoding='utf-8')
-                self._files[stream] = fh
-            buf = self._buffers.get(stream, [])
-            if buf:
-                fh.writelines(buf)
-                fh.flush()
-                self._buffers[stream] = []
-        except Exception:
-            self._buffers[stream] = []
-
-    def shutdown(self):
-        try:
-            self._stop.set()
-            self._thread.join(timeout=3.0)
-        except Exception:
-            pass
+from engine.fuzzy_reporting import export_fuzzy_components_to_csv
+from engine.market_utils import prepare_fuzzy_data, SignalScheduler
+from engine.base_strategy import OrderSide
+from engine.utils.async_logger import AsyncJsonlLogger
 
 
-def generate_execution_table(strategy_summary: dict) -> str:
-    """
-    Generate a clean and modern execution summary table for terminal display.
-    
-    Args:
-        strategy_summary: Dictionary containing execution summary data
-        
-    Returns:
-        Formatted table string with consistent styling
-    """
-    if not strategy_summary:
-        return "No execution data available."
-    
-    # Prepare data rows
-    rows = []
-    
-    # Add daily executions (all order types - all execute once per day)
-    daily_executions = strategy_summary.get('daily_executions', {})
-    for attempt_type, metrics in daily_executions.items():
-        rows.append({
-            'type': attempt_type,
-            'category': 'Daily',
-            'attempts': metrics['attempts'],
-            'successful': metrics['successful'],
-            'failed': metrics['failed'],
-            'fill_rate': metrics['fill_rate']
-        })
-    
-    if not rows:
-        return "No execution data available."
-    
-    # Calculate totals
-    total_attempts = sum(row['attempts'] for row in rows)
-    total_successful = sum(row['successful'] for row in rows)
-    total_failed = sum(row['failed'] for row in rows)
-    overall_fill_rate = total_successful / total_attempts if total_attempts > 0 else 0
-    
-    # Generate clean table
-    table_lines = []
-    
-    # Header
-    table_lines.append("=" * 80)
-    table_lines.append("EXECUTION PERFORMANCE SUMMARY")
-    table_lines.append("=" * 80)
-    table_lines.append(f"{'Execution Type':<15} {'Category':<10} {'Attempts':>10} {'Successful':>10} {'Failed':>10} {'Fill Rate':>10}")
-    table_lines.append("-" * 80)
-    
-    # Data rows
-    for row in rows:
-        # Create simple progress bar for fill rate
-        fill_rate_pct = row['fill_rate'] * 100
-        progress_bars = int(fill_rate_pct / 10)  # 10% per bar
-        progress_bar = "[" + "█" * progress_bars + " " * (10 - progress_bars) + "]"
-        
-        table_lines.append(
-            f"{row['type']:<15} {row['category']:<10} {row['attempts']:>10} {row['successful']:>10} "
-            f"{row['failed']:>10} {row['fill_rate']:>9.1%} {progress_bar}"
-        )
-    
-    # Totals row
-    table_lines.append("-" * 80)
-    
-    # Create progress bar for overall fill rate
-    overall_pct = overall_fill_rate * 100
-    overall_bars = int(overall_pct / 10)
-    overall_progress_bar = "[" + "█" * overall_bars + " " * (10 - overall_bars) + "]"
-    
-    table_lines.append(
-        f"{'TOTAL':<15} {'ALL':<10} {total_attempts:>10} {total_successful:>10} "
-        f"{total_failed:>10} {overall_fill_rate:>9.1%} {overall_progress_bar}"
-    )
-    
-    # Footer
-    table_lines.append("=" * 80)
-    
-    return "\n".join(table_lines)
+from engine.utils.terminal_table import generate_execution_table
 
 def _load_portfolio_symbols() -> list:
     """Load symbols from portfolio.csv in project root or data/.
 
     Returns uppercase symbols list or empty list if not found/invalid.
     """
+    # Prefer data/portfolio.csv explicitly; fallback to root portfolio.csv
     candidates = [
-        Path(__file__).parent / 'portfolio.csv',
         Path(__file__).parent / 'data' / 'portfolio.csv',
+        Path(__file__).parent / 'portfolio.csv',
     ]
     for path in candidates:
         try:
@@ -246,7 +108,12 @@ def _load_portfolio_symbols() -> list:
                 if 'symbol' in df.columns:
                     symbols = [str(s).strip().upper() for s in df['symbol'].dropna().tolist()]
                     symbols = [s for s in symbols if len(s) > 0]
-                    return list(dict.fromkeys(symbols))  # de-duplicate preserving order
+                    syms_out = list(dict.fromkeys(symbols))  # de-duplicate preserving order
+                    try:
+                        print(f"Loaded portfolio from: {path} ({len(syms_out)} symbols)")
+                    except Exception:
+                        pass
+                    return syms_out
         except Exception as e:
             logger.warning(f"Failed to load portfolio from {path}: {e}")
     return []
@@ -272,7 +139,21 @@ def main():
     parser.add_argument('--start-date', default=None, help='Start date (default from config)')
     parser.add_argument('--end-date', default=None, help='End date (default from config)')
     parser.add_argument('--save-results', action='store_true', default=None, help='Save results for comparison (default from config)')
+    # Reporting and data guardrails
+    parser.add_argument('--report-format', default='json', choices=['json','csv','txt','parquet'], help='Report output format (default: json)')
+    parser.add_argument('--report-level', default='summary', choices=['summary','full','debug'], help='Report detail level')
+    parser.add_argument('--report-output-path', default='reports', help='Directory to write reports')
+    parser.add_argument('--report-fail-on-preflight', action='store_true', help='Abort simulation on failed preflight but still write a full report with reasons')
+    parser.add_argument('--data-strict-warmup', action='store_true', help='Require strict warmup (abort if insufficient)')
+    parser.add_argument('--data-allow-degraded-warmup', action='store_true', help='Allow degraded warmup and proceed with flags in report')
+    parser.add_argument('--warmup-min-sessions', type=int, default=60, help='Minimum warmup sessions (default: 60)')
+    parser.add_argument('--ingestion-cache-policy', default='use', choices=['use','refresh','off'], help='Cache policy for ingestion provenance')
     parser.add_argument('--show-comparison', action='store_true', help='Show comparison with previous runs')
+    # Data prefetch for validation
+    parser.add_argument('--download-portfolio-daily', action='store_true', help='Prefetch ALL daily data for symbols in data/portfolio_full.csv over default backtest dates before running')
+    parser.add_argument('--portfolio-full-csv', default='data/portfolio_full.csv', help='Path to the full portfolio CSV (column: symbol)')
+    # Pair mode for market-neutral execution
+    parser.add_argument('--pair-mode', action='store_true', help='Enable market-neutral pair trading (top BUY + top SELL per day, R$50k notional each)')
     
     args = parser.parse_args()
     
@@ -281,6 +162,8 @@ def main():
         try:
             import os as _os
             _os.environ.setdefault('DISABLE_DATA_SOURCE_REPORT', '1')
+            # Ensure multi-frame mode is ON before any coverage prefiltering logic
+            _os.environ.setdefault('MULTIFRAME_MODE', '1')
         except Exception:
             pass
 
@@ -298,7 +181,9 @@ def main():
         t0_total = time.perf_counter()
         # Initialize run-scoped event logger and meta
         from datetime import datetime as _dt
-        run_ts = _dt.utcnow().strftime('%Y%m%d_%H%M%S')
+        # Use timezone-aware UTC to avoid deprecation
+        from datetime import datetime as _DT, timezone as _TZ
+        run_ts = _DT.now(_TZ.utc).strftime('%Y%m%d_%H%M%S')
         short_hash = abs(hash((str(args.profile), str(args.config_file), str(args.start_date), str(args.end_date)))) % 10_000_000
         run_id = f"{run_ts}_{short_hash}"
         base_log_dir = Path(os.environ.get('LOG_DIR', 'logs')) / run_id
@@ -341,46 +226,87 @@ def main():
         tickers = csv_symbols
         logger.info(f"Loaded portfolio from CSV: {','.join(tickers)}")
 
+        # Optional: pre-download ALL daily data for full portfolio range to ensure cache readiness
+        if args.download_portfolio_daily:
+            try:
+                import pandas as _pd
+                from engine.brapi_provider import BrapiProvider as _Brapi
+                full_csv = Path(args.portfolio_full_csv)
+                if not full_csv.exists():
+                    logger.warning(f"Full portfolio CSV not found at {full_csv}, falling back to current tickers list")
+                    full_syms = tickers
+                else:
+                    df_full = _pd.read_csv(full_csv)
+                    full_syms = [str(s).strip().upper() for s in df_full.get('symbol', []) if _pd.notna(s) and str(s).strip()]
+                    full_syms = list(dict.fromkeys(full_syms))
+                logger.info(f"Prefetching daily data for {len(full_syms)} symbols over {start_date}..{end_date}")
+                bp = _Brapi(api_token=os.environ.get('BRAPI_API_TOKEN', ''), cache_dir=(_cfg.get('brapi', {}) or {}).get('data', {}).get('cache_dir', 'data/brapi_cache'))
+                ok = 0; fail = 0
+                for i, sym in enumerate(full_syms, 1):
+                    try:
+                        df = bp.get_daily_data(sym, start_date, end_date)
+                        n = 0 if df is None else len(df)
+                        ok += 1 if n > 0 else 0
+                        if i % 20 == 0:
+                            logger.info(f"Prefetched {i}/{len(full_syms)} symbols")
+                    except Exception as _e:
+                        fail += 1
+                        if fail <= 5:
+                            logger.warning(f"Daily fetch failed for {sym}: {_e}")
+                        continue
+                # Benchmark too
+                try:
+                    bm = (_cfg.get('benchmark', {}) or {}).get('symbol', '^BVSP')
+                    _ = bp.get_daily_data(bm, start_date, end_date)
+                except Exception:
+                    pass
+                logger.info(f"Daily prefetch complete: ok={ok} fail={fail}")
+            except Exception as _e:
+                logger.warning(f"Daily prefetch skipped due to error: {_e}")
+
         # Prefilter symbols by hourly coverage to avoid mid-run cancellation
         # Uses the same thresholds as loader._assess_execution_coverage
         try:
-            from engine.brapi_provider import BrapiProvider as _BrapiProvider
             import os as _os
-            from datetime import datetime as _dt
-            import pandas as _pd
-
-            _bp = _BrapiProvider(api_token=_os.environ.get('BRAPI_API_TOKEN', ''))
-            _start_dt = _dt.strptime(start_date, '%Y-%m-%d')
-            _end_dt = _dt.strptime(end_date, '%Y-%m-%d')
-            _total_calendar_days = (_end_dt - _start_dt).days + 1
-            _expected_trading_days = max(_total_calendar_days * 5 // 7, 1)
-
-            _kept = []
-            _dropped = []
-            for _sym in tickers:
-                try:
-                    _dfh = _bp.get_ohlc(_sym, '1h', _start_dt, _end_dt)
-                    if _dfh is None or _dfh.empty:
-                        _dropped.append((_sym, 'empty'))
-                        continue
-                    _unique_days = len(set(_dfh.index.date))
-                    _coverage = _unique_days / _expected_trading_days
-                    _bars_per_day = len(_dfh) / max(_unique_days, 1)
-                    _sufficient = (_coverage >= 0.8 and _bars_per_day >= 4 and len(_dfh) >= 50)
-                    if _sufficient:
-                        _kept.append(_sym)
-                    else:
-                        _dropped.append((_sym, f"cov={_coverage:.1%}, bpd={_bars_per_day:.2f}, bars={len(_dfh)}"))
-                except Exception as _e:
-                    _dropped.append((_sym, f"error:{_e}"))
-
-            if _kept:
-                logger.info(f"Prefilter coverage: kept {len(_kept)}/{len(tickers)} symbols")
-                if len(_dropped) > 0:
-                    logger.info("Dropped (insufficient hourly coverage): " + ",".join([d[0] for d in _dropped[:20]]) + ("..." if len(_dropped) > 20 else ""))
-                tickers = _kept
+            if _os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on'):
+                logger.info("Prefilter coverage: skipped in multi-frame mode (hourly fetched only for execution days)")
             else:
-                logger.warning("No symbols met hourly coverage threshold; proceeding with original list (may cancel mid-run).")
+                from engine.brapi_provider import BrapiProvider as _BrapiProvider
+                from datetime import datetime as _dt
+                import pandas as _pd
+
+                _bp = _BrapiProvider(api_token=_os.environ.get('BRAPI_API_TOKEN', ''))
+                _start_dt = _dt.strptime(start_date, '%Y-%m-%d')
+                _end_dt = _dt.strptime(end_date, '%Y-%m-%d')
+                _total_calendar_days = (_end_dt - _start_dt).days + 1
+                _expected_trading_days = max(_total_calendar_days * 5 // 7, 1)
+
+                _kept = []
+                _dropped = []
+                for _sym in tickers:
+                    try:
+                        _dfh = _bp.get_ohlc(_sym, '1h', _start_dt, _end_dt)
+                        if _dfh is None or _dfh.empty:
+                            _dropped.append((_sym, 'empty'))
+                            continue
+                        _unique_days = len(set(_dfh.index.date))
+                        _coverage = _unique_days / _expected_trading_days
+                        _bars_per_day = len(_dfh) / max(_unique_days, 1)
+                        _sufficient = (_coverage >= 0.8 and _bars_per_day >= 4 and len(_dfh) >= 50)
+                        if _sufficient:
+                            _kept.append(_sym)
+                        else:
+                            _dropped.append((_sym, f"cov={_coverage:.1%}, bpd={_bars_per_day:.2f}, bars={len(_dfh)}"))
+                    except Exception as _e:
+                        _dropped.append((_sym, f"error:{_e}"))
+
+                if _kept:
+                    logger.info(f"Prefilter coverage: kept {len(_kept)}/{len(tickers)} symbols")
+                    if len(_dropped) > 0:
+                        logger.info("Dropped (insufficient hourly coverage): " + ",".join([d[0] for d in _dropped[:20]]) + ("..." if len(_dropped) > 20 else ""))
+                    tickers = _kept
+                else:
+                    logger.warning("No symbols met hourly coverage threshold; proceeding with original list (may cancel mid-run).")
         except Exception as _e:
             logger.warning(f"Coverage prefilter skipped due to error: {_e}")
         # start_date and end_date already resolved above
@@ -396,6 +322,119 @@ def main():
         logger.info("🚀 Initializing Hybrid Data Management System...")
         hybrid_data_manager = HybridDataManager(config_path="config/settings.yaml")
         data_loader = DataLoader(auto_download=True)
+
+        # ===============
+        # Preflight checks
+        # ===============
+        def _build_report_skeleton():
+            return {
+                'schema_version': '1.0.0',
+                'run_id': run_id,
+                'metadata': {
+                    'strategy': 'FuzzyFajutoStrategy',
+                    'strategy_version': '1.x',
+                    'environment': 'backtest',
+                    'timezone': 'UTC',
+                    'session_calendar': 'B3',
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'symbols': tickers,
+                    'benchmark': '^BVSP',
+                    'data_granularity': {'execution_input': 'hourly', 'indicators_input': 'daily'},
+                    'report_format': args.report_format,
+                    'report_level': args.report_level,
+                    'ingestion_cache_policy': args.ingestion_cache_policy,
+                    'strict_warmup': bool(args.data_strict_warmup),
+                    'allow_degraded_warmup': bool(args.data_allow_degraded_warmup),
+                    'warmup_min_sessions': int(args.warmup_min_sessions)
+                },
+                'preflight': {'symbols': {}, 'benchmark': {}, 'status': 'unknown', 'reasons': []},
+                'ingestion': {'diagnostics': {}, 'reasons': []},
+                'signals': {'rows': [], 'reasons': []},
+                'orders': {'legs': [], 'reasons': []},
+                'execution': {'fills': [], 'reasons': []},
+                'eod': {'flattening': {}, 'reasons': []},
+                'outcomes': {'summary': {}, 'reasons': []}
+            }
+
+        def _write_report(report_dict):
+            try:
+                out_dir = Path(args.report_output_path or 'reports')
+                out_dir.mkdir(parents=True, exist_ok=True)
+                json_path = out_dir / 'portfolio_backtest_report.json'
+                import json as _json
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    _json.dump(report_dict, f, ensure_ascii=False, separators=(",", ":"))
+                print(f"Report saved: {json_path}")
+            except Exception as _e:
+                logger.warning(f"Failed to write report: {_e}")
+
+        # Preflight: data availability and warmup sufficiency per symbol and benchmark
+        preflight = _build_report_skeleton()
+        try:
+            from engine.brapi_provider import BrapiProvider as _BrapiProvider
+            import os as _os
+            bp = _BrapiProvider(api_token=_os.environ.get('BRAPI_API_TOKEN',''), cache_dir="data/brapi_cache")
+            # Benchmark (^BVSP) check
+            try:
+                ibov_daily = bp.get_daily_data('^BVSP', start_date, end_date)
+                preflight['preflight']['benchmark'] = {
+                    'symbol': '^BVSP',
+                    'has_data': bool(ibov_daily is not None and not ibov_daily.empty),
+                    'rows': int(0 if ibov_daily is None else len(ibov_daily))
+                }
+                if not preflight['preflight']['benchmark']['has_data']:
+                    preflight['preflight']['reasons'].append('benchmark_unavailable')
+            except Exception as _e:
+                preflight['preflight']['benchmark'] = {'symbol': '^BVSP', 'has_data': False, 'error': str(_e)}
+                preflight['preflight']['reasons'].append('benchmark_error')
+
+            # Symbols coverage
+            from datetime import datetime as _dt
+            sdt = _dt.strptime(start_date, '%Y-%m-%d')
+            edt = _dt.strptime(end_date, '%Y-%m-%d')
+            total_days = max((edt - sdt).days + 1, 1)
+            for sym in tickers:
+                try:
+                    h = bp.get_ohlc(sym, '1h', sdt, edt)
+                    u_days = len(set(h.index.date)) if h is not None and not h.empty else 0
+                    bpd = (len(h) / u_days) if u_days > 0 else 0.0
+                    cov = (u_days / max(total_days*5//7,1)) if u_days>0 else 0.0
+                    preflight['preflight']['symbols'][sym] = {
+                        'hourly_rows': int(len(h) if h is not None else 0),
+                        'unique_days': int(u_days),
+                        'bars_per_day': float(round(bpd,2)),
+                        'coverage_pct': float(round(cov,3))
+                    }
+                    if cov < 0.8 or bpd < 6:
+                        preflight['preflight']['reasons'].append(f'insufficient_hourly:{sym}')
+                except Exception as _e:
+                    preflight['preflight']['symbols'][sym] = {'error': str(_e)}
+                    preflight['preflight']['reasons'].append(f'fetch_error:{sym}')
+
+            # Warmup policy
+            warmup_required = int(max(args.warmup_min_sessions, 60))
+            preflight['preflight']['warmup_required_sessions'] = warmup_required
+            # Mark status
+            preflight['preflight']['status'] = 'ok' if len(preflight['preflight']['reasons'])==0 else 'degraded'
+        except Exception as _e:
+            preflight['preflight']['status'] = 'error'
+            preflight['preflight']['reasons'].append(f'preflight_error:{_e}')
+
+        # If strict fail requested and we have preflight issues, write report and exit
+        if args.report_fail_on_preflight and preflight['preflight']['status'] != 'ok':
+            _write_report(preflight)
+            # Also write empty CSVs with reasons
+            try:
+                from pathlib import Path as _P
+                import pandas as _pd
+                _P('reports').mkdir(exist_ok=True)
+                _pd.DataFrame({'section':['preflight'], 'reason':preflight['preflight']['reasons']}).to_csv('reports/portfolio_backtest_executions.csv', index=False)
+                _pd.DataFrame(columns=['symbol','timestamp','date','side','order_type','attempt','filled','quantity','execution_price','open','high','low','close','slippage','bar_index','distance_from_open','pnl']).to_csv('reports/portfolio_backtest_executions_derived.csv', index=False)
+                _pd.DataFrame(preflight['signals']['rows']).to_csv('reports/portfolio_fuzzy_indicators.csv', index=False)
+            except Exception:
+                pass
+            return 0
         
         # Check local data availability (for transparency)
         logger.info("Checking local data availability...")
@@ -417,6 +456,214 @@ def main():
         except Exception:
             pass
         
+        # Daily-only indicators and schedule (multi-frame injection)
+        try:
+            from engine.market_utils import IndicatorService, SignalScheduler, DailyTechnicalIndicators
+            os.environ.setdefault('MULTIFRAME_MODE', '1')
+            ind_svc = IndicatorService()
+            # Resolve benchmark symbol from config; fallback to BRAPI IBOV if needed
+            _bm_from_cfg = (_cfg.get('benchmark', {}) or {}).get('symbol', '^BVSP')
+            _bm_fallback = ((_cfg.get('brapi', {}) or {}).get('data', {}) or {}).get('ibov_symbol', 'IBOV')
+            bm_symbol = _bm_from_cfg or _bm_fallback or '^BVSP'
+            # Daily vectors for universe (no hourly)
+            vectors = ind_svc.compute_daily_vectors(
+                symbols=tickers,
+                benchmark=bm_symbol,
+                start=start_date,
+                end=end_date,
+                ema_periods=[3,5,10,15,20],
+                rsi_period=10,
+                atr_period=14,
+                warmup_min_sessions=int(args.warmup_min_sessions),
+                buffer_sessions=5
+            )
+            # If empty and we weren't already on the fallback, try fallback benchmark symbol
+            if (not isinstance(vectors, dict) or len(vectors) == 0) and bm_symbol != _bm_fallback:
+                try:
+                    vectors = ind_svc.compute_daily_vectors(
+                        symbols=tickers,
+                        benchmark=_bm_fallback,
+                        start=start_date,
+                        end=end_date,
+                        ema_periods=[3,5,10,15,20],
+                        rsi_period=10,
+                        atr_period=14,
+                        warmup_min_sessions=int(args.warmup_min_sessions),
+                        buffer_sessions=5
+                    )
+                    logger.info(f"Retry vectors with fallback benchmark '{_bm_fallback}': symbols={len(vectors)}")
+                except Exception:
+                    pass
+
+            # Final fallback: build daily vectors by aggregating hourly execution data (cache-only, no network)
+            if not isinstance(vectors, dict) or len(vectors) == 0:
+                try:
+                    _agg_vectors: dict[str, _pd.DataFrame] = {}
+                    _ind_calc = DailyTechnicalIndicators()
+                    for sym in tickers:
+                        try:
+                            res = hybrid_data_manager.initialize_backtest_data(
+                                symbol=sym,
+                                start_date=start_date,
+                                end_date=end_date,
+                                local_loader=data_loader
+                            )
+                            exec_df = res.get('execution_data')
+                            if exec_df is None or exec_df.empty:
+                                continue
+                            ddf = exec_df.copy()
+                            if getattr(ddf.index, 'tz', None) is not None:
+                                ddf.index = ddf.index.tz_localize(None)
+                            # Aggregate to daily OHLCV
+                            gb = ddf.groupby(ddf.index.normalize())
+                            daily = _pd.DataFrame({
+                                'open': gb['open'].first(),
+                                'high': gb['high'].max(),
+                                'low': gb['low'].min(),
+                                'close': gb['close'].last(),
+                                'volume': gb['volume'].sum() if 'volume' in ddf.columns else 0
+                            })
+                            daily.index = _pd.to_datetime(daily.index)
+                            daily = daily.sort_index()
+                            # Compute indicators
+                            atr = _ind_calc.calculate_atr(daily, period=14)
+                            # Minimal EMA set
+                            ema3 = daily['close'].ewm(span=3, adjust=False).mean()
+                            ema5 = daily['close'].ewm(span=5, adjust=False).mean()
+                            ema10 = daily['close'].ewm(span=10, adjust=False).mean()
+                            ema15 = daily['close'].ewm(span=15, adjust=False).mean()
+                            ema20 = daily['close'].ewm(span=20, adjust=False).mean()
+                            # Returns and simple fuzzy score (no benchmark)
+                            sym_ret = daily['close'].pct_change()
+                            ret_vs_ibov_term = (sym_ret > 0).astype(int) - (sym_ret < 0).astype(int)
+                            ema_sum = ((daily['close'] > ema3).astype(float)
+                                       + (daily['close'] > ema5).astype(float)
+                                       + (daily['close'] > ema10).astype(float)
+                                       + (daily['close'] > ema15).astype(float)
+                                       + (daily['close'] > ema20).astype(float)) * 0.25
+                            # Basic RSI(10) fallback
+                            delta = daily['close'].diff()
+                            up = delta.clip(lower=0).rolling(10).mean()
+                            down = (-delta.clip(upper=0)).rolling(10).mean()
+                            rs = up / (down.replace(0, _pd.NA))
+                            rsi = 100 - (100 / (1 + rs))
+                            rsi_term = _pd.Series(0.0, index=daily.index)
+                            rsi_term[rsi > 65] = 0.25
+                            rsi_term[rsi < 35] = -0.25
+                            score = ret_vs_ibov_term.astype(float) + ema_sum.fillna(0.0) + rsi_term.fillna(0.0)
+                            out = _pd.DataFrame(index=daily.index)
+                            out['close'] = daily['close']
+                            out['ibov_return'] = _pd.Series(0.0, index=daily.index)
+                            out['symbol_return'] = sym_ret
+                            out['atr'] = atr
+                            out['rsi'] = rsi
+                            out['ema_3'] = ema3
+                            out['ema_5'] = ema5
+                            out['ema_10'] = ema10
+                            out['ema_15'] = ema15
+                            out['ema_20'] = ema20
+                            out['fuzzy_score'] = score
+                            # Clip to requested period
+                            mask = (out.index >= _pd.to_datetime(start_date)) & (out.index <= _pd.to_datetime(end_date))
+                            out = out.loc[mask]
+                            if not out.empty:
+                                _agg_vectors[sym] = out
+                        except Exception:
+                            continue
+                    if len(_agg_vectors) > 0:
+                        vectors = _agg_vectors
+                        logger.info(f"Fallback vectors from hourly aggregation: symbols={len(vectors)}")
+                except Exception as _e:
+                    logger.warning(f"Hourly aggregation fallback failed: {_e}")
+            try:
+                logger.info(f"Indicator vectors built: symbols={len(vectors)}")
+                for _k, _df in list(vectors.items())[:5]:
+                    logger.info(f"  - {_k}: rows={0 if _df is None else len(_df)} cols={list(_df.columns) if _df is not None else []}")
+            except Exception:
+                pass
+            # If vectorization produced nothing (alignment or tz issues), fall back to strategy-collected fuzzy rows
+            sched = {}
+            if isinstance(vectors, dict) and len(vectors) > 0:
+                sched = SignalScheduler(leg_notional_brl=10000.0).build_schedule(vectors)
+
+            # Write consolidated fuzzy indicators CSV and signal matching math
+            try:
+                from pathlib import Path as _P
+                import pandas as _pd
+                _P('reports').mkdir(exist_ok=True)
+                rows_all = []
+                for sym, df in (vectors or {}).items():
+                    if df is None or df.empty:
+                        continue
+                    for ts, r in df.iterrows():
+                        fs = float(r.get('fuzzy_score', 0.0) or 0.0)
+                        side = 'BUY' if fs >= 1.50 else ('SELL' if fs <= -1.50 else 'HOLD')
+                        row = {
+                            'date': _pd.to_datetime(ts).tz_localize(None).date() if hasattr(_pd.to_datetime(ts), 'tz_localize') else _pd.to_datetime(ts).date(),
+                            'symbol': sym,
+                            'close': float(r.get('close', 0.0) or 0.0),
+                            'ibov_return': float(r.get('ibov_return', _pd.NA)) if r.get('ibov_return', None) is not None else _pd.NA,
+                            'symbol_return': float(r.get('symbol_return', _pd.NA)) if r.get('symbol_return', None) is not None else _pd.NA,
+                            'atr': float(r.get('atr', _pd.NA)) if r.get('atr', None) is not None else _pd.NA,
+                            'rsi': float(r.get('rsi', _pd.NA)) if r.get('rsi', None) is not None else _pd.NA,
+                            'ema_3': float(r.get('ema_3', _pd.NA)) if r.get('ema_3', None) is not None else _pd.NA,
+                            'ema_5': float(r.get('ema_5', _pd.NA)) if r.get('ema_5', None) is not None else _pd.NA,
+                            'ema_10': float(r.get('ema_10', _pd.NA)) if r.get('ema_10', None) is not None else _pd.NA,
+                            'ema_15': float(r.get('ema_15', _pd.NA)) if r.get('ema_15', None) is not None else _pd.NA,
+                            'ema_20': float(r.get('ema_20', _pd.NA)) if r.get('ema_20', None) is not None else _pd.NA,
+                            'fuzzy_score': fs,
+                            'signal_side': side,
+                        }
+                        rows_all.append(row)
+                df_all = _pd.DataFrame(rows_all)
+                if not df_all.empty:
+                    # Ensure date column is string YYYY-MM-DD for grouping
+                    df_all['date'] = _pd.to_datetime(df_all['date']).dt.strftime('%Y-%m-%d')
+                    # Add threshold metadata
+                    th_buy = 1.50
+                    th_sell = -1.50
+                    df_all['threshold_buy'] = th_buy
+                    df_all['threshold_sell'] = th_sell
+                    df_all['abs_fuzzy'] = df_all['fuzzy_score'].abs()
+                    df_all['out_of_range'] = (df_all['fuzzy_score'] >= th_buy) | (df_all['fuzzy_score'] <= th_sell)
+                    # Always write the full daily fuzzy table for diagnostics
+                    df_all.sort_values(['date','symbol']).to_csv('reports/portfolio_fuzzy_indicators_all.csv', index=False)
+                    # Keep only rows that cross thresholds per user request (primary CSV)
+                    df_sel = df_all[df_all['out_of_range']].sort_values(['date','symbol'])
+                    if not df_sel.empty:
+                        df_sel.to_csv('reports/portfolio_fuzzy_indicators.csv', index=False)
+                    else:
+                        logger.warning("No symbols crossed fuzzy thresholds in the selected period; primary CSV not written")
+                else:
+                    logger.warning("No fuzzy indicator rows produced; skipping CSV write to avoid empty file")
+
+                # Per-day BUY/SELL counts and matched pairs
+                if not df_all.empty:
+                    grp = df_all.groupby('date', dropna=False)['signal_side']
+                    recs = []
+                    total_buys = 0
+                    total_sells = 0
+                    total_matched = 0
+                    for d, s in grp:
+                        buys = int((s == 'BUY').sum())
+                        sells = int((s == 'SELL').sum())
+                        matched = int(min(buys, sells))
+                        total_buys += buys
+                        total_sells += sells
+                        total_matched += matched
+                        recs.append({'date': d, 'buys': buys, 'sells': sells, 'matched_pairs': matched})
+                    df_sig = _pd.DataFrame(recs).sort_values('date')
+                    # Append totals row
+                    df_tot = _pd.DataFrame([{'date': 'TOTAL', 'buys': total_buys, 'sells': total_sells, 'matched_pairs': total_matched}])
+                    df_sig = _pd.concat([df_sig, df_tot], ignore_index=True)
+                    df_sig.to_csv('reports/portfolio_signal_summary.csv', index=False)
+            except Exception as _e:
+                logger.warning(f"Failed to write fuzzy indicators/signal summary CSVs: {_e}")
+        except Exception as _e:
+            logger.warning(f"Multi-frame daily stage degraded: {_e}")
+            vectors = {}
+            sched = {}
+
         # Per-date, multi-symbol execution: build combined data once, then run a single simulator
         logger.info("🔄 Building combined execution dataset for all symbols...")
         t0_data = time.perf_counter()
@@ -431,21 +678,36 @@ def main():
         failures = []
         def _load_exec(sym: str):
             try:
-                res = hybrid_data_manager.initialize_backtest_data(
-                    symbol=sym,
-                    start_date=start_date,
-                    end_date=end_date,
-                    local_loader=data_loader
-                )
-                exec_df = res.get('execution_data')
-                if exec_df is None or exec_df.empty:
-                    logger.error(f"No execution data for {sym}")
-                    return None
-                df = exec_df.copy()
-                if getattr(df.index, 'tz', None) is not None:
-                    df.index = df.index.tz_localize(None)
-                df['symbol'] = sym
-                return df, res
+                # Multi-frame path: fetch hourly only for execution days if schedule exists; fallback to backtest range
+                from engine.market_utils import MarketDataRouter, DataRequirements
+                router = MarketDataRouter()
+                frames_local = []
+                days_map = DataRequirements.list_execution_days(sched)
+                days = days_map.get(sym, [])
+                if days:
+                    for d in days:
+                        ddf, _m = router.get_hourly_for_day(sym, d)
+                        if ddf is not None and not ddf.empty:
+                            ddf = ddf.copy(); ddf['symbol'] = sym; frames_local.append(ddf)
+                if not frames_local:
+                    # fallback: hourly for [start,end] only
+                    res = hybrid_data_manager.initialize_backtest_data(
+                        symbol=sym,
+                        start_date=start_date,
+                        end_date=end_date,
+                        local_loader=data_loader
+                    )
+                    exec_df = res.get('execution_data')
+                    if exec_df is None or exec_df.empty:
+                        logger.warning(f"No execution data for {sym} in fallback range")
+                        return None
+                    df = exec_df.copy()
+                    if getattr(df.index, 'tz', None) is not None:
+                        df.index = df.index.tz_localize(None)
+                    df['symbol'] = sym
+                    return df, res
+                df = pd.concat(frames_local, axis=0, ignore_index=False).sort_index()
+                return df, {'execution_data': df, 'data_sources': {'execution': {'source': 'router_hourly_execution_days'}}}
             except Exception as e:
                 logger.error(f"Error loading data for {sym}: {e}")
                 return None
@@ -509,12 +771,18 @@ def main():
             universe=tickers,
             warmup_bars=30,
             risk_tolerance=0.02,
-            max_position_size=0.10,
+            # In pair mode we must allow R$50k per leg on R$100k portfolio → 50%
+            max_position_size=(0.50 if args.pair_mode else 0.10),
             max_daily_loss=0.02,
             stop_loss_pct=0.05,
             take_profit_pct=0.10
         )
         market_utils = BrazilianMarketUtils()
+        # Load centralized pair mode into metadata config for downstream consumers
+        try:
+            _cfg['pair_mode'] = _cfg.get('pair_mode') or {}
+        except Exception:
+            pass
         strategy_context = StrategyContext(
             data_portal=data_loader,
             portfolio=portfolio,
@@ -525,6 +793,9 @@ def main():
                 'strategy_config_path': "config/profiles/fuzzy_fajuto_default.yaml",
                 'complete_data': combined,
                 'hybrid_data_result': {'execution_data': combined},
+                # Expose full config and tranche for strategy
+                'config': _cfg,
+                'tranche_notional_brl': ( (_cfg.get('pair_mode',{}).get('gross_exposure_brl',50000)/_cfg.get('pair_mode',{}).get('tranches',4)) if args.pair_mode else 10000.0 ),
             }
         )
         strategy_context.hybrid_data_manager = hybrid_data_manager
@@ -535,6 +806,214 @@ def main():
             profile=profile,
             config_file=config_file
         )
+        # Inject precomputed daily vectors and schedules into strategy (no indicators recompute in hourly)
+        try:
+            if isinstance(vectors, dict) and vectors:
+                # Map into strategy daily_data and indicators stores per symbol
+                strategy.daily_data = strategy.daily_data if hasattr(strategy, 'daily_data') else {}
+                strategy.daily_indicators_data = strategy.daily_indicators_data if hasattr(strategy, 'daily_indicators_data') else {}
+                for sym, df in vectors.items():
+                    try:
+                        # Minimal daily store: OHLC required for close-based limits
+                        # Use Brapi daily in IndicatorService; here we only keep index and close for alignment
+                        from pandas import DataFrame
+                        if isinstance(df, DataFrame) and not df.empty:
+                            # Build compact OHLC with close as proxy; open/high/low not re-used by indicators here
+                            dfd = df[['close']].copy()
+                            dfd['open'] = dfd['close']
+                            dfd['high'] = dfd['close']
+                            dfd['low'] = dfd['close']
+                            dfd['volume'] = 0
+                            strategy.daily_data[sym] = dfd[['open','high','low','close','volume']]
+                            # Indicators per symbol
+                            inds = {}
+                            for p in (3,5,10,15,20):
+                                k = f'ema_{p}';
+                                if k in df.columns:
+                                    inds[k] = df[k]
+                            if 'rsi' in df.columns:
+                                inds['rsi'] = df['rsi']
+                            if inds:
+                                strategy.daily_indicators_data[sym] = inds
+                    except Exception:
+                        pass
+                # Seed fuzzy diagnostics for reporting
+                try:
+                    strategy._fuzzy_rows = []
+                    for sym, df in vectors.items():
+                        for ts, row in df.iterrows():
+                            fs = float(row.get('fuzzy_score', 0.0) or 0.0)
+                            side = 'BUY' if fs >= 1.50 else ('SELL' if fs <= -1.50 else 'HOLD')
+                            strategy._fuzzy_rows.append({
+                                'date': str(pd.to_datetime(ts).date()),
+                                'symbol': sym,
+                                'side': side,
+                                'fuzzy_score': fs,
+                                'eligible': side in ('BUY','SELL'),
+                                'reason_if_not': '' if side in ('BUY','SELL') else 'below_threshold',
+                                'exposure_cap_brl': 40000.0,
+                                'notional_P1': 10000.0,
+                                'notional_P2': 10000.0,
+                                'notional_P3': 10000.0,
+                                'notional_P4': 10000.0,
+                            })
+                except Exception:
+                    pass
+            if isinstance(sched, dict) and sched:
+                strategy._scheduled_day_trades = sched
+                try:
+                    _k = list(sched.keys())
+                    logger.info(f"Injected T+1 schedule days: {len(_k)} | sample: {[_k[i] for i in range(min(3, len(_k)))]}")
+                except Exception:
+                    pass
+        except Exception as _e:
+            logger.warning(f"Failed to inject precomputed vectors/schedule: {_e}")
+
+        # Build schedule using the strategy's own fuzzy logic to guarantee alignment with intents
+        try:
+            if not isinstance(get('sched', locals()).get('sched', {}), dict):
+                pass
+        except Exception:
+            pass
+        try:
+            if not isinstance(locals().get('sched', {}), dict):
+                sched = {}
+            # Prefer strategy-derived schedule to ensure BUY/SELL parity with generate_intents
+            sched_from_strategy: dict = {}
+            if isinstance(vectors, dict) and vectors:
+                from engine.base_strategy import Bar
+                for sym, df in vectors.items():
+                    if df is None or len(df) == 0:
+                        continue
+                    # Ensure daily_data exists for symbol
+                    if not hasattr(strategy, 'daily_data') or sym not in strategy.daily_data:
+                        try:
+                            tmp = df[['close']].copy()
+                            tmp['open'] = tmp['close']; tmp['high'] = tmp['close']; tmp['low'] = tmp['close']; tmp['volume'] = 0
+                            strategy.daily_data = getattr(strategy, 'daily_data', {})
+                            strategy.daily_data[sym] = tmp[['open','high','low','close','volume']]
+                        except Exception:
+                            continue
+                    # Walk daily dates T and use strategy._generate_signal to decide T+1 schedule
+                    for ts, row in df.iterrows():
+                        try:
+                            ts_dt = pd.to_datetime(ts)
+                            b = Bar(symbol=sym,
+                                    timestamp=ts_dt.to_pydatetime(),
+                                    open=float(row.get('close', row.get('open', 0.0)) or 0.0),
+                                    high=float(row.get('close', row.get('high', 0.0)) or 0.0),
+                                    low=float(row.get('close', row.get('low', 0.0)) or 0.0),
+                                    close=float(row.get('close', 0.0) or 0.0),
+                                    volume=int(row.get('volume', 0) or 0))
+                            sig_val = 0
+                            try:
+                                sig_val = strategy._generate_signal(b)
+                            except Exception:
+                                sig_val = 0
+                            if sig_val == 0:
+                                continue
+                            side = OrderSide.BUY if sig_val > 0 else OrderSide.SELL
+                            # Use strategy limit calculator off close(t)
+                            atr_series = None
+                            try:
+                                atr_series = strategy.daily_indicators_data.get(sym, {}).get('atr')
+                            except Exception:
+                                atr_series = None
+                            atr_t = float(atr_series.loc[ts_dt]) if atr_series is not None and ts_dt in atr_series.index else 0.0
+                            try:
+                                p2, p3, p4 = strategy._calculate_entry_limits_from_close(float(row.get('close', 0.0) or 0.0), atr_t, side)
+                            except Exception:
+                                # Fallback to scheduler limits if strategy helper fails
+                                from engine.market_utils import SignalScheduler as _SS
+                                p2, p3, p4 = _SS()._limits_from_close(float(row.get('close', 0.0) or 0.0), 'BUY' if side == OrderSide.BUY else 'SELL')
+                            d_exec = (ts_dt + pd.Timedelta(days=1)).date()
+                            day_store = sched_from_strategy.setdefault(d_exec, {})
+                            day_store[sym] = {
+                                'symbol': sym,
+                                'side': side,
+                                'valid_for_date': d_exec,
+                                'base_close_t': float(row.get('close', 0.0) or 0.0),
+                                'limits_used': {'limit_level_2': float(p2), 'limit_level_3': float(p3), 'limit_level_4': float(p4)},
+                                'current_atr_t': float(atr_t),
+                                'fuzzy_score_t': float(abs(getattr(strategy, '_last_signal_strength', sig_val)))
+                            }
+                        except Exception:
+                            continue
+            # Overwrite schedule if we produced any using strategy logic
+            if sched_from_strategy:
+                strategy._scheduled_day_trades = sched_from_strategy
+                try:
+                    _k2 = list(sched_from_strategy.keys())
+                    logger.info(f"Strategy-derived T+1 schedule days: {len(_k2)} | sample: {[_k2[i] for i in range(min(3, len(_k2)))]}")
+                except Exception:
+                    pass
+        except Exception as _e:
+            logger.warning(f"Failed to build schedule from strategy logic: {_e}")
+
+        # Pair-mode: pre-simulation candidate selection and injection (top BUY/SELL per day)
+        if args.pair_mode:
+            try:
+                csv_path = export_fuzzy_components_to_csv(tickers, start_dt.strftime('%Y-%m-%d'), end_date, _cfg)
+                if csv_path:
+                    import pandas as _pd
+                    df = _pd.read_csv(csv_path)
+                    req = {'date','symbol','qualified_signal','fuzzy_score_raw'}
+                    if req.issubset(df.columns):
+                        pair_schedule: dict = {}
+                        for d, g in df.groupby('date'):
+                            buys = g[g['qualified_signal']=='BUY']
+                            sells = g[g['qualified_signal']=='SELL']
+                            if len(buys)==0 or len(sells)==0:
+                                continue
+                            b = buys.sort_values('fuzzy_score_raw', ascending=False).iloc[0]
+                            s = sells.sort_values('fuzzy_score_raw', ascending=True).iloc[0]
+                            exec_date = (pd.to_datetime(d) + pd.Timedelta(days=1)).date()
+                            day_store = pair_schedule.setdefault(exec_date, {})
+                            # Ensure close for limits
+                            close_b = float(b.get('close', float('nan')) if 'close' in b else float('nan'))
+                            close_s = float(s.get('close', float('nan')) if 'close' in s else float('nan'))
+                            if not (close_b == close_b and close_s == close_s):
+                                bench = ((_cfg.get('benchmark', {}) or {}).get('symbol')) or ((_cfg.get('brapi', {}) or {}).get('data', {}) or {}).get('ibov_symbol', '^BVSP')
+                                prepared = prepare_fuzzy_data(tickers, bench, start_dt.strftime('%Y-%m-%d'), end_date)
+                                m = prepared[['date','symbol','close']].set_index(['date','symbol'])
+                                if (d, b['symbol']) in m.index:
+                                    close_b = float(m.loc[(d, b['symbol'])]['close'])
+                                if (d, s['symbol']) in m.index:
+                                    close_s = float(m.loc[(d, s['symbol'])]['close'])
+                            def limits(side: str, c: float) -> tuple[float,float,float]:
+                                try:
+                                    return SignalScheduler()._limits_from_close(c, side)
+                                except Exception:
+                                    step = (0.005, 0.010, 0.015)
+                                    if side == 'BUY':
+                                        return (round(c*(1- step[0]),2), round(c*(1- step[1]),2), round(c*(1- step[2]),2))
+                                    else:
+                                        return (round(c*(1+ step[0]),2), round(c*(1+ step[1]),2), round(c*(1+ step[2]),2))
+                            p2b,p3b,p4b = limits('BUY', close_b)
+                            p2s,p3s,p4s = limits('SELL', close_s)
+                            day_store[str(b['symbol'])] = {
+                                'symbol': str(b['symbol']),
+                                'side': OrderSide.BUY,
+                                'valid_for_date': exec_date,
+                                'base_close_t': close_b,
+                                'limits_used': {'limit_level_2': p2b, 'limit_level_3': p3b, 'limit_level_4': p4b},
+                                'current_atr_t': float('nan'),
+                                'fuzzy_score_t': float(b['fuzzy_score_raw'])
+                            }
+                            day_store[str(s['symbol'])] = {
+                                'symbol': str(s['symbol']),
+                                'side': OrderSide.SELL,
+                                'valid_for_date': exec_date,
+                                'base_close_t': close_s,
+                                'limits_used': {'limit_level_2': p2s, 'limit_level_3': p3s, 'limit_level_4': p4s},
+                                'current_atr_t': float('nan'),
+                                'fuzzy_score_t': float(s['fuzzy_score_raw'])
+                            }
+                        if pair_schedule:
+                            strategy._scheduled_day_trades = pair_schedule
+                            logger.info(f"Injected pair_schedule days: {len(pair_schedule)}")
+            except Exception as e:
+                logger.warning(f"Pair-mode pre-sim selection failed: {e}")
 
         simulator = BacktestSimulator(
             strategy=strategy,
@@ -569,11 +1048,12 @@ def main():
             except Exception:
                 pass
 
-        # Render single HTML report (no CSV files)
+        # Render robust report (JSON + CSVs)
         try:
-            # Ensure output directory and path are defined up-front
+            # Ensure output directory and define output paths
             Path('reports').mkdir(parents=True, exist_ok=True)
-            html_path = Path('reports') / 'portfolio_execution_report.html'
+            fuzzy_html_path = Path('reports') / 'portfolio_execution_report.html'
+            exec_html_path = Path('reports') / 'portfolio_backtest_executions.html'
 
             # Get execution history from strategy (prefer in-memory DF; fallback to list)
             aggregated_exec_history = []
@@ -746,7 +1226,7 @@ def main():
                         total_trades = int(exec_df['_filled_int'].sum()) if '_filled_int' in exec_df.columns else 0
                         unique_symbols = ','.join(sorted(set(exec_df.get('symbol', pd.Series(dtype=str)).astype(str))))
                         period_text = f"{min(exec_df['date'])} - {max(exec_df['date'])}" if 'date' in exec_df.columns and len(exec_df) else ""
-                        # Build enriched data payload for advanced HTML report (UI/UX only; no engine changes)
+                        # Build enriched data payload for advanced report and JSON schema
                         import json as _json
                         # Ensure timestamp parsed
                         try:
@@ -907,17 +1387,53 @@ def main():
                         date_list = sorted(list({r['date'] for r in derived_rows if r['date']}))
                         date_min = date_list[0] if date_list else ''
                         date_max = date_list[-1] if date_list else ''
-                        # Optional fuzzy_by_date ingestion if present
+                        # Fuzzy rows directly from strategy memory (already filtered to chosen side only)
                         fuzzy_rows = []
                         try:
-                            import os as _os
-                            _fz = Path('reports') / 'fuzzy_by_date.csv'
-                            if _fz.exists():
-                                _fz_df = pd.read_csv(_fz)
-                                # Normalize types
-                                if 'date' in _fz_df.columns:
-                                    _fz_df['date'] = _fz_df['date'].astype(str)
-                                fuzzy_rows = _fz_df.to_dict(orient='records')
+                            fz = getattr(strategy, '_fuzzy_rows', None)
+                            if fz:
+                                out = []
+                                for r in fz:
+                                    row = dict(r)
+                                    row.setdefault('date', str(row.get('date','')))
+                                    row.setdefault('symbol', row.get('symbol',''))
+                                    row.setdefault('side', row.get('side',''))
+                                    row.setdefault('fuzzy_score', row.get('fuzzy_score', 0.0))
+                                    row.setdefault('ret_vs_ibov', row.get('ret_vs_ibov', None))
+                                    row.setdefault('ema_sum', row.get('ema_sum', None))
+                                    row.setdefault('rsi_term', row.get('rsi_term', None))
+                                    row.setdefault('eligible', row.get('eligible', False))
+                                    row.setdefault('reason_if_not', row.get('reason_if_not',''))
+                                    row.setdefault('exposure_cap_brl', row.get('exposure_cap_brl', 0.0))
+                                    row.setdefault('notional_P1', row.get('notional_P1', 0.0))
+                                    row.setdefault('notional_P2', row.get('notional_P2', 0.0))
+                                    row.setdefault('notional_P3', row.get('notional_P3', 0.0))
+                                    row.setdefault('notional_P4', row.get('notional_P4', 0.0))
+                                    out.append(row)
+                                fuzzy_rows = out
+                                # Fallback: write fuzzy indicators and signal summary from in-memory rows
+                                try:
+                                    import pandas as _pd
+                                    from pathlib import Path as _P
+                                    _P('reports').mkdir(exist_ok=True)
+                                    df_fz = _pd.DataFrame(fuzzy_rows)
+                                    if not df_fz.empty:
+                                        df_fz_sorted = df_fz.sort_values(['date','symbol']) if set(['date','symbol']).issubset(df_fz.columns) else df_fz
+                                        df_fz_sorted.to_csv('reports/portfolio_fuzzy_indicators.csv', index=False)
+                                        if 'date' in df_fz_sorted.columns and 'side' in df_fz_sorted.columns:
+                                            g = df_fz_sorted.groupby('date')['side']
+                                            recs = []
+                                            tb = ts = tm = 0
+                                            for d, s in g:
+                                                b = int((s == 'BUY').sum()); se = int((s == 'SELL').sum()); m = min(b, se)
+                                                tb += b; ts += se; tm += m
+                                                recs.append({'date': d, 'buys': b, 'sells': se, 'matched_pairs': m})
+                                            import pandas as _pd2
+                                            df_sig = _pd2.DataFrame(recs).sort_values('date')
+                                            df_tot = _pd2.DataFrame([{'date': 'TOTAL', 'buys': tb, 'sells': ts, 'matched_pairs': tm}])
+                                            _pd2.concat([df_sig, df_tot], ignore_index=True).to_csv('reports/portfolio_signal_summary.csv', index=False)
+                                except Exception:
+                                    pass
                         except Exception:
                             fuzzy_rows = []
 
@@ -935,6 +1451,14 @@ def main():
                                 'totalTrades': int(sum(1 for r in derived_rows if r['filled'])),
                             }
                         }
+                        # Attach preflight and ingestion diagnostics
+                        preflight['signals']['rows'] = fuzzy_rows
+                        preflight['ingestion']['diagnostics'] = {
+                            'execution_input_rows': int(len(filtered_data)),
+                            'execution_unique_days': int(len(set(filtered_data.index.date))),
+                        }
+                        preflight['outcomes']['summary'] = report_payload['kpis']
+                        _write_report(preflight)
                         REPORT_JSON = _json.dumps(report_payload, ensure_ascii=False)
                         # Server-side render of fuzzy table for graceful no-JS viewing
                         def _fmt_brl(x):
@@ -943,6 +1467,13 @@ def main():
                             except Exception:
                                 return ''
                         fuzzy_rows_sorted = sorted(fuzzy_rows, key=lambda r: (str(r.get('date','')), str(r.get('symbol',''))))
+                        period_text = f"{start_date} - {end_date}"
+                        # Render with debug breakdown columns: ret_vs_ibov, ema_sum, rsi_term
+                        def _fmt(x, nd=2):
+                            try:
+                                return f"{float(x):.{nd}f}"
+                            except Exception:
+                                return "-"
                         fuzzy_table_html = "\n".join(
                             [
                                 f"<tr align='right'>"
@@ -950,13 +1481,11 @@ def main():
                                 f"<td>{_html_escape(str(r.get('symbol','')))}</td>"
                                 f"<td>{_html_escape(str(r.get('side','')))}</td>"
                                 f"<td>{(float(r.get('fuzzy_score',0.0))):.4f}</td>"
+                                f"<td>{_fmt(r.get('ret_vs_ibov', None), 2)}</td>"
+                                f"<td>{_fmt(r.get('ema_sum', None), 2)}</td>"
+                                f"<td>{_fmt(r.get('rsi_term', None), 2)}</td>"
                                 f"<td>{'Yes' if r.get('eligible') else 'No'}</td>"
-                                f"<td>{_html_escape(str(r.get('reason_if_not','') or ''))}</td>"
                                 f"<td>{_fmt_brl(r.get('exposure_cap_brl',0.0))}</td>"
-                                f"<td>{_fmt_brl(r.get('notional_P1',0.0))}</td>"
-                                f"<td>{_fmt_brl(r.get('notional_P2',0.0))}</td>"
-                                f"<td>{_fmt_brl(r.get('notional_P3',0.0))}</td>"
-                                f"<td>{_fmt_brl(r.get('notional_P4',0.0))}</td>"
                                 f"</tr>"
                                 for r in fuzzy_rows_sorted
                             ]
@@ -1021,12 +1550,15 @@ def main():
                                     f"</tr>"
                                 )
                         orders_table = "\n".join(orders_rows)
+                        # Build executions HTML (includes consolidated daily and orders detail)
+                        # Display configured date range from settings, not inferred min/max rows
+                        period_text = f"{start_date} - {end_date}"
                         placeholder_tpl = """
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset='utf-8'>
-  <title>Relatório de Execução de Portfólio</title>
+  <title>Relatório de Execuções do Backtest</title>
   <style>
     :root { --bg:#ffffff; --fg:#000000; --muted:#555; --card:#f6f8fa; --accent:#0b5fff; }
     [data-theme="dark"] { --bg:#0d1117; --fg:#c9d1d9; --muted:#8b949e; --card:#161b22; --accent:#58a6ff; }
@@ -1136,7 +1668,7 @@ def main():
     <table cellspacing='1' cellpadding='3' border='0'>
       <thead class='sticky'>
         <tr align='center'>
-          <th>Data</th><th>Ativo</th><th>Lado</th><th>Fuzzy</th><th>Elegível</th><th>Motivo (se não)</th><th>Capex (BRL)</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th>
+          <th>Data</th><th>Ativo</th><th>Lado</th><th>Fuzzy</th><th>ret_vs_ibov</th><th>ema_sum</th><th>rsi_term</th><th>Elegível</th><th>Capex (BRL)</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th>
         </tr>
       </thead>
       <tbody id='fuzzyTableBody' class='zebra'>
@@ -1219,88 +1751,108 @@ def main():
 </body>
 </html>
 """
-                        template = (
-                            placeholder_tpl
-                            .replace('%%PERIOD%%', _html_escape(period_text))
-                            .replace('%%SYMBOLS%%', _html_escape(unique_symbols))
-                            .replace('%%TOTAL_TRADES%%', str(total_trades))
-                            .replace('%%TOTAL_PNL%%', fmt_money(total_pnl))
-                            .replace('%%DAILY_TABLE%%', daily_table)
-                            .replace('%%ORDERS_TABLE%%', orders_table)
-                            .replace('%%FUZZY_TABLE%%', fuzzy_table_html)
-                            .replace('%%REPORT_JSON%%', REPORT_JSON)
-                        )
+        # Write execution CSVs
+                        import pandas as _pd
                         t0_report = time.perf_counter()
-                        with open(html_path, 'w', encoding='utf-8') as f:
-                            f.write(template)
-                        print(f"HTML report saved to: {html_path}")
+                        # Skip legacy execution CSVs – focus on razor CSV only
                         report_secs = time.perf_counter() - t0_report
 
-                        # Post-generation validation: run execution-vs-BRAPI test
-                        try:
-                            import os as _os
-                            import subprocess as _sp
-                            # Allow disabling via env var if needed
-                            if _os.getenv('RUN_EXEC_VALIDATION', '1').lower() in ('1', 'true', 'yes'):
-                                validation_args = [
-                                    'pytest',
-                                    'tests/test_validate_html_executions_against_brapi.py',
-                                    '--report-html', str(html_path),
-                                    '--tolerance', _os.getenv('VALIDATION_TOLERANCE', '0.01'),
-                                    '-q'
-                                ]
-                                print("Running execution validation test (html vs BRAPI)...")
-                                _sp.run(validation_args, check=False)
-                        except Exception as _e:
-                            logger.warning(f"Execution validation step skipped: {_e}")
+                        # Razor-focused fuzzy component export and pair candidate selection
+                    except Exception as e:
+                        logger.warning(f"Failed to consolidate execution history: {e}")
+                    try:
+                        csv_path = export_fuzzy_components_to_csv(tickers, start_date, end_date, _cfg)
+                        if csv_path:
+                            logger.info(f"Fuzzy components CSV: {csv_path}")
+                            if args.pair_mode:
+                                import pandas as _pd
+                                df = _pd.read_csv(csv_path)
+                                req = {'date','symbol','qualified_signal','fuzzy_score_raw'}
+                                if req.issubset(df.columns):
+                                    # Build per-day top BUY and SELL selection
+                                    pair_schedule: dict = {}
+                                    for d, g in df.groupby('date'):
+                                        buys = g[g['qualified_signal']=='BUY']
+                                        sells = g[g['qualified_signal']=='SELL']
+                                        if len(buys)==0 or len(sells)==0:
+                                            continue
+                                        b = buys.sort_values('fuzzy_score_raw', ascending=False).iloc[0]
+                                        s = sells.sort_values('fuzzy_score_raw', ascending=True).iloc[0]
+                                        exec_date = (pd.to_datetime(d) + pd.Timedelta(days=1)).date()
+                                        day_store = pair_schedule.setdefault(exec_date, {})
+                                        # Use SignalScheduler to compute limit ladder off close; fall back to ±0.5/1.0/1.5%
+                                        close_b = float(b.get('close', float('nan')) if 'close' in b else float('nan'))
+                                        close_s = float(s.get('close', float('nan')) if 'close' in s else float('nan'))
+                                        # Try to fetch closes via prepare_fuzzy_data if absent
+                                        if not (close_b == close_b and close_s == close_s):
+                                            bench = ((_cfg.get('benchmark', {}) or {}).get('symbol')) or ((_cfg.get('brapi', {}) or {}).get('data', {}) or {}).get('ibov_symbol', '^BVSP')
+                                            prepared = prepare_fuzzy_data(tickers, bench, start_date, end_date)
+                                            m = prepared[['date','symbol','close']]
+                                            mm = m.set_index(['date','symbol'])
+                                            close_b = float(mm.loc[(d, b['symbol'])]['close']) if (d, b['symbol']) in mm.index else close_b
+                                            close_s = float(mm.loc[(d, s['symbol'])]['close']) if (d, s['symbol']) in mm.index else close_s
+                                    
+                                        def limits(side: str, c: float) -> tuple[float,float,float]:
+                                            try:
+                                                return SignalScheduler()._limits_from_close(c, side)
+                                            except Exception:
+                                                step = (0.005, 0.010, 0.015)
+                                                if side == 'BUY':
+                                                    return (round(c*(1- step[0]),2), round(c*(1- step[1]),2), round(c*(1- step[2]),2))
+                                                else:
+                                                    return (round(c*(1+ step[0]),2), round(c*(1+ step[1]),2), round(c*(1+ step[2]),2))
+                                        p2b,p3b,p4b = limits('BUY', close_b)
+                                        p2s,p3s,p4s = limits('SELL', close_s)
+                                        day_store[str(b['symbol'])] = {
+                                            'symbol': str(b['symbol']),
+                                            'side': OrderSide.BUY,
+                                            'valid_for_date': exec_date,
+                                            'base_close_t': close_b,
+                                            'limits_used': {'limit_level_2': p2b, 'limit_level_3': p3b, 'limit_level_4': p4b},
+                                            'current_atr_t': float('nan'),
+                                            'fuzzy_score_t': float(b['fuzzy_score_raw'])
+                                        }
+                                        day_store[str(s['symbol'])] = {
+                                            'symbol': str(s['symbol']),
+                                            'side': OrderSide.SELL,
+                                            'valid_for_date': exec_date,
+                                            'base_close_t': close_s,
+                                            'limits_used': {'limit_level_2': p2s, 'limit_level_3': p3s, 'limit_level_4': p4s},
+                                            'current_atr_t': float('nan'),
+                                            'fuzzy_score_t': float(s['fuzzy_score_raw'])
+                                        }
+                                    if pair_schedule:
+                                        # Inject into strategy context to be consumed by strategy/simulator
+                                        try:
+                                            strategy._scheduled_day_trades = pair_schedule
+                                        except Exception:
+                                            pass
+                                        # Also persist a summary CSV
+                                        rows = []
+                                        for d, syms in pair_schedule.items():
+                                            buy = next((v for v in syms.values() if getattr(v.get('side'),'name','')=='BUY' or v.get('side')==OrderSide.BUY), None)
+                                            sell = next((v for v in syms.values() if getattr(v.get('side'),'name','')=='SELL' or v.get('side')==OrderSide.SELL), None)
+                                            if buy and sell:
+                                                rows.append({'date': d, 'buy_symbol': buy['symbol'], 'sell_symbol': sell['symbol']})
+                                        if rows:
+                                            out = _pd.DataFrame(rows).sort_values('date')
+                                            out_path = Path('reports')/ 'pair_mode_summary.csv'
+                                            out.to_csv(out_path, index=False)
+                                            logger.info(f"Pair mode summary: {out_path}")
+                    except Exception as _e:
+                        logger.warning(f"Failed to write fuzzy components CSV / pair schedule: {_e}")
                     except Exception as e:
                         logger.warning(f"Failed to build daily consolidated execution history: {e}")
                 except Exception as e:
                     logger.warning(f"Failed to save aggregated execution history: {e}")
             else:
-                # No executions available: write minimal stub so a file exists
+                # No legacy fallbacks – we only care about fuzzy components CSV now
                 try:
-                    fallback_period = f"{start_date} - {end_date}"
-                    fallback_symbols = ','.join(tickers)
-                    stub_tpl = """
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <title>Relatório de Execução de Portfólio</title>
-  <meta name='generator' content='quant_b3_backtest'>
-  <meta name='report-class' content='A'>
-  <meta name='period' content='%%PERIOD%%'>
-  <meta name='symbols' content='%%SYMBOLS%%'>
-  <meta name='total-trades' content='0'>
-  <meta name='total-pnl' content='0,00'>
-  <meta name='currency' content='BRL'>
-  <meta name='locale' content='pt-BR'>
-  <style>
-    body { font-family: Tahoma, Arial, sans-serif; margin: 16px; }
-    .box { border: 1px solid #ccc; padding: 14px; border-radius: 6px; background: #f8f9fa; }
-  </style>
-  </head>
-  <body>
-    <h2>Relatório de Execução de Portfólio</h2>
-    <div class='box'>
-      <div><strong>Período:</strong> %%PERIOD%%</div>
-      <div><strong>Ativos:</strong> %%SYMBOLS%%</div>
-      <div style='margin-top:10px;'>Nenhuma execução foi gerada neste intervalo. O relatório foi criado sem dados.</div>
-    </div>
-  </body>
-</html>
-"""
-                    stub_html = (
-                        stub_tpl
-                        .replace('%%PERIOD%%', str(fallback_period))
-                        .replace('%%SYMBOLS%%', str(fallback_symbols))
-                    )
-                    with open(html_path, 'w', encoding='utf-8') as _f:
-                        _f.write(stub_html)
-                    print(f"HTML report saved to: {html_path} (no executions)")
+                    csv_path = export_fuzzy_components_to_csv(tickers, start_date, end_date, _cfg)
+                    if csv_path:
+                        logger.info(f"Fuzzy components CSV: {csv_path}")
                 except Exception as _e:
-                    logger.warning(f"Failed to write stub HTML report: {_e}")
+                    logger.warning(f"Failed to write fuzzy components CSV: {_e}")
         except Exception as e:
             logger.error(f"Failed to render HTML report: {e}")
 

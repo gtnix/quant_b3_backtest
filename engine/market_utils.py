@@ -966,6 +966,282 @@ class DataValidationComparator:
         
         print(f"\n🧪 DATA VALIDATION REPORT: {symbol}")
         print("=" * 60)
+
+
+# =============================
+# Multi-frame services (no new files)
+# =============================
+
+class IndicatorService:
+    """
+    Daily-only indicator orchestration and FuzzyFajuto score calculation.
+    Operates independently from the simulator; does not fetch or require hourly data.
+    """
+    def __init__(self, api_token_env: str = 'BRAPI_API_TOKEN', cache_dir: str = 'data/brapi_cache'):
+        self.api_token_env = api_token_env
+        self.cache_dir = cache_dir
+        self.ind_calc = DailyTechnicalIndicators()
+
+    def _fetch_daily(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        from engine.brapi_provider import BrapiProvider
+        import os as _os
+        bp = BrapiProvider(api_token=_os.environ.get(self.api_token_env, ''), cache_dir=self.cache_dir)
+        df = bp.get_daily_data(symbol, start, end)
+        if df is None:
+            return pd.DataFrame()
+        try:
+            df.index = pd.to_datetime(df.index)
+        except Exception:
+            pass
+        return df
+
+    def compute_daily_vectors(self, symbols: list[str], benchmark: str, start: str, end: str,
+                               ema_periods: list[int] = [3,5,10,15,20], rsi_period: int = 10,
+                               atr_period: int = 14, warmup_min_sessions: int = 60,
+                               buffer_sessions: int = 5) -> dict[str, pd.DataFrame]:
+        # Extend daily window for warmup
+        start_dt = pd.to_datetime(start)
+        warmup_days = max(3 * max(ema_periods), rsi_period + 1, atr_period + 1, warmup_min_sessions) + buffer_sessions
+        start_warm = (start_dt - pd.tseries.offsets.BDay(warmup_days)).date().strftime('%Y-%m-%d')
+        # Fetch benchmark
+        ibov = self._fetch_daily(benchmark, start_warm, end)
+        ibov_available = not ibov.empty
+        if ibov_available:
+            # Normalize index to tz-naive daily dates to avoid tz/clock comparisons
+            try:
+                ibov.index = pd.to_datetime(ibov.index).tz_localize(None).normalize()
+            except Exception:
+                ibov.index = pd.to_datetime(ibov.index).normalize()
+            ibov = ibov.sort_index()
+            ibov['ret'] = ibov['close'].pct_change()
+        results: dict[str, pd.DataFrame] = {}
+        for sym in symbols:
+            try:
+                df = self._fetch_daily(sym, start_warm, end)
+                if df is None or df.empty:
+                    continue
+                # Normalize to tz-naive daily dates
+                try:
+                    df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
+                except Exception:
+                    df.index = pd.to_datetime(df.index).normalize()
+                df = df.sort_index()
+                # Align dates strictly (intersection) with benchmark if available; otherwise use symbol dates
+                common = df.index.intersection(ibov.index) if ibov_available else df.index
+                if len(common) == 0:
+                    continue
+                df = df.loc[common]
+                # Indicators
+                ind = {
+                    'atr': self.ind_calc.calculate_atr(df, period=atr_period),
+                    'rsi': self.ind_calc.calculate_rsi(df, period=rsi_period)
+                }
+                for p in ema_periods:
+                    ind[f'ema_{p}'] = self.ind_calc.calculate_ema(df, period=p)
+                # Vectorize FuzzyFajuto score on aligned days
+                sym_ret = df['close'].pct_change()
+                if ibov_available:
+                    ibov_al = ibov.loc[common]
+                    ibov_ret = ibov_al['ret']
+                else:
+                    # Fallback: no benchmark available; treat ret_vs_ibov as sign of symbol return only
+                    ibov_ret = pd.Series(0.0, index=common)
+                # Components
+                ret_vs_ibov_term = (sym_ret > ibov_ret).astype(int) - (sym_ret < ibov_ret).astype(int)
+                ema_sum = pd.Series(0.0, index=common)
+                for p in ema_periods:
+                    key = f'ema_{p}'
+                    s = ind[key]
+                    # Align to index; if missing values, keep at 0 contribution
+                    s_al = s.reindex(common)
+                    ema_sum = ema_sum + ((df['close'].reindex(common) > s_al).astype(float) - (df['close'].reindex(common) < s_al).astype(float)) * 0.25
+                rsi_term = pd.Series(0.0, index=common)
+                rsi_al = ind['rsi'].reindex(common)
+                rsi_term = rsi_term.where(True, other=0.0)  # placeholder
+                rsi_term = pd.Series(0.0, index=common)
+                rsi_term[rsi_al > 65] = 0.25
+                rsi_term[rsi_al < 35] = -0.25
+                score = ret_vs_ibov_term.astype(float) + ema_sum.fillna(0.0) + rsi_term.fillna(0.0)
+                # Slice to requested [start, end] using daily dates (tz-naive)
+                try:
+                    start_d = pd.to_datetime(start).tz_localize(None).normalize()
+                except Exception:
+                    start_d = pd.to_datetime(start).normalize()
+                try:
+                    end_d = pd.to_datetime(end).tz_localize(None).normalize()
+                except Exception:
+                    end_d = pd.to_datetime(end).normalize()
+                idx = score.index[(score.index >= start_d) & (score.index <= end_d)]
+                if len(idx) == 0:
+                    continue
+                out = pd.DataFrame(index=idx)
+                out['close'] = df['close'].reindex(idx)
+                out['ibov_return'] = ibov_ret.reindex(idx)
+                out['symbol_return'] = sym_ret.reindex(idx)
+                for k, s in ind.items():
+                    out[k] = s.reindex(idx)
+                out['fuzzy_score'] = score.reindex(idx)
+                # Persist
+                results[sym] = out
+            except Exception:
+                continue
+        return results
+
+
+class SignalScheduler:
+    """
+    Consumes daily vectors and creates T+1 four-leg schedules per symbol-date.
+    """
+    def __init__(self, round_lot_size: int = 100, tick_size: float = 0.01,
+                 leg_notional_brl: float = 10000.0,
+                 buy_threshold: float = 1.50, sell_threshold: float = -1.50):
+        self.round_lot_size = int(round_lot_size)
+        self.tick_size = float(tick_size)
+        self.leg_notional_brl = float(leg_notional_brl)
+        self.buy_th = float(buy_threshold)
+        self.sell_th = float(sell_threshold)
+
+    def _round_to_tick(self, price: float) -> float:
+        return round(round(price / self.tick_size) * self.tick_size, 2)
+
+    def _round_to_lot(self, qty: float) -> int:
+        q = int(qty // self.round_lot_size) * self.round_lot_size
+        return max(q, 0)
+
+    def _limits_from_close(self, close_price: float, side: str) -> tuple[float, float, float]:
+        step1, step2, step3 = 0.005, 0.010, 0.015
+        if side == 'BUY':
+            p2 = max(close_price * (1.0 - step1), 0.01)
+            p3 = max(close_price * (1.0 - step2), 0.01)
+            p4 = max(close_price * (1.0 - step3), 0.01)
+        else:
+            p2 = close_price * (1.0 + step1)
+            p3 = close_price * (1.0 + step2)
+            p4 = close_price * (1.0 + step3)
+        return (self._round_to_tick(p2), self._round_to_tick(p3), self._round_to_tick(p4))
+
+    def build_schedule(self, vectors: dict[str, pd.DataFrame]) -> dict:
+        """
+        Returns: schedule dict keyed by execution date D = T+1
+        schedule[D][symbol] = { side, valid_for_date, base_close_t, limits_used:{...}, current_atr_t, fuzzy_score_t }
+        """
+        schedule: dict = {}
+        for sym, df in vectors.items():
+            if df is None or df.empty or 'fuzzy_score' not in df.columns:
+                continue
+            for ts, row in df.iterrows():
+                try:
+                    fs = float(row.get('fuzzy_score', 0.0))
+                    if fs >= self.buy_th:
+                        side = 'BUY'
+                    elif fs <= self.sell_th:
+                        side = 'SELL'
+                    else:
+                        continue
+                    close_t = float(row.get('close', 0.0) or 0.0)
+                    atr_t = float(row.get('atr', 0.0) or 0.0)
+                    p2, p3, p4 = self._limits_from_close(close_t, side)
+                    # Precompute quantities per leg (rounded to lot); market qty sized at open≈close for schedule
+                    qty1 = self._round_to_lot(self.leg_notional_brl / max(close_t, 1e-9))
+                    qty2 = self._round_to_lot(self.leg_notional_brl / max(p2, 1e-9))
+                    qty3 = self._round_to_lot(self.leg_notional_brl / max(p3, 1e-9))
+                    qty4 = self._round_to_lot(self.leg_notional_brl / max(p4, 1e-9))
+                    # Reject fully unfeasible zero-qty signals
+                    if max(qty1, qty2, qty3, qty4) == 0:
+                        continue
+                    d = (pd.to_datetime(ts) + pd.Timedelta(days=1)).date()
+                    day_store = schedule.setdefault(d, {})
+                    day_store[sym] = {
+                        'symbol': sym,
+                        'side': OrderSide.BUY if side == 'BUY' else OrderSide.SELL,
+                        'valid_for_date': d,
+                        'base_close_t': close_t,
+                        'limits_used': {'limit_level_2': p2, 'limit_level_3': p3, 'limit_level_4': p4},
+                        'current_atr_t': atr_t,
+                        'fuzzy_score_t': float(abs(fs))
+                    }
+                except Exception:
+                    continue
+        return schedule
+
+
+class DataRequirements:
+    """
+    Deterministic computation of data ranges needed for a run.
+    """
+    @staticmethod
+    def compute_daily_warmup(start: str, ema_max: int, rsi: int, atr: int, floor_sessions: int = 60, buffer_sessions: int = 5) -> dict:
+        start_dt = pd.to_datetime(start)
+        warmup_days = max(3 * int(ema_max), int(rsi) + 1, int(atr) + 1, int(floor_sessions)) + int(buffer_sessions)
+        warmup_start = (start_dt - pd.tseries.offsets.BDay(warmup_days)).date().strftime('%Y-%m-%d')
+        return {
+            'warmup_days': int(warmup_days),
+            'warmup_start': warmup_start,
+        }
+
+    @staticmethod
+    def list_execution_days(schedule: dict) -> dict[str, list[pd.Timestamp]]:
+        sym_to_days: dict[str, list[pd.Timestamp]] = {}
+        for d, syms in (schedule or {}).items():
+            for sym in syms.keys():
+                sym_to_days.setdefault(sym, []).append(pd.to_datetime(d))
+        for sym, lst in sym_to_days.items():
+            sym_to_days[sym] = sorted(list({pd.to_datetime(x).normalize() for x in lst}))
+        return sym_to_days
+
+
+class MarketDataRouter:
+    """
+    Centralized data access with local-first policy and graceful degradation.
+    """
+    def __init__(self, api_token_env: str = 'BRAPI_API_TOKEN', cache_dir: str = 'data/brapi_cache'):
+        from engine.brapi_provider import BrapiProvider
+        import os as _os
+        self._bp = BrapiProvider(api_token=_os.environ.get(api_token_env, ''), cache_dir=cache_dir)
+
+    def get_daily(self, symbol: str, start: str, end: str, min_sessions: int = 60, auto_extend_days: int = 120) -> tuple[pd.DataFrame, dict]:
+        meta = {'degraded_warmup': False, 'source': 'brapi_daily', 'attempts': []}
+        def _fetch(_start: str) -> pd.DataFrame:
+            try:
+                df = self._bp.get_daily_data(symbol, _start, end)
+                if df is None:
+                    return pd.DataFrame()
+                df.index = pd.to_datetime(df.index)
+                return df.sort_index()
+            except Exception as e:
+                meta['attempts'].append({'source': 'brapi_daily', 'error': str(e)})
+                return pd.DataFrame()
+        df = _fetch(start)
+        if len(df) < min_sessions:
+            # Auto-extend lookback using business days
+            start_dt = pd.to_datetime(start)
+            for extra in (30, 60, 90, auto_extend_days):
+                ext_start = (start_dt - pd.tseries.offsets.BDay(int(extra))).date().strftime('%Y-%m-%d')
+                dfx = _fetch(ext_start)
+                if len(dfx) >= min_sessions:
+                    df = dfx
+                    break
+            if len(df) < min_sessions:
+                meta['degraded_warmup'] = True
+        return df, meta
+
+    def get_hourly_for_day(self, symbol: str, day: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
+        meta = {'source': 'brapi_hourly', 'date': str(pd.to_datetime(day).date())}
+        try:
+            start = pd.to_datetime(day).strftime('%Y-%m-%d')
+            end = (pd.to_datetime(day) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            df = self._bp.get_hourly_data(symbol, start, end)
+            if df is None:
+                return pd.DataFrame(), meta
+            df = df.copy()
+            df.index = pd.to_datetime(df.index)
+            # Keep only this day
+            mask = (df.index.date == pd.to_datetime(day).date())
+            df = df.loc[mask]
+            return df.sort_index(), meta
+        except Exception as e:
+            meta['error'] = str(e)
+            return pd.DataFrame(), meta
         
         # Period info
         period = result['comparison_period']
@@ -1005,3 +1281,113 @@ class DataValidationComparator:
             print(f"  {rec}")
         
         print("=" * 60) 
+
+
+# =============================
+# FuzzyFajuto data preparation
+# =============================
+def prepare_fuzzy_data(symbols: list[str], benchmark: str, start_date, end_date) -> pd.DataFrame:
+    """
+    Prepare aligned daily OHLC-derived inputs for FuzzyFajuto.
+
+    Fetch window: max(90 calendar days, 60 business days) prior to start_date through end_date.
+    Outputs one row per (date, symbol) including:
+      stock_return, ibov_return, rs_component,
+      ema_3/5/10/15/20 signals (+0.25/-0.25/0), rsi_signal (+0.25/-0.25/0), atr_value.
+
+    Notes:
+    - No forward-fill of returns; alignment on common trading days only, then reindex to calendar
+    - Indicators computed from daily bars via generic DailyTechnicalIndicators
+    - Caller can safely slice to simulation window; lookback ensures EMA/ATR warm-up.
+    """
+    from pandas.tseries.offsets import BDay
+    ind = IndicatorService()
+    ind_calc = DailyTechnicalIndicators()
+
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+    lookback_90c = (start_dt - pd.Timedelta(days=90)).date().strftime('%Y-%m-%d')
+    lookback_60b = (start_dt - BDay(60)).date().strftime('%Y-%m-%d')
+    start_warm = min(lookback_90c, lookback_60b)
+
+    # Benchmark daily
+    ibov = ind._fetch_daily(benchmark, start_warm, end_dt.strftime('%Y-%m-%d'))
+    if ibov is None:
+        ibov = pd.DataFrame()
+    try:
+        ibov.index = pd.to_datetime(ibov.index).tz_localize(None).normalize()
+    except Exception:
+        ibov.index = pd.to_datetime(ibov.index).normalize()
+    ibov = ibov.sort_index()
+    ibov['ibov_return'] = ibov['close'].pct_change()
+
+    cal = pd.date_range(start=start_dt, end=end_dt, freq='D')
+    out_frames: list[pd.DataFrame] = []
+    for sym in symbols:
+        try:
+            df = ind._fetch_daily(sym, start_warm, end_dt.strftime('%Y-%m-%d'))
+            if df is None or df.empty:
+                continue
+            try:
+                df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
+            except Exception:
+                df.index = pd.to_datetime(df.index).normalize()
+            df = df.sort_index()
+            # Indicators (daily)
+            atr = ind_calc.calculate_atr(df, period=14)
+            ema3 = df['close'].ewm(span=3, adjust=False).mean()
+            ema5 = df['close'].ewm(span=5, adjust=False).mean()
+            ema10 = df['close'].ewm(span=10, adjust=False).mean()
+            ema15 = df['close'].ewm(span=15, adjust=False).mean()
+            ema20 = df['close'].ewm(span=20, adjust=False).mean()
+            delta = df['close'].diff()
+            up = delta.clip(lower=0).rolling(10).mean()
+            down = (-delta.clip(upper=0)).rolling(10).mean()
+            rs = up / (down.replace(0, pd.NA))
+            rsi = 100 - (100 / (1 + rs))
+            stock_ret = df['close'].pct_change()
+
+            common = df.index.intersection(ibov.index)
+            if len(common) == 0:
+                continue
+            base = pd.DataFrame(index=common)
+            base['close'] = df['close'].reindex(common)
+            base['stock_return'] = stock_ret.reindex(common)
+            base['ibov_return'] = ibov['ibov_return'].reindex(common)
+            rs_cmp = pd.Series(0.0, index=common)
+            rs_cmp[base['stock_return'] > base['ibov_return']] = 1.0
+            rs_cmp[base['stock_return'] < base['ibov_return']] = -1.0
+            base['rs_component'] = rs_cmp
+
+            def em_sig(ema_series: pd.Series) -> pd.Series:
+                sig = pd.Series(0.0, index=common)
+                ema_al = ema_series.reindex(common)
+                close_al = df['close'].reindex(common)
+                sig[close_al > ema_al] = 0.25
+                sig[close_al < ema_al] = -0.25
+                return sig
+
+            base['ema_3_signal'] = em_sig(ema3)
+            base['ema_5_signal'] = em_sig(ema5)
+            base['ema_10_signal'] = em_sig(ema10)
+            base['ema_15_signal'] = em_sig(ema15)
+            base['ema_20_signal'] = em_sig(ema20)
+
+            rsi_al = rsi.reindex(common)
+            rsi_sig = pd.Series(0.0, index=common)
+            rsi_sig[rsi_al > 65] = 0.25
+            rsi_sig[rsi_al < 35] = -0.25
+            base['rsi_signal'] = rsi_sig
+            base['atr_value'] = atr.reindex(common)
+
+            base = base.reindex(cal)
+            base.index.name = 'date'
+            base = base.reset_index()
+            base['symbol'] = sym
+            out_frames.append(base)
+        except Exception:
+            continue
+    if not out_frames:
+        cols = ['date','symbol','stock_return','ibov_return','rs_component','ema_3_signal','ema_5_signal','ema_10_signal','ema_15_signal','ema_20_signal','rsi_signal','atr_value']
+        return pd.DataFrame(columns=cols)
+    return pd.concat(out_frames, ignore_index=True).sort_values(['date','symbol'])

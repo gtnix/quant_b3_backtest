@@ -44,6 +44,8 @@ Date: 2025
 import sys
 import os
 import logging
+import time
+import math
 from datetime import datetime, date, timedelta
 from typing import Iterable, List, Dict, Any, Optional, Tuple, Sequence
 from collections import deque
@@ -129,6 +131,14 @@ class FuzzyFajutoStrategy(BaseStrategy):
 
         # Diagnostics buffers (lightweight): per-symbol/date fuzzy for CSV
         self._fuzzy_rows: list = []
+        # Day-trade scheduling store
+        self._scheduled_day_trades: Dict[date, Dict[str, Dict[str, Any]]] = {}
+        md = self._config.metadata if isinstance(self._config.metadata, dict) else {}
+        self.target_gross_exposure_per_side: float = float(md.get('target_gross_exposure_per_side', 0.5))
+        self.max_net_exposure: float = float(md.get('max_net_exposure', 0.02))
+        self.max_single_side_exposure: float = float(md.get('max_single_side_exposure', 0.5))
+        # Indicator warmup tracking
+        self.first_valid_indicator_date: Dict[str, date] = {}
     
     def _load_strategy_config(self):
         """Load strategy-specific configuration from specified config file."""
@@ -407,6 +417,8 @@ class FuzzyFajutoStrategy(BaseStrategy):
         
         # Neutrality state (market-neutral final gate)
         self.RISK_MARKET_NEUTRAL: bool = True
+        # Strict pairing: emit at most one BUY and one SELL symbol per day (net-neutral pair)
+        self.RISK_STRICT_ONE_PAIR: bool = True
         self._neutral_buffer: Dict[date, Dict[str, Dict[str, Any]]] = {}
         self._first_bar_seen_by_date: Dict[date, set] = {}
         try:
@@ -1319,35 +1331,15 @@ class FuzzyFajutoStrategy(BaseStrategy):
     
     def _round_to_lot_size(self, raw_quantity: float) -> int:
         """
-        Apply conservative rounding to convert raw quantity to valid lot size.
-        
-        Conservative rounding logic:
-        - If raw_quantity >= 50% of min_lot_size: Round to NEAREST lot size
-        - If raw_quantity < 50% of min_lot_size: Round DOWN to 0 (skip trade)
-        
-        Args:
-            raw_quantity: Raw calculated quantity (can be fractional)
-            
-        Returns:
-            Rounded quantity in valid lot sizes
+        Enforce B3 standard lots: multiples of min_lot_size (default 100). No odd lots.
+        Round to nearest full lot; minimum one lot if positive.
         """
         if raw_quantity <= 0:
             return 0
-        
-        # Calculate threshold for conservative rounding
-        threshold = self.min_lot_size * self.min_exposure_threshold
-        
-        if raw_quantity < threshold:
-            # Below threshold: skip trade (conservative approach)
-            return 0
-        else:
-            # At or above threshold: round to NEAREST lot size
-            # Use proper rounding (not ceiling division)
-            lots = round(raw_quantity / self.min_lot_size)
-            # Ensure we don't return 0 if raw_quantity >= threshold
-            if lots == 0 and raw_quantity >= threshold:
-                lots = 1
-            return lots * self.min_lot_size
+        lot = int(self.min_lot_size) if hasattr(self, 'min_lot_size') else 100
+        lots_float = float(raw_quantity) / float(max(1, lot))
+        lots = max(1, int(round(lots_float)))
+        return lots * lot
     
     def _calculate_order_quantities(self, symbol: str, bar: Bar) -> Tuple[int, int, int, int]:
         """
@@ -1365,20 +1357,8 @@ class FuzzyFajutoStrategy(BaseStrategy):
             self.context.logger.warning(f"Invalid bar data for {symbol}: open={bar.open}")
             return 0, 0, 0, 0
         
-        # Get portfolio value
-        portfolio_value = self.context.portfolio.get_portfolio_value()
-        if portfolio_value <= 0:
-            self.context.logger.warning(f"Invalid portfolio value for {symbol}: {portfolio_value}")
-            return 0, 0, 0, 0
-        
-        # Calculate total exposure for this asset
-        total_exposure = portfolio_value * self.asset_exposure_pct
-        if total_exposure <= 0:
-            self.context.logger.warning(f"Invalid total exposure for {symbol}: {total_exposure}")
-            return 0, 0, 0, 0
-        
-        # Per-order notional fixed at 15k BRL across 4 attempts (cap by asset exposure)
-        exposure_per_attempt = min(15000.0, total_exposure / 4.0)
+        # Fixed tranche sizing: 4 tranches of BRL 12,500 each -> total 50,000 per symbol
+        exposure_per_attempt = 12500.0
         
         # Get ATR and validate
         atr = self._get_daily_atr(symbol)
@@ -1445,7 +1425,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
         # Log calculation details for debugging
         self.context.logger.debug(f"Quantity calculation for {symbol}: exposure_per_attempt={exposure_per_attempt:.2f}, open={bar.open:.2f}")
         self.context.logger.debug(f"Raw quantities: qty1_raw={qty1_raw:.2f}, qty2_raw={qty2_raw:.2f}, qty3_raw={qty3_raw:.2f}, qty4_raw={qty4_raw:.2f}")
-        self.context.logger.debug(f"Conservative rounding: threshold={self.min_lot_size * self.min_exposure_threshold:.0f} shares")
+        # Keep logging concise; fixed tranche model
         self.context.logger.debug(f"Final quantities: qty1={qty1}, qty2={qty2}, qty3={qty3}, qty4={qty4}")
         
         # Emit lightweight sizing event and append fuzzy row (no rule changes)
@@ -1458,7 +1438,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
                     'date': str(bar.timestamp.date()),
                     'symbol': symbol,
                     'side': getattr(self, 'current_signal_side', OrderSide.SELL).name if hasattr(self, 'current_signal_side') else 'SELL',
-                    'exposure_cap_brl': float(self.context.portfolio.get_portfolio_value() * self.asset_exposure_pct),
+                    'exposure_cap_brl': float(50000.0),
                     'split_1_3_brl': float((self.context.portfolio.get_portfolio_value() * self.asset_exposure_pct) / 3.0),
                     'pre_round_qty_P1': float(exposure_per_attempt / max(bar.open, 1e-9)),
                     'pre_round_qty_P2': float(qty2_raw),
@@ -1479,19 +1459,38 @@ class FuzzyFajutoStrategy(BaseStrategy):
             pass
 
         try:
-            self._fuzzy_rows.append({
-                'date': str(bar.timestamp.date()),
+            # Upsert a single fuzzy row per (date, symbol)
+            if not hasattr(self, '_fuzzy_logged_dates'):
+                self._fuzzy_logged_dates = set()
+            date_str = str(bar.timestamp.date())
+            key = (date_str, symbol)
+            row = {
+                'date': date_str,
                 'symbol': symbol,
                 'side': getattr(self, 'current_signal_side', OrderSide.SELL).name if hasattr(self, 'current_signal_side') else 'SELL',
                 'fuzzy_score': float(abs(getattr(self, '_last_signal_strength', 0.0))),
                 'eligible': bool(qty1>0 or qty2>0 or qty3>0 or qty4>0),
                 'reason_if_not': None if (qty1>0 or qty2>0 or qty3>0 or qty4>0) else 'below_min_lot',
-                'exposure_cap_brl': float(self.context.portfolio.get_portfolio_value() * self.asset_exposure_pct),
+                'exposure_cap_brl': float(50000.0),
                 'notional_P1': float(bar.open * qty1),
                 'notional_P2': float(limit_price_alpha * qty2),
                 'notional_P3': float(limit_price_beta * qty3),
                 'notional_P4': float(limit_price_gamma * qty4),
-            })
+            }
+            # Replace existing row for same (date, symbol, side) if any
+            replaced = False
+            for i, r in enumerate(self._fuzzy_rows):
+                if r.get('date') == date_str and r.get('symbol') == symbol and r.get('side') == row['side']:
+                    # also set eligibility fields now that quantities are known
+                    eligible_now = bool(qty1>0 or qty2>0 or qty3>0 or qty4>0)
+                    row['eligible'] = eligible_now
+                    row['reason_if_not'] = None if eligible_now else 'below_min_lot'
+                    self._fuzzy_rows[i] = row
+                    replaced = True
+                    break
+            if not replaced:
+                self._fuzzy_rows.append(row)
+            self._fuzzy_logged_dates.add(key)
         except Exception:
             pass
 
@@ -1622,8 +1621,15 @@ class FuzzyFajutoStrategy(BaseStrategy):
             out['_remaining'] = remaining
             return out
 
-        buy_alloc = allocate(buys)
-        sell_alloc = allocate(sells)
+        # If strict one-pair mode: pick top fuzzy BUY and top fuzzy SELL only
+        if getattr(self, 'RISK_STRICT_ONE_PAIR', False):
+            buys_top = sorted(buys, key=lambda t: t[1], reverse=True)[:1]
+            sells_top = sorted(sells, key=lambda t: t[1], reverse=True)[:1]
+            buy_alloc = allocate(buys_top)
+            sell_alloc = allocate(sells_top)
+        else:
+            buy_alloc = allocate(buys)
+            sell_alloc = allocate(sells)
 
         def to_qty(alloc: Dict[str, Dict[str, float]]) -> Tuple[Dict[str, Dict[str, int]], float]:
             qty_map: Dict[str, Dict[str, int]] = {}
@@ -1802,6 +1808,136 @@ class FuzzyFajutoStrategy(BaseStrategy):
             f"market={open_price:.2f}, alpha={alpha_price:.2f}, beta={beta_price:.2f} "
             f"(min%: alpha>={self.min_alpha_pct*100:.2f}%, beta>={self.min_beta_pct*100:.2f}%)"
         )
+
+    def _calculate_entry_limits_from_close(self, close_price: float, atr: float, side: OrderSide) -> Tuple[float, float, float]:
+        """
+        Compute three limit prices off close(t) using fixed percentages per spec:
+        BUY: close * (1 - 0.5%), (1 - 1.0%), (1 - 1.5%)
+        SELL: close * (1 + 0.5%), (1 + 1.0%), (1 + 1.5%)
+        """
+        step1, step2, step3 = 0.005, 0.010, 0.015
+        if side == OrderSide.BUY:
+            p2 = max(close_price * (1.0 - step1), 0.01)
+            p3 = max(close_price * (1.0 - step2), 0.01)
+            p4 = max(close_price * (1.0 - step3), 0.01)
+        else:
+            p2 = close_price * (1.0 + step1)
+            p3 = close_price * (1.0 + step2)
+            p4 = close_price * (1.0 + step3)
+        return (p2, p3, p4)
+
+    # =====================
+    # Warmup Requirements
+    # =====================
+    def required_history(self) -> Dict[str, Any]:
+        """Declare indicator history requirements and warmup policy."""
+        # Defaults; allow overrides via config metadata
+        meta = self.config.metadata if isinstance(self.config.metadata, dict) else {}
+        ind_cfg = meta.get('indicators', {}) if isinstance(meta.get('indicators', {}), dict) else {}
+        cal_cfg = meta.get('calendar', {}) if isinstance(meta.get('calendar', {}), dict) else {}
+        ema_windows = ind_cfg.get('ema_windows', [3, 5, 10, 15, 20])
+        rsi_window = ind_cfg.get('rsi_window', 10)
+        atr_window = ind_cfg.get('atr_window', 14)
+        rel_strength_return_window = ind_cfg.get('rel_strength_return_window', 5)
+        daily_return_window = ind_cfg.get('daily_return_window', 1)
+        warmup_multiplier_for_ema = float(ind_cfg.get('warmup_multiplier_for_ema', 3.0))
+        buffer_sessions = int(ind_cfg.get('buffer_sessions', 5))
+        calendar_buffer_sessions = int(cal_cfg.get('buffer_sessions', 3))
+        return {
+            'ema_windows': ema_windows,
+            'rsi_window': rsi_window,
+            'atr_window': atr_window,
+            'rel_strength_return_window': rel_strength_return_window,
+            'daily_return_window': daily_return_window,
+            'warmup_multiplier_for_ema': warmup_multiplier_for_ema,
+            'buffer_sessions': buffer_sessions,
+            'calendar_buffer_sessions': calendar_buffer_sessions,
+        }
+
+    def prewarm_indicators(self, start_d: date, end_d: date) -> None:
+        """Fetch extended daily data and compute indicators for universe and ^BVSP."""
+        try:
+            symbols = list(self.config.universe)
+        except Exception:
+            symbols = []
+        # Include benchmark
+        bench = '^BVSP'
+        if bench not in symbols:
+            symbols = symbols + [bench]
+        # Fetch and compute per symbol
+        for sym in symbols:
+            try:
+                # Use existing helper to load range around date; fetch chunked by end date
+                # Single-range fetch path
+                df = self._get_daily_data_for_date(sym, end_d)
+                if df is None or df.empty:
+                    continue
+                # Filter to [start_d, end_d]
+                df = df[(df.index.date >= start_d) & (df.index.date <= end_d)]
+                if df.empty:
+                    continue
+                self.daily_data[sym] = df
+                self.daily_data_last_update[sym] = end_d
+                if sym != bench:
+                    # Compute indicators over extended window
+                    dti = DailyTechnicalIndicators()
+                    indicators: Dict[str, Any] = {}
+                    for p in (3, 5, 10, 15, 20):
+                        indicators[f'ema_{p}'] = dti.calculate_ema(df, period=p)
+                    indicators['rsi'] = dti.calculate_rsi(df, period=getattr(self, 'rsi_period', 10))
+                    self.daily_indicators_data[sym] = indicators
+                    self.daily_indicators_last_update[sym] = end_d
+                    # Determine first valid date where all needed indicators exist
+                    valid_idx = df.index
+                    try:
+                        ema20 = indicators.get('ema_20')
+                        rsi = indicators.get('rsi')
+                        mask = (~ema20.isna()) & (~rsi.isna())
+                        first_valid = valid_idx[mask].min().date() if mask.any() else None
+                        if first_valid:
+                            self.first_valid_indicator_date[sym] = first_valid
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+    def _ensure_eod_inputs(self, symbol: str, d: date) -> None:
+        """Ensure daily indicators for symbol and ^BVSP are initialized up to date d."""
+        try:
+            # Ensure symbol daily data exists up to d
+            daily_df = self._get_daily_data_up_to_date(symbol, d)
+            if daily_df is None or daily_df.empty or daily_df.index.max().date() != d:
+                # attempt refresh via existing machinery if available
+                try:
+                    self._refresh_daily_data(symbol, d)
+                except Exception:
+                    pass
+                daily_df = self._get_daily_data_up_to_date(symbol, d)
+            # Compute indicators (EMA 3,5,10,15,20 and RSI) for symbol at d
+            if daily_df is not None and not daily_df.empty:
+                dti = DailyTechnicalIndicators()
+                indicators: Dict[str, Any] = {}
+                try:
+                    for p in (3, 5, 10, 15, 20):
+                        indicators[f'ema_{p}'] = dti.calculate_ema(daily_df, period=p)
+                    indicators['rsi'] = dti.calculate_rsi(daily_df, period=getattr(self, 'rsi_period', 14))
+                    self.daily_indicators_data[symbol] = indicators
+                    self.daily_indicators_last_update[symbol] = d
+                except Exception:
+                    pass
+            # Ensure ^BVSP exists up to d
+            ibov_symbol = '^BVSP'
+            ibov_df = self._get_daily_data_up_to_date(ibov_symbol, d) if ibov_symbol in self.daily_data else None
+            if ibov_df is None or ibov_df.empty or ibov_df.index.max().date() != d:
+                try:
+                    fetched = self._get_daily_data_for_date(ibov_symbol, d)
+                    if fetched is not None and not fetched.empty:
+                        self.daily_data[ibov_symbol] = fetched
+                        self.daily_data_last_update[ibov_symbol] = d
+                except Exception:
+                    pass
+        except Exception:
+            return
     
     def _get_stored_order_price(self, symbol: str, trading_date: date, attempt_type: str) -> Optional[float]:
         """
@@ -1994,16 +2130,132 @@ class FuzzyFajutoStrategy(BaseStrategy):
         """
         # Pre-trade validation
         if not self._validate_bar_data(bar):
+            # Always log fuzzy diagnostics even if we cannot trade today
+            try:
+                date_str = str(bar.timestamp.date())
+                sig = 0
+                try:
+                    sig = self._generate_signal(bar)
+                except Exception:
+                    sig = 0
+                if sig != 0:
+                    chosen_side = OrderSide.BUY if sig > 0 else OrderSide.SELL
+                    row = {
+                        'date': date_str,
+                        'symbol': bar.symbol,
+                        'side': chosen_side.name,
+                        'fuzzy_score': float(getattr(self, '_last_signal_strength', 0.0)),
+                        'ret_vs_ibov': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ret_vs_ibov', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'ema_sum': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ema_sum', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'rsi_term': float(getattr(self, '_last_fuzzy_breakdown', {}).get('rsi_term', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'eligible': False,
+                        'reason_if_not': 'validation_failed',
+                        'exposure_cap_brl': float(50000.0),
+                        'notional_P1': 0.0,
+                        'notional_P2': 0.0,
+                        'notional_P3': 0.0,
+                        'notional_P4': 0.0,
+                    }
+                    replaced = False
+                    for i, r in enumerate(getattr(self, '_fuzzy_rows', [])):
+                        if r.get('date') == date_str and r.get('symbol') == bar.symbol:
+                            self._fuzzy_rows[i] = row
+                            replaced = True
+                            break
+                    if not replaced:
+                        if not hasattr(self, '_fuzzy_rows'):
+                            self._fuzzy_rows = []
+                        self._fuzzy_rows.append(row)
+            except Exception:
+                pass
             return []
         
         # Core recalculation engine - mandatory daily recalculation
         current_date = bar.timestamp.date()
         self.context.logger.debug(f"Processing bar for {bar.symbol} on {current_date} at {bar.timestamp.time()}")
+
+        # Ensure a single fuzzy row per (symbol, date) from day 1 of backtest
+        try:
+            if not hasattr(self, '_fuzzy_rows'):
+                self._fuzzy_rows = []
+            if not hasattr(self, '_fuzzy_logged_dates'):
+                self._fuzzy_logged_dates = set()
+            date_str = str(current_date)
+            key = (date_str, bar.symbol)
+            if key not in self._fuzzy_logged_dates:
+                # Decide a single side by score sign and log only that side
+                try:
+                    sig = self._generate_signal(bar)
+                except Exception:
+                    sig = 0
+                if sig != 0:
+                    chosen_side = OrderSide.BUY if sig > 0 else OrderSide.SELL
+                    row = {
+                        'date': date_str,
+                        'symbol': bar.symbol,
+                        'side': chosen_side.name,
+                        'fuzzy_score': float(getattr(self, '_last_signal_strength', 0.0)),
+                        'ret_vs_ibov': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ret_vs_ibov', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'ema_sum': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ema_sum', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'rsi_term': float(getattr(self, '_last_fuzzy_breakdown', {}).get('rsi_term', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                        'eligible': False,
+                        'reason_if_not': 'no_sizing',
+                        'exposure_cap_brl': float(50000.0),
+                        'notional_P1': 0.0,
+                        'notional_P2': 0.0,
+                        'notional_P3': 0.0,
+                        'notional_P4': 0.0,
+                    }
+                    # Upsert by (date, symbol)
+                    replaced = False
+                    for i, r in enumerate(self._fuzzy_rows):
+                        if r.get('date') == date_str and r.get('symbol') == bar.symbol:
+                            self._fuzzy_rows[i] = row
+                            replaced = True
+                            break
+                    if not replaced:
+                        self._fuzzy_rows.append(row)
+                self._fuzzy_logged_dates.add(key)
+        except Exception:
+            pass
         
         # Check if this is a new trading day requiring recalculation
         if self._is_new_trading_day(bar.symbol, current_date):
             self.context.logger.info(f"🔄 New trading day detected for {bar.symbol} on {current_date}")
             self._force_daily_recalculation(bar.symbol, current_date)
+            # Refresh fuzzy diagnostics row with post-recalculation values (logging only; no business change)
+            try:
+                sig = self._generate_signal(bar)
+                if sig != 0:
+                    chosen_side_name = (OrderSide.BUY if sig > 0 else OrderSide.SELL).name
+                    date_str = str(current_date)
+                    for i, r in enumerate(self._fuzzy_rows):
+                        if r.get('date') == date_str and r.get('symbol') == bar.symbol and r.get('side') == chosen_side_name:
+                            # Update diagnostics row and recompute eligibility based on stored daily quantities
+                            q_mkt = self._get_stored_order_quantity(bar.symbol, current_date, 'market') or 0
+                            q_a = self._get_stored_order_quantity(bar.symbol, current_date, 'limit_alpha') or 0
+                            q_b = self._get_stored_order_quantity(bar.symbol, current_date, 'limit_beta') or 0
+                            q_g = self._get_stored_order_quantity(bar.symbol, current_date, 'limit_gamma') or 0
+                            eligible_now = bool((q_mkt or 0) > 0 or (q_a or 0) > 0 or (q_b or 0) > 0 or (q_g or 0) > 0)
+                            self._fuzzy_rows[i] = {
+                                'date': date_str,
+                                'symbol': bar.symbol,
+                                'side': chosen_side_name,
+                                'fuzzy_score': float(getattr(self, '_last_signal_strength', 0.0)),
+                                'ret_vs_ibov': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ret_vs_ibov', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'ema_sum': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ema_sum', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'rsi_term': float(getattr(self, '_last_fuzzy_breakdown', {}).get('rsi_term', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'eligible': eligible_now,
+                                'reason_if_not': (None if eligible_now else 'below_min_lot'),
+                                'exposure_cap_brl': r.get('exposure_cap_brl', 0.0),
+                                'notional_P1': r.get('notional_P1', 0.0),
+                                'notional_P2': r.get('notional_P2', 0.0),
+                                'notional_P3': r.get('notional_P3', 0.0),
+                                'notional_P4': r.get('notional_P4', 0.0)
+                            }
+                            break
+            except Exception:
+                pass
         
         # Validate current ATR availability
         if bar.symbol not in self.current_atr_values:
@@ -2041,33 +2293,114 @@ class FuzzyFajutoStrategy(BaseStrategy):
         
         # Rule 2: Check if this is first bar of day (for market orders)
         is_first_bar = self._is_first_bar_of_day(bar.symbol, current_date)
-        
-        # Generate signal to determine if we should trade
-        signal = self._generate_signal(bar)
-        if signal == 0:
-            self.context.logger.debug(f"No trading signal for {bar.symbol}, skipping order generation")
-            return []
-        
-        # Determine order side based on signal
-        side = OrderSide.BUY if signal > 0 else OrderSide.SELL
-        self.context.logger.info(f"🎯 Trading signal: {side.value} for {bar.symbol} (signal={signal:.2f})")
-        
-        # Rule 3: Calculate order quantities
-        qty1, qty2, qty3, qty4 = self._calculate_order_quantities(bar.symbol, bar)
-        if qty1 == 0 and qty2 == 0 and qty3 == 0 and qty4 == 0:
-            self.context.logger.warning(f"All quantities are zero for {bar.symbol}, skipping trade")
-            return []
-        
-        # Rule 4: Store immutable order prices and quantities (calculated once per day)
-        self._store_daily_order_prices(bar.symbol, current_date, bar.open, atr, side)
-        self._store_daily_order_quantities(bar.symbol, current_date, qty1, qty2, qty3, qty4)
-        
-        # Rule 5: Emit orders only on first bar if we have a signal
-        if is_first_bar:
-            return self._emit_daily_orders(bar, current_date, side, qty1, qty2, qty3, qty4, atr, signal)
-        else:
-            # Not first bar, but still process any pending limit orders
-            return self._process_existing_orders(bar, current_date)
+
+        # Day-trade scheduled execution path (t+1 execution)
+        try:
+            scheduled_today = self._scheduled_day_trades.get(current_date, {})
+            if bar.symbol in scheduled_today:
+                sched = scheduled_today[bar.symbol]
+                side: OrderSide = sched['side']
+                # Store immutable prices for day and override with scheduled limits
+                atr_val = float(sched.get('current_atr_t', 0.0) or 0.0)
+                self._store_daily_order_prices(bar.symbol, current_date, bar.open, atr_val, side)
+                price_data = self.daily_order_prices[bar.symbol][current_date]
+                price_data['alpha_price'] = float(sched['limits_used']['limit_level_2'])
+                price_data['beta_price'] = float(sched['limits_used']['limit_level_3'])
+                price_data['gamma_price'] = float(sched['limits_used']['limit_level_4'])
+
+                # Per-leg notional: load from centralized config when available (pair mode)
+                tranche_notional_brl = float(self.context.metadata.get('tranche_notional_brl', 10000.0))
+                try:
+                    cfg = getattr(self.context, 'config', None)
+                    if cfg is None and hasattr(self.context, 'metadata'):
+                        cfg = self.context.metadata.get('config')
+                    if cfg and isinstance(cfg, dict):
+                        pair_cfg = (cfg.get('pair_mode') or {})
+                        gross = float(pair_cfg.get('gross_exposure_brl', 50000))
+                        tranches = int(pair_cfg.get('tranches', 4))
+                        if tranches > 0:
+                            tranche_notional_brl = gross / tranches
+                except Exception:
+                    pass
+                # Use previous day's close as sizing anchor for all legs to keep uniform lots
+                prev_close = float(sched.get('base_close_t', float('nan')))
+
+                intents: List[OrderIntent] = []
+                # Compute a single uniform quantity for the tranche using previous close
+                qty_uniform = 0
+                if prev_close == prev_close and prev_close > 0:  # check not NaN
+                    raw_qty = tranche_notional_brl / prev_close
+                    qty_uniform = (int(raw_qty) // 100) * 100
+                # Leg 1: MARKET at open (uniform qty)
+                if is_first_bar and qty_uniform > 0:
+                    price_open = round(float(bar.open), 2)
+                    self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} open_market qty={qty_uniform} @open {price_open:.2f}")
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.MARKET, 'quantity': qty_uniform, 'price': None, 'execution_price': price_open, 'attempt_name': 'Open Market', 'attempt_type': 'market'}, True, bar, side)
+                    intent_mkt = OrderIntent(
+                        symbol=bar.symbol,
+                        side=side,
+                        quantity=qty_uniform,
+                        order_type=OrderType.MARKET,
+                        price=None,
+                        timestamp=bar.timestamp,
+                        metadata={'trade_type': 'day_trade','entry_leg': 'open_market','valid_for_date': str(current_date),'base_close_t': sched.get('base_close_t'),'limits_used': sched.get('limits_used'),'current_atr_t': sched.get('current_atr_t')}
+                    )
+                    self._mark_market_order_executed(current_date)
+                    intents.append(intent_mkt)
+                # Legs 2-4: LIMIT levels
+                p2 = round(price_data['alpha_price'], 2); p3 = round(price_data['beta_price'], 2); p4 = round(price_data['gamma_price'], 2)
+                # Use uniform qty for all limit levels; skip entirely if qty_uniform==0
+                self._store_daily_order_quantities(bar.symbol, current_date, (intents[0].quantity if intents else 0), qty_uniform, qty_uniform, qty_uniform)
+                if qty_uniform > 0:
+                    self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_2 qty={qty_uniform} @ {p2:.2f}")
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p2, 'execution_price': p2, 'attempt_name': 'Limit Level 2', 'attempt_type': 'limit_alpha'}, False, bar, side)
+                    self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_3 qty={qty_uniform} @ {p3:.2f}")
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p3, 'execution_price': p3, 'attempt_name': 'Limit Level 3', 'attempt_type': 'limit_beta'}, False, bar, side)
+                    self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_4 qty={qty_uniform} @ {p4:.2f}")
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p4, 'execution_price': p4, 'attempt_name': 'Limit Level 4', 'attempt_type': 'limit_gamma'}, False, bar, side)
+
+                # Update fuzzy diagnostics row for this (date, symbol, side)
+                try:
+                    date_str = str(current_date)
+                    for i, r in enumerate(self._fuzzy_rows):
+                        if r.get('date') == date_str and r.get('symbol') == bar.symbol and r.get('side') == side.name:
+                            self._fuzzy_rows[i] = {
+                                'date': date_str,
+                                'symbol': bar.symbol,
+                                'side': side.name,
+                                'fuzzy_score': float(getattr(self, '_last_signal_strength', 0.0)),
+                                'ret_vs_ibov': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ret_vs_ibov', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'ema_sum': float(getattr(self, '_last_fuzzy_breakdown', {}).get('ema_sum', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'rsi_term': float(getattr(self, '_last_fuzzy_breakdown', {}).get('rsi_term', 0.0)) if hasattr(self, '_last_fuzzy_breakdown') else None,
+                                'eligible': bool((intents[0].quantity if intents else 0) > 0 or qty_uniform>0),
+                                'reason_if_not': None,
+                                'exposure_cap_brl': float(40000.0),
+                                'notional_P1': float((bar.open) * (intents[0].quantity if intents else 0)),
+                                'notional_P2': float(p2 * qty_uniform),
+                                'notional_P3': float(p3 * qty_uniform),
+                                'notional_P4': float(p4 * qty_uniform),
+                            }
+                            break
+                except Exception:
+                    pass
+
+                # Clear schedule for this symbol (day-only GTD)
+                try:
+                    del self._scheduled_day_trades[current_date][bar.symbol]
+                except Exception:
+                    pass
+
+                # Emit market intent now, and process immediate limit fills if any
+                for it in intents:
+                    yield it
+                for it in self._process_existing_orders(bar, current_date):
+                    yield it
+                return []
+        except Exception:
+            pass
+
+        # If nothing scheduled for this symbol, only process existing limit orders; do not emit new intraday entries
+        return self._process_existing_orders(bar, current_date)
     
     def _emit_daily_orders(self, bar: Bar, trading_date: date, side: OrderSide, 
                          qty1: int, qty2: int, qty3: int, qty4: int, atr: float, signal: float) -> Iterable[OrderIntent]:
@@ -2393,22 +2726,15 @@ class FuzzyFajutoStrategy(BaseStrategy):
             self.context.logger.debug(f"Insufficient daily data for {symbol} to compute returns")
             return 0
 
-        # Align "today" as last available daily bar up to current date
-        today_idx = daily_df.index.max()
-        prev_idx = daily_df.index.sort_values()[-2]
-        close_today = float(daily_df.loc[today_idx, 'close'])
-        close_prev = float(daily_df.loc[prev_idx, 'close'])
-        if close_prev == 0 or np.isnan(close_prev) or np.isnan(close_today):
-            return 0
-        stock_ret = (close_today / close_prev) - 1.0
-
+        # Align on a common latest date present in BOTH the symbol and ^BVSP to avoid drift bias
+        sym_last = daily_df.index.max()
         # Ensure IBOV (^BVSP) daily data cached and aligned
         ibov_symbol = '^BVSP'
         if ibov_symbol not in self.daily_data or self.daily_data[ibov_symbol].empty:
             try:
-                ibov_df = self._get_daily_data_for_date(ibov_symbol, current_date)
-                if ibov_df is not None and not ibov_df.empty:
-                    self.daily_data[ibov_symbol] = ibov_df
+                ibov_df_boot = self._get_daily_data_for_date(ibov_symbol, current_date)
+                if ibov_df_boot is not None and not ibov_df_boot.empty:
+                    self.daily_data[ibov_symbol] = ibov_df_boot
                     self.daily_data_last_update[ibov_symbol] = current_date
             except Exception as e:
                 self.context.logger.error(f"Failed to fetch ^BVSP daily data: {e}")
@@ -2417,17 +2743,41 @@ class FuzzyFajutoStrategy(BaseStrategy):
         if ibov_df is None or ibov_df.empty or len(ibov_df) < 2:
             self.context.logger.debug("Insufficient ^BVSP data to compute benchmark return")
             return 0
-        # Align benchmark to the same dates if possible
-        if today_idx not in ibov_df.index:
-            # Fallback to last available date
-            ibov_today_idx = ibov_df.index.max()
-        else:
-            ibov_today_idx = today_idx
-        ibov_prev_idx = ibov_df.index[ibov_df.index.get_loc(ibov_today_idx) - 1] if ibov_df.index.get_loc(ibov_today_idx) > 0 else None
-        if ibov_prev_idx is None:
+        # Choose the latest date that exists in both series
+        try:
+            ibov_upto_sym = ibov_df[ibov_df.index <= sym_last]
+            if ibov_upto_sym.empty:
+                self.context.logger.debug("No overlapping dates between symbol and ^BVSP")
+                return 0
+            common_idx = min(sym_last, ibov_upto_sym.index.max())
+        except Exception:
+            common_idx = sym_last
+        # Get current and previous closes for the symbol on aligned date
+        try:
+            sym_pos = daily_df.index.get_loc(common_idx)
+        except Exception:
+            # Fallback to last available
+            sym_pos = len(daily_df.index) - 1
+            common_idx = daily_df.index[sym_pos]
+        if sym_pos == 0:
+            self.context.logger.debug("Not enough symbol history for return comparison")
+            return 0
+        prev_idx = daily_df.index[sym_pos - 1]
+        close_today = float(daily_df.loc[common_idx, 'close'])
+        close_prev = float(daily_df.loc[prev_idx, 'close'])
+        if close_prev == 0 or np.isnan(close_prev) or np.isnan(close_today):
+            return 0
+        stock_ret = (close_today / close_prev) - 1.0
+        # Benchmark returns on aligned date
+        try:
+            ibov_pos = ibov_df.index.get_loc(common_idx)
+        except Exception:
+            ibov_pos = len(ibov_df.index) - 1
+        if ibov_pos == 0:
             self.context.logger.debug("Not enough ^BVSP history for return comparison")
             return 0
-        ibov_close_today = float(ibov_df.loc[ibov_today_idx, 'close'])
+        ibov_prev_idx = ibov_df.index[ibov_pos - 1]
+        ibov_close_today = float(ibov_df.loc[common_idx, 'close'])
         ibov_close_prev = float(ibov_df.loc[ibov_prev_idx, 'close'])
         if ibov_close_prev == 0 or np.isnan(ibov_close_prev) or np.isnan(ibov_close_today):
             return 0
@@ -2439,45 +2789,52 @@ class FuzzyFajutoStrategy(BaseStrategy):
             fuzzy += 1.0
         elif stock_ret < ibov_ret:
             fuzzy -= 1.0
+        ret_vs_ibov_term = 1.0 if stock_ret > ibov_ret else (-1.0 if stock_ret < ibov_ret else 0.0)
 
         # Rule 2: EMA comparisons (+/- 0.25 each)
         ema_periods = getattr(self, 'ema_periods', [3, 5, 10, 15, 20])
+        ema_sum = 0.0
         for period in ema_periods:
             key = f'ema_{period}'
             if key in indicators and not indicators[key].empty:
                 try:
-                    ema_today = float(indicators[key].loc[today_idx])
+                    # Use aligned date; fallback to last available
+                    ema_today = float(indicators[key].loc[common_idx]) if common_idx in indicators[key].index else float(indicators[key].iloc[-1])
                 except Exception:
                     continue
                 if not np.isnan(ema_today):
                     if close_today > ema_today:
                         fuzzy += 0.25
+                        ema_sum += 0.25
                     elif close_today < ema_today:
                         fuzzy -= 0.25
+                        ema_sum -= 0.25
 
         # Rule 3: RSI bands (+0.25 if >65, -0.25 if <35)
+        rsi_term = 0.0
         if 'rsi' in indicators and not indicators['rsi'].empty:
             try:
-                rsi_today = float(indicators['rsi'].loc[today_idx])
+                rsi_today = float(indicators['rsi'].loc[common_idx]) if common_idx in indicators['rsi'].index else float(indicators['rsi'].iloc[-1])
                 if not np.isnan(rsi_today):
                     overbought = getattr(self, 'rsi_overbought', 65)
                     oversold = getattr(self, 'rsi_oversold', 35)
                     if rsi_today > overbought:
                         fuzzy += 0.25
+                        rsi_term = 0.25
                     elif rsi_today < oversold:
                         fuzzy -= 0.25
+                        rsi_term = -0.25
             except Exception:
                 pass
 
         # Persist last strength for diagnostics/sizing
         self._last_signal_strength = float(fuzzy)
-
-        # Optional: basic quality validation using EMA series for stability
-        ema5_series = indicators.get('ema_5', pd.Series(dtype=float))
-        ema_slice = ema5_series.dropna().iloc[-5:].values if not ema5_series.empty else np.array([])
-        if len(ema_slice) >= 3:
-            if not self._validate_signal_quality(fuzzy, ema_slice, symbol, current_date):
-                return 0
+        # Store breakdown for diagnostics
+        self._last_fuzzy_breakdown = {
+            'ret_vs_ibov': float(ret_vs_ibov_term),
+            'ema_sum': float(ema_sum),
+            'rsi_term': float(rsi_term),
+        }
 
         # Decide
         if fuzzy >= buy_threshold:
@@ -2796,6 +3153,38 @@ class FuzzyFajutoStrategy(BaseStrategy):
         closed at market close, as required by Section 7 rules.
         """
         super().on_end_of_day(d)
+        # Schedule day-trade legs for next day based on close(d)
+        try:
+            valid_for = d + timedelta(days=1)
+            day_store = self._scheduled_day_trades.setdefault(valid_for, {})
+            universe = list(self._universe_symbols) if getattr(self, '_universe_symbols', None) else []
+            for symbol in universe:
+                # Ensure inputs (daily indicators and ^BVSP) are present for date d
+                self._ensure_eod_inputs(symbol, d)
+                df = self._get_daily_data_up_to_date(symbol, d)
+                if df is None or df.empty or df.index.max().date() != d:
+                    continue
+                class _B: pass
+                b = _B(); b.symbol = symbol; b.timestamp = datetime.combine(d, datetime.max.time())
+                row = df.iloc[-1]
+                b.open = float(row['open']); b.high = float(row['high']); b.low = float(row['low']); b.close = float(row['close']); b.volume = int(row.get('volume', 0))
+                sig = self._generate_signal(b)
+                if sig == 0:
+                    continue
+                side = OrderSide.BUY if sig > 0 else OrderSide.SELL
+                atr_val = float(self._get_current_atr(symbol)) if symbol in self.current_atr_values else 0.0
+                p2, p3, p4 = self._calculate_entry_limits_from_close(b.close, atr_val, side)
+                day_store[symbol] = {
+                    'symbol': symbol,
+                    'side': side,
+                    'valid_for_date': valid_for,
+                    'base_close_t': float(b.close),
+                    'limits_used': {'limit_level_2': p2, 'limit_level_3': p3, 'limit_level_4': p4},
+                    'current_atr_t': atr_val,
+                    'fuzzy_score_t': float(abs(getattr(self, '_last_signal_strength', 0.0)))
+                }
+        except Exception:
+            pass
         
         moc_orders_generated = 0
         
@@ -2910,26 +3299,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
         if self.save_execution_history and self.execution_history:
             self._save_execution_history()
 
-        # Write fuzzy_by_date.csv (lightweight summary for report)
-        try:
-            if getattr(self, '_fuzzy_rows', None):
-                import pandas as _pd
-                from pathlib import Path as _P
-                _df = _pd.DataFrame(self._fuzzy_rows)
-                out = _P('reports') / 'fuzzy_by_date.csv'
-                out.parent.mkdir(parents=True, exist_ok=True)
-                # Stable column order
-                cols = ['date','symbol','side','fuzzy_score','eligible','reason_if_not','exposure_cap_brl','notional_P1','notional_P2','notional_P3']
-                _df = _df.reindex(columns=cols)
-                _df.to_csv(out, index=False)
-                try:
-                    from engine import event_logger
-                    if event_logger is not None:
-                        event_logger.emit('performance', {'type':'report','ts':int(time.time()),'phase':'write_fuzzy_csv','rows':int(len(_df))})
-                except Exception:
-                    pass
-        except Exception:
-            self.context.logger.warning("Failed to write reports/fuzzy_by_date.csv")
+        # No CSV export of fuzzy rows; report consumes in-memory data
     
     def _save_execution_history(self):
         """Save execution history to file."""
@@ -3324,15 +3694,21 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 self.context.logger.warning(f"Quantity {intent.quantity} not multiple of {self.min_lot_size}")
                 return False
             
-            # Check position size limits
-            portfolio_value = self.context.portfolio.get_portfolio_value()
-            max_position_value = portfolio_value * self.max_position_size_pct
-            
-            if intent.price is not None:
-                position_value = intent.quantity * intent.price
-                if position_value > max_position_value:
-                    self.context.logger.warning(f"Position value {position_value:.2f} exceeds limit {max_position_value:.2f}")
-                    return False
+            # Check position size limits (disable per-leg cap in pair mode; global risk handled via tranche config)
+            is_pair_mode = False
+            try:
+                cfg = getattr(self.context, 'metadata', {}).get('config')
+                is_pair_mode = bool(cfg and 'pair_mode' in cfg)
+            except Exception:
+                is_pair_mode = False
+            if not is_pair_mode:
+                portfolio_value = self.context.portfolio.get_portfolio_value()
+                max_position_value = portfolio_value * self.max_position_size_pct
+                if intent.price is not None:
+                    position_value = intent.quantity * intent.price
+                    if position_value > max_position_value:
+                        self.context.logger.warning(f"Position value {position_value:.2f} exceeds limit {max_position_value:.2f}")
+                        return False
             
             # Check daily loss limits
             if self.daily_loss > portfolio_value * self.max_daily_loss_pct:

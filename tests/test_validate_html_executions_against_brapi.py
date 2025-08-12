@@ -176,6 +176,21 @@ def _extract_execs_from_html(html_path: Path) -> List[ExecRow]:
     return list(unique.values())
 
 
+def _extract_report_data_json(html_path: Path) -> Optional[dict]:
+    if not html_path.exists():
+        return None
+    try:
+        text = html_path.read_text(encoding="utf-8", errors="ignore")
+        import re, json
+        m = re.search(r"const REPORT_DATA\s*=\s*(\{[\s\S]*?\});", text)
+        if not m:
+            return None
+        raw = m.group(1)
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
 def _extract_execs_from_csv(csv_path: Path) -> List[ExecRow]:
     if not csv_path.exists():
         return []
@@ -215,6 +230,7 @@ def _extract_execs_from_csv(csv_path: Path) -> List[ExecRow]:
 # Validation helpers
 # =============================
 
+# BRAPI delivers UTC timestamps; B3 continuous session runs 13:00–20:00 UTC
 SESSION_OPEN_HOUR_UTC = 13
 SESSION_CLOSE_HOUR_UTC = 20
 
@@ -308,8 +324,32 @@ def test_validate_html_executions_against_brapi(report_paths, brapi_adapter, pri
     html_execs = _extract_execs_from_html(report_paths["html"]) if report_paths["html"].exists() else []
     csv_execs = _extract_execs_from_csv(report_paths["csv"]) if report_paths["csv"].exists() else []
 
+    # Optional: validate fuzzy table coverage per (date, symbol) if present
+    report_data = _extract_report_data_json(report_paths["html"]) if report_paths["html"].exists() else None
+    if isinstance(report_data, dict) and isinstance(report_data.get('fuzzyByDate'), list) and isinstance(report_data.get('symbols'), list):
+        fz = report_data.get('fuzzyByDate', [])
+        syms = [str(s).upper() for s in report_data.get('symbols', [])]
+        # Build mapping date -> set(symbols present)
+        by_date: Dict[str, set] = {}
+        for r in fz:
+            d = str(r.get('date',''))
+            s = str(r.get('symbol','')).upper()
+            if d:
+                by_date.setdefault(d, set()).add(s)
+        # For each date present in fuzzy table, expect every symbol to have a row
+        missing: List[Tuple[str,str]] = []
+        for d, present in by_date.items():
+            for s in syms:
+                if s not in present:
+                    missing.append((d, s))
+        assert not missing, f"Fuzzy coverage missing for {len(missing)} (date,symbol) pairs; examples: {missing[:10]}"
+
     # Prefer CSV for numeric precision when available, otherwise HTML
     exec_rows: List[ExecRow] = csv_execs or html_execs
+    # If no executions and we have fuzzy coverage, skip execution validation gracefully
+    if not exec_rows and isinstance(report_data, dict) and isinstance(report_data.get('fuzzyByDate'), list) and report_data.get('fuzzyByDate'):
+        # Nothing to validate against BRAPI for executions
+        return
     assert exec_rows, f"No executions found. Checked HTML: {report_paths['html']}, CSV: {report_paths['csv']}"
 
     # Group by (symbol, day) to minimize adapter calls

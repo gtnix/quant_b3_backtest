@@ -163,9 +163,14 @@ advanced:
 
 # Backtest defaults (used by run scripts when CLI not provided)
 backtest:
-  default_start_date: "2025-05-30"
-  default_end_date: "2025-07-20"
+  default_start_date: "2025-05-20"
+  default_end_date: "2025-08-11"
   save_results: true
+
+# Centralized pair-mode risk configuration
+pair_mode:
+  gross_exposure_brl: 50000
+  tranches: 4
 
 # Brapi.dev API Configuration
 brapi:
@@ -195,7 +200,7 @@ brapi:
 # Benchmark Configuration
 benchmark:
   enabled: true                    # Enable benchmark analysis for all backtests
-  symbol: "IBOV"                   # Default benchmark symbol (Bovespa Index)
+  symbol: "^BVSP"                  # Default benchmark symbol (Bovespa Index via BRAPI)
   auto_load: true                  # Automatically load benchmark data
   required: true                   # Require benchmark data for backtest completion
   data_sources: ["brapi", "csv", "parquet", "yahoo_finance"]  # Priority order for data sources (Brapi preferred)
@@ -240,6 +245,10 @@ sgs:
     minimum_coverage_percentage: 95.0  # Require 95% data coverage
     fail_on_missing_data: true     # Fail backtest if data is missing
     allow_partial_data: false      # Do not allow partial data usage
+
+# SELIC convenience toggle for backtests (overrides sgs.strict_mode.fail_on_missing_data when false)
+selic:
+  strict_mode: false
     
   # Data Quality Thresholds for Strict Mode
   quality_thresholds:

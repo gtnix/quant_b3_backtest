@@ -24,6 +24,30 @@ Examples:
 
 import argparse
 import sys
+import subprocess
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Hierarchical test runner")
+    parser.add_argument("--suite", choices=["all", "core", "signal", "mechanical", "smoke", "data"], default="smoke")
+    args, extra = parser.parse_known_args()
+
+    base = ["tests/core", "tests/signal", "tests/mechanical", "tests/data", "tests/smoke"]
+    mapping = {
+        "all": base,
+        "core": ["tests/core", "-m", "core"],
+        "signal": ["tests/signal", "-m", "signal"],
+        "mechanical": ["tests/mechanical", "-m", "mechanical"],
+        "data": ["tests/data", "-m", "data_quality"],
+        "smoke": ["tests/smoke", "-m", "smoke or core"],
+    }
+    cmd = [sys.executable, "-m", "pytest"] + mapping[args.suite] + extra
+    sys.exit(subprocess.call(cmd))
+
+
+if __name__ == "__main__":
+    main()
+import sys
 import os
 import logging
 import numpy as np
@@ -146,7 +170,7 @@ def print_data_status(data_status):
     
     # IBOV data status
     ibov_status = data_status['ibov']
-    print(f"\n📈 IBOV DATA:")
+    print(f"\n📈 Benchmark (^BVSP) DATA:")
     print(f"   Has data: {ibov_status['has_data']}")
     print(f"   Needs download: {ibov_status['needs_download']}")
     if ibov_status['data_range']:
