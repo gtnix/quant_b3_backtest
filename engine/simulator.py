@@ -388,6 +388,13 @@ class BacktestSimulator:
         self._ts_pos_map: Dict[datetime, int] = {}
         # Cached, normalized benchmark (^BVSP) dataframe (loaded once)
         self._ibov_df_cached = None
+
+        # Unified fills capture (authoritative, simulator-level)
+        # Each entry will contain: timestamp, symbol, side, quantity, price, lot_type,
+        # original vs normalized values (rounding deltas), trade_type, attempt metadata,
+        # and tranche sizing metadata from centralized config/strategy context.
+        self.unified_fills: list[dict] = []
+        self.unified_fills_df: Optional[pd.DataFrame] = None
         
         # Initialize SGS data for the entire backtest period
         self.selic_data = None
@@ -1054,6 +1061,12 @@ class BacktestSimulator:
             
             # Calculate all performance metrics (including benchmark)
             self._calculate_performance_metrics()
+
+            # Build unified fills DataFrame for downstream reporting
+            try:
+                self.unified_fills_df = pd.DataFrame(self.unified_fills) if self.unified_fills else pd.DataFrame()
+            except Exception:
+                self.unified_fills_df = pd.DataFrame()
             
             # Create simulation result
             result = self._create_simulation_result()
@@ -2082,6 +2095,18 @@ class BacktestSimulator:
                     else:
                         price_str = "market"
                     logger.info(f"Buy executed: {quantity} {ticker} @ {price_str}")
+                    # Append unified fill row (BUY)
+                    try:
+                        self._append_unified_fill(
+                            timestamp=signal.timestamp,
+                            symbol=ticker,
+                            side='BUY',
+                            quantity=quantity,
+                            price=price,
+                            metadata=getattr(signal, 'metadata', {})
+                        )
+                    except Exception:
+                        pass
                 else:
                     if price is not None and price > 0:
                         price_str = f"R$ {price:.2f}"
@@ -2117,6 +2142,18 @@ class BacktestSimulator:
                     else:
                         price_str = "market"
                     logger.info(f"Sell executed: {sell_quantity} {ticker} @ {price_str}")
+                    # Append unified fill row (SELL)
+                    try:
+                        self._append_unified_fill(
+                            timestamp=signal.timestamp,
+                            symbol=ticker,
+                            side='SELL',
+                            quantity=sell_quantity,
+                            price=price,
+                            metadata=getattr(signal, 'metadata', {})
+                        )
+                    except Exception:
+                        pass
                 else:
                     if price is not None and price > 0:
                         price_str = f"R$ {price:.2f}"
@@ -2170,6 +2207,87 @@ class BacktestSimulator:
             
         except Exception as e:
             logger.error(f"Error executing trade for signal {signal}: {str(e)}")
+
+    def _append_unified_fill(self, timestamp: datetime, symbol: str, side: str,
+                              quantity: int, price: float, metadata: Dict[str, Any]) -> None:
+        """Append a normalized unified fill row capturing execution details.
+
+        Columns: timestamp, symbol, side, quantity, price, lot_type, rounding,
+        tranche_notional_brl, trade_type, order_type, attempt_type, attempt_name.
+        """
+        try:
+            # Lot typing and rounding delta (100-share round-lot)
+            lot_multiple = 100
+            is_round = (int(quantity) % lot_multiple == 0)
+            lot_type = 'round_lot' if is_round else 'odd_lot'
+            rounding_delta = int(quantity) % lot_multiple
+
+            # Determine order_type/attempts
+            order_type_txt = None
+            attempt_type = None
+            attempt_name = None
+            emission_type = None
+            if isinstance(metadata, dict):
+                order_type_txt = str(metadata.get('order_type') or metadata.get('OrderType') or '').upper() or None
+                attempt_type = metadata.get('attempt_type')
+                attempt_name = metadata.get('attempt_name')
+                emission_type = metadata.get('emission_type')
+            # Trade type (day/swing) best-effort
+            trade_type_txt = 'day_trade'
+            if isinstance(metadata, dict) and isinstance(metadata.get('trade_type'), str):
+                trade_type_txt = metadata.get('trade_type')
+
+            # Tranche notional from centralized config/strategy context
+            tranche_notional = self._get_tranche_notional_brl()
+
+            row = {
+                'timestamp': timestamp,
+                'ticker': symbol,
+                'symbol': symbol,
+                'side': side.upper(),
+                'quantity': int(quantity),
+                'price': float(price),
+                'lot_type': lot_type,
+                'rounding': int(rounding_delta),
+                'tranche_notional_brl': float(tranche_notional),
+                'trade_type': trade_type_txt,
+                'order_type': (order_type_txt or ('MOC' if (attempt_type == 'moc') else ('MARKET' if emission_type in ('first_bar', 'open_market') else 'LIMIT'))),
+                'attempt_type': attempt_type,
+                'attempt_name': attempt_name,
+            }
+            self.unified_fills.append(row)
+        except Exception as _:
+            # Do not let reporting impact execution
+            pass
+
+    def _get_tranche_notional_brl(self) -> float:
+        """Resolve tranche_notional_brl from strategy context/config with safe defaults."""
+        try:
+            # Strategy context metadata first
+            if hasattr(self.strategy, 'context') and hasattr(self.strategy.context, 'metadata'):
+                md = self.strategy.context.metadata
+                if isinstance(md, dict):
+                    t = md.get('tranche_notional_brl')
+                    if t is not None:
+                        return float(t)
+                    cfg = md.get('config') or {}
+                    pair_cfg = (cfg.get('pair_mode') or {}) if isinstance(cfg, dict) else {}
+                    gross = float(pair_cfg.get('gross_exposure_brl', 50000.0))
+                    tranches = int(pair_cfg.get('tranches', 4) or 4)
+                    if tranches > 0:
+                        return float(gross / tranches)
+        except Exception:
+            pass
+        try:
+            # Fallback to simulator config
+            pair_cfg = (self.config.get('pair_mode') or {}) if hasattr(self, 'config') else {}
+            gross = float(pair_cfg.get('gross_exposure_brl', 50000.0))
+            tranches = int(pair_cfg.get('tranches', 4) or 4)
+            if tranches > 0:
+                return float(gross / tranches)
+        except Exception:
+            pass
+        return 10000.0
     
     def _calculate_performance_metrics(self) -> None:
         """Calculate comprehensive performance metrics including benchmark analysis."""
@@ -2392,6 +2510,17 @@ class BacktestSimulator:
             benchmark_max_drawdown=benchmark_max_drawdown,
             benchmark_win_rate=benchmark_win_rate
         )
+
+    def get_unified_fills_dataframe(self) -> pd.DataFrame:
+        """Return unified fills as a DataFrame (cached)."""
+        if self.unified_fills_df is None:
+            try:
+                self.unified_fills_df = pd.DataFrame(self.unified_fills) if self.unified_fills else pd.DataFrame(
+                    columns=['timestamp','symbol','side','quantity','price','lot_type','rounding','tranche_notional_brl','trade_type','order_type','attempt_type','attempt_name']
+                )
+            except Exception:
+                self.unified_fills_df = pd.DataFrame()
+        return self.unified_fills_df
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """

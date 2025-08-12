@@ -152,8 +152,7 @@ def main():
     # Data prefetch for validation
     parser.add_argument('--download-portfolio-daily', action='store_true', help='Prefetch ALL daily data for symbols in data/portfolio_full.csv over default backtest dates before running')
     parser.add_argument('--portfolio-full-csv', default='data/portfolio_full.csv', help='Path to the full portfolio CSV (column: symbol)')
-    # Pair mode for market-neutral execution
-    parser.add_argument('--pair-mode', action='store_true', help='Enable market-neutral pair trading (top BUY + top SELL per day, R$50k notional each)')
+    # Pair mode is mandatory; CLI flag removed
     
     args = parser.parse_args()
     
@@ -219,11 +218,14 @@ def main():
         args.save_results = default_save if args.save_results is None else args.save_results
 
         # Determine tickers universe
-        # Enforce: always read from portfolio.csv only
-        csv_symbols = _load_portfolio_symbols()
-        if not csv_symbols:
-            raise SystemExit("portfolio.csv não encontrado ou sem coluna 'symbol'. Coloque sua lista em data/portfolio.csv.")
-        tickers = csv_symbols
+        # Enforce: always read from portfolio.csv only unless explicit --tickers is passed
+        if args.tickers and str(args.tickers).strip():
+            tickers = [s.strip().upper() for s in str(args.tickers).split(',') if s.strip()]
+        else:
+            csv_symbols = _load_portfolio_symbols()
+            if not csv_symbols:
+                raise SystemExit("portfolio.csv não encontrado ou sem coluna 'symbol'. Coloque sua lista em data/portfolio.csv.")
+            tickers = csv_symbols
         logger.info(f"Loaded portfolio from CSV: {','.join(tickers)}")
 
         # Optional: pre-download ALL daily data for full portfolio range to ensure cache readiness
@@ -771,8 +773,8 @@ def main():
             universe=tickers,
             warmup_bars=30,
             risk_tolerance=0.02,
-            # In pair mode we must allow R$50k per leg on R$100k portfolio → 50%
-            max_position_size=(0.50 if args.pair_mode else 0.10),
+            # Pair-mode mandatory: allow 50% per leg on R$100k portfolio → 50%
+            max_position_size=0.50,
             max_daily_loss=0.02,
             stop_loss_pct=0.05,
             take_profit_pct=0.10
@@ -795,7 +797,8 @@ def main():
                 'hybrid_data_result': {'execution_data': combined},
                 # Expose full config and tranche for strategy
                 'config': _cfg,
-                'tranche_notional_brl': ( (_cfg.get('pair_mode',{}).get('gross_exposure_brl',50000)/_cfg.get('pair_mode',{}).get('tranches',4)) if args.pair_mode else 10000.0 ),
+                # Pair-mode mandatory: tranche derived from config
+                'tranche_notional_brl': (_cfg.get('pair_mode',{}).get('gross_exposure_brl',50000)/max(1, _cfg.get('pair_mode',{}).get('tranches',4))),
             }
         )
         strategy_context.hybrid_data_manager = hybrid_data_manager
@@ -950,8 +953,8 @@ def main():
         except Exception as _e:
             logger.warning(f"Failed to build schedule from strategy logic: {_e}")
 
-        # Pair-mode: pre-simulation candidate selection and injection (top BUY/SELL per day)
-        if args.pair_mode:
+        # Pair-mode mandatory: pre-simulation candidate selection and injection (top BUY/SELL per day)
+        if True:
             try:
                 csv_path = export_fuzzy_components_to_csv(tickers, start_dt.strftime('%Y-%m-%d'), end_date, _cfg)
                 if csv_path:
@@ -1764,11 +1767,11 @@ def main():
                         csv_path = export_fuzzy_components_to_csv(tickers, start_date, end_date, _cfg)
                         if csv_path:
                             logger.info(f"Fuzzy components CSV: {csv_path}")
-                            if args.pair_mode:
-                                import pandas as _pd
-                                df = _pd.read_csv(csv_path)
-                                req = {'date','symbol','qualified_signal','fuzzy_score_raw'}
-                                if req.issubset(df.columns):
+                            # Pair-mode mandatory
+                            import pandas as _pd
+                            df = _pd.read_csv(csv_path)
+                            req = {'date','symbol','qualified_signal','fuzzy_score_raw'}
+                            if req.issubset(df.columns):
                                     # Build per-day top BUY and SELL selection
                                     pair_schedule: dict = {}
                                     for d, g in df.groupby('date'):
@@ -2006,6 +2009,21 @@ def main():
             print(f"{'Initial Capital':<25} R$ {results.initial_capital:>21,.2f} {'Final Portfolio Value':<25} R$ {results.final_portfolio_value:>21,.2f}")
             print(f"{'Total Commission':<25} R$ {results.total_commission:>21,.2f} {'Total Taxes':<25} R$ {results.total_taxes:>21,.2f}")
             print("="*80)
+
+            # Export unified fills if available
+            try:
+                fills_df = simulator.get_unified_fills_dataframe()
+                if result_manager is not None and fills_df is not None and not fills_df.empty:
+                    art = result_manager.export_fills(fills_df, base_name='fills')
+                    summ = result_manager.summarize_fills(fills_df)
+                    print("\nUnified Fills Summary:")
+                    print(f"  Total fills: {summ.get('total_fills', 0)}  Turnover (BRL): {summ.get('turnover_brl', 0.0):,.2f}")
+                    if 'csv' in art:
+                        print(f"  CSV: {art['csv']}")
+                    if 'json' in art:
+                        print(f"  JSON: {art['json']}")
+            except Exception:
+                pass
         
         # Get strategy performance summary
         strategy_summary = strategy.get_performance_summary()

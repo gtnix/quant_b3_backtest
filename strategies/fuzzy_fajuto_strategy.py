@@ -3694,15 +3694,16 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 self.context.logger.warning(f"Quantity {intent.quantity} not multiple of {self.min_lot_size}")
                 return False
             
-            # Check position size limits (disable per-leg cap in pair mode; global risk handled via tranche config)
-            is_pair_mode = False
+            # Pre-compute portfolio_value once to avoid unbound usage below
+            # Fix: ensure portfolio_value is initialized regardless of pair-mode branch
             try:
-                cfg = getattr(self.context, 'metadata', {}).get('config')
-                is_pair_mode = bool(cfg and 'pair_mode' in cfg)
+                portfolio_value = float(self.context.portfolio.get_portfolio_value())
             except Exception:
-                is_pair_mode = False
-            if not is_pair_mode:
-                portfolio_value = self.context.portfolio.get_portfolio_value()
+                portfolio_value = 0.0
+
+            # Check position size limits (disable per-leg cap in pair mode; global risk handled via tranche config)
+            # Pair-mode mandatory: per-leg cap disabled globally
+            if False:
                 max_position_value = portfolio_value * self.max_position_size_pct
                 if intent.price is not None:
                     position_value = intent.quantity * intent.price

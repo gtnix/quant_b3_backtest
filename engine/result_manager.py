@@ -247,3 +247,58 @@ class ResultManager:
         # Quiet CLI output in performance runs; keep method for compatibility
         _ = results
         return
+
+    # --- New: unified fills exports ---
+    def export_fills(self, fills_df: pd.DataFrame, base_name: str = "fills") -> Dict[str, str]:
+        """Export unified fills DataFrame to CSV and JSON in results directory.
+
+        Returns map of artifact type to path. No-ops when AUDIT_EXECUTIONS_ONLY is set.
+        """
+        artifacts: Dict[str, str] = {}
+        try:
+            import os as _os
+            if _os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes'):
+                return artifacts
+            self.results_dir.mkdir(exist_ok=True)
+            csv_path = self.results_dir / f"{base_name}.csv"
+            json_path = self.results_dir / f"{base_name}.json"
+            if fills_df is not None and not fills_df.empty:
+                fills_df.to_csv(csv_path, index=False)
+                artifacts['csv'] = str(csv_path)
+                try:
+                    fills_df.to_json(json_path, orient='records', indent=2, date_format='iso')
+                    artifacts['json'] = str(json_path)
+                except Exception:
+                    pass
+            return artifacts
+        except Exception as e:
+            logger.warning(f"Failed to export fills: {e}")
+            return artifacts
+
+    def summarize_fills(self, fills_df: pd.DataFrame) -> Dict[str, Any]:
+        """Compute concise fills summary KPIs and breakdowns suitable for reports."""
+        if fills_df is None or fills_df.empty:
+            return {"total_fills": 0, "by_order_type": {}, "by_symbol": {}}
+        try:
+            df = fills_df.copy()
+            df['notional'] = (df['quantity'].abs() * df['price']).astype(float)
+            total_fills = int(len(df))
+            by_order_type = (
+                df.groupby('order_type')['notional']
+                  .agg(['count', 'sum'])
+                  .rename(columns={'count': 'fills', 'sum': 'notional'}).to_dict('index')
+            )
+            by_symbol = (
+                df.groupby('symbol')['notional']
+                  .agg(['count', 'sum'])
+                  .rename(columns={'count': 'fills', 'sum': 'notional'})
+            )
+            return {
+                'total_fills': total_fills,
+                'turnover_brl': float(df['notional'].sum()),
+                'by_order_type': by_order_type,
+                'by_symbol': by_symbol.reset_index().to_dict('records')
+            }
+        except Exception as e:
+            logger.warning(f"Failed to summarize fills: {e}")
+            return {"total_fills": int(len(fills_df))}
