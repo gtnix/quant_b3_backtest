@@ -50,7 +50,7 @@ def create_mock_market_data():
         'volume': 1200000
     }
     
-    # Create IBOV data with proper structure
+    # Create benchmark (^BVSP) data with proper structure
     ibov_returns = historical_data['close'].pct_change().dropna()
     ibov_data = {
         'returns': ibov_returns,
@@ -116,7 +116,7 @@ def test_enhanced_execution_metrics():
         strong_trend_data['low'] = strong_trend_data[['open', 'close']].min(axis=1) * 0.95
         strong_trend_data['high'] = strong_trend_data[['open', 'close']].max(axis=1) * 1.05
         
-        # Create IBOV data with strong trend
+    # Create benchmark (^BVSP) data with strong trend
         ibov_returns = strong_trend_data['close'].pct_change().dropna()
         ibov_data = {
             'returns': ibov_returns,

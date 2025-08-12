@@ -509,33 +509,43 @@ class HybridDataManager:
         indicators_ready = not indicator_data.empty
         indicator_source = "brapi_daily_cached" if indicators_ready else "unavailable"
         
-        # Phase 2: Load Brapi.dev hourly for execution (with warmup extension)
+        # Phase 2: Load Brapi.dev hourly for execution (scope depends on multi-frame mode)
         logger.info("⚡ Phase 2: Loading execution data from Brapi.dev hourly...")
-        
-        # Calculate warmup extension: Strategy needs 29 trading days for proper warmup
-        # Add 45 calendar days to ensure sufficient trading days (accounting for weekends/holidays)
+
+        mf_mode = os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on')
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        warmup_start_dt = start_dt - timedelta(days=45)  # 45 calendar days before start
-        warmup_start_date = warmup_start_dt.strftime('%Y-%m-%d')
-        
-        logger.info(f"📅 Extending execution data range for warmup:")
-        logger.info(f"   - Requested start: {start_date}")
-        logger.info(f"   - Warmup start: {warmup_start_date} (45 days earlier)")
-        logger.info(f"   - This ensures sufficient historical data for 29 trading days warmup")
-        
-        # Load extended execution data
-        execution_data = self.brapi_provider.get_hourly_data(symbol, warmup_start_date, end_date)
-        execution_source = "brapi_hourly_extended"
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        if mf_mode:
+            # Multi-frame: hourly only for backtest days (no warmup extension)
+            hourly_start = start_dt.strftime('%Y-%m-%d')
+            hourly_end = end_dt.strftime('%Y-%m-%d')
+            logger.info(f"📅 Multi-frame hourly scope: {hourly_start} to {hourly_end} (no warmup hourly)")
+            execution_data = self.brapi_provider.get_hourly_data(symbol, hourly_start, hourly_end)
+            execution_source = "brapi_hourly_execution_days_only"
+        else:
+            # Legacy: extended warmup for hourly
+            warmup_start_dt = start_dt - timedelta(days=45)
+            warmup_start_date = warmup_start_dt.strftime('%Y-%m-%d')
+            logger.info(f"📅 Extending execution data range for warmup:")
+            logger.info(f"   - Requested start: {start_date}")
+            logger.info(f"   - Warmup start: {warmup_start_date} (45 days earlier)")
+            logger.info(f"   - This ensures sufficient historical data for 29 trading days warmup")
+            execution_data = self.brapi_provider.get_hourly_data(symbol, warmup_start_date, end_date)
+            execution_source = "brapi_hourly_extended"
         
         # Phase 3: Assess coverage and quality
         logger.info("📊 Phase 3: Assessing data coverage and quality...")
         coverage_stats = self._assess_execution_coverage(execution_data, start_date, end_date, symbol)
         
-        # Phase 4: Fail fast if insufficient data
+        # Phase 4: Fail fast if insufficient data (relax in multi-frame)
+        mf_mode = os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on')
         if not coverage_stats['sufficient']:
-            logger.error("❌ Insufficient Brapi.dev data detected - failing fast")
-            self.fallback_handler.handle_insufficient_execution_data(symbol, coverage_stats)
-            # This will raise SystemExit, so we won't reach here
+            if mf_mode:
+                logger.warning("Multi-frame mode: proceeding despite insufficient hourly coverage for execution days")
+            else:
+                logger.error("❌ Insufficient Brapi.dev data detected - failing fast")
+                self.fallback_handler.handle_insufficient_execution_data(symbol, coverage_stats)
+                # This will raise SystemExit
         
         # Phase 5: Setup validation comparison if possible
         logger.info("🧪 Phase 5: Setting up validation comparison...")
@@ -815,10 +825,10 @@ class DataLoader:
     
     def check_ibov_data(self) -> Dict[str, Any]:
         """
-        Check for missing IBOV data.
+        Check for missing benchmark (^BVSP) data (legacy name retained for compatibility).
         
         Returns:
-            Dict[str, Any]: Dictionary with IBOV data status
+            Dict[str, Any]: Dictionary with benchmark data status
         """
         if not self.auto_download or not self.ibov_downloader:
             return {
@@ -829,8 +839,12 @@ class DataLoader:
             }
         
         try:
-            # Check IBOV data (via BRAPI; CSV path retained for backward-compat only)
+            # Prefer generic '^BVSP' CSV directly; keep legacy path for compatibility
             ibov_file = Path("data/IBOV/raw/IBOV_raw.csv")
+            if not ibov_file.exists():
+                generic_csv = Path("data") / "^BVSP_raw.csv"
+                if generic_csv.exists():
+                    ibov_file = generic_csv
             
             if not ibov_file.exists():
                 return {
@@ -891,14 +905,12 @@ class DataLoader:
                 
                 # Filter missing dates to only include business days
                 missing_business_days = [date for date in missing_dates if date in business_days_list]
-                
-                logger.info(f"IBOV: Using dias_uteis: {len(business_days_list)} business days, {len(missing_business_days)} missing business days")
-                
+                logger.info(f"^BVSP: Using dias_uteis: {len(business_days_list)} business days, {len(missing_business_days)} missing business days")
             except ImportError:
                 # Fallback to pandas business day range if dias_uteis not available
                 business_days = pd.bdate_range(start=data_end + pd.Timedelta(days=1), end=today)
                 missing_business_days = [date for date in missing_dates if date in business_days]
-                logger.warning("IBOV: dias_uteis not available, using pandas business day range")
+                logger.warning("^BVSP: dias_uteis not available, using pandas business day range")
             
             return {
                 'has_data': True,
@@ -913,7 +925,7 @@ class DataLoader:
             }
             
         except Exception as e:
-            logger.error(f"Error checking IBOV data: {e}")
+            logger.error(f"Error checking ^BVSP data: {e}")
             return {
                 'has_data': False,
                 'missing_dates': [],
@@ -960,7 +972,7 @@ class DataLoader:
     
     def _download_ibov_data(self) -> bool:
         """
-        Download missing IBOV data.
+        Download missing benchmark (^BVSP) data via BRAPI.
         
         Returns:
             bool: True if download was successful, False otherwise
@@ -970,20 +982,20 @@ class DataLoader:
             return False
         
         try:
-            logger.info("Downloading missing IBOV data...")
+            logger.info("Downloading missing ^BVSP data via BRAPI...")
             
             # Download recent data (last 30 days) – Yahoo downloader removed
             result = self.ibov_downloader.get_recent_data(days=30)
             
             if result.success:
-                logger.info(f"Successfully downloaded IBOV data: {result.data_points} data points")
+                logger.info(f"Successfully downloaded ^BVSP data: {result.data_points} data points")
                 return True
             else:
-                logger.error(f"Failed to download IBOV data: {result.error_message}")
+                logger.error(f"Failed to download ^BVSP data: {result.error_message}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error downloading IBOV data: {e}")
+            logger.error(f"Error downloading ^BVSP data: {e}")
             return False
     
     def check_missing_data(self, tickers: List[str]) -> Dict[str, Any]:

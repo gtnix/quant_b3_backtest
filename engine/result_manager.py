@@ -31,18 +31,25 @@ class ResultManager:
     """
     
     def __init__(self, results_dir: str = "results"):
-        """Initialize result manager with storage directory."""
+        """Initialize result manager with storage directory.
+
+        In audit-only mode (AUDIT_EXECUTIONS_ONLY=true), do not create or
+        write any result directories/files. All persistence is disabled.
+        """
+        import os as _os
         self.results_dir = Path(results_dir)
-        self.results_dir.mkdir(exist_ok=True)
-        
-        # Create subdirectories
-        self.detailed_dir = self.results_dir / "detailed"
-        self.detailed_dir.mkdir(exist_ok=True)
-        
-        # Index file for quick access
         self.index_file = self.results_dir / "results_index.csv"
-        
-        logger.info(f"ResultManager initialized with directory: {self.results_dir}")
+        self.detailed_dir = self.results_dir / "detailed"
+
+        audit_only = _os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes')
+
+        if not audit_only:
+            # Only create directories when not in audit-only mode
+            self.results_dir.mkdir(exist_ok=True)
+            self.detailed_dir.mkdir(exist_ok=True)
+            logger.info(f"ResultManager initialized with directory: {self.results_dir}")
+        else:
+            logger.info("ResultManager running in audit-only mode; no filesystem writes will occur")
     
     def save_result(self, strategy_name: str, profile: str, ticker: str,
                    start_date: str, end_date: str, results: Any,

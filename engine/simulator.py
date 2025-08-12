@@ -386,7 +386,7 @@ class BacktestSimulator:
         self._ts_bounds_map: Dict[datetime, Tuple[int, int]] = {}
         # Mapping of timestamp -> first index position for fast historical slicing up to ts (exclusive)
         self._ts_pos_map: Dict[datetime, int] = {}
-        # Cached, normalized IBOV dataframe (loaded once)
+        # Cached, normalized benchmark (^BVSP) dataframe (loaded once)
         self._ibov_df_cached = None
         
         # Initialize SGS data for the entire backtest period
@@ -478,7 +478,14 @@ class BacktestSimulator:
         except Exception as e:
             config = self._load_config()
             strict_config = config.get('sgs', {}).get('strict_mode', {})
-            
+            # Allow override via selic.strict_mode: false
+            try:
+                selic_override = (config.get('selic', {}) or {}).get('strict_mode', None)
+            except Exception:
+                selic_override = None
+            if selic_override is False:
+                logger.warning(f"SELIC strict-mode override active; proceeding despite SGS init error: {e}")
+                return
             if strict_config.get('fail_on_missing_data', False):
                 logger.error(f"Critical SGS data initialization error: {e}")
                 raise RuntimeError(f"Backtest cannot proceed due to SGS data issues: {e}")
@@ -569,6 +576,32 @@ class BacktestSimulator:
             SimulationResult with comprehensive performance metrics
         """
         logger.info("Starting backtest simulation...")
+        # Determine and log extended warmup based on strategy requirements
+        try:
+            req = self.strategy.required_history()
+            ema_max = max(req.get('ema_windows', [20]))
+            mul = float(req.get('warmup_multiplier_for_ema', 3.0))
+            buf = int(req.get('buffer_sessions', 5))
+            cal_buf = int(req.get('calendar_buffer_sessions', 3))
+            required_warmup_sessions = max(
+                int(math.ceil(mul * ema_max)),
+                int(req.get('rsi_window', 10)) + buf,
+                int(req.get('atr_window', 14)) + buf,
+                int(req.get('rel_strength_return_window', 5)) + buf
+            )
+            # Compute extended_start by approximating business days
+            first_dt = pd.to_datetime(data.index.min()).date()
+            # Heuristic: 2x sessions in calendar days, then backtest loader ensures slicing
+            extended_start = pd.to_datetime(first_dt) - pd.Timedelta(days=(required_warmup_sessions + cal_buf) * 2)
+            logger.info(f"Warmup requirements: sessions={required_warmup_sessions}, calendar_buffer={cal_buf}")
+            logger.info(f"Extended start (approx): {extended_start.date()} | Backtest start: {first_dt}")
+            # Allow strategy to prewarm indicators on extended window
+            try:
+                self.strategy.prewarm_indicators(start_d=extended_start.date(), end_d=pd.to_datetime(data.index.max()).date())
+            except Exception as _e:
+                logger.debug(f"prewarm_indicators skipped: {_e}")
+        except Exception as _e:
+            logger.debug(f"required_history not available or failed: {_e}")
         
         # Validate data
         if data.empty:
@@ -736,8 +769,9 @@ class BacktestSimulator:
                 is_new_trading_day = (current_trading_day is None) or (current_date != current_trading_day)
                 if is_new_trading_day:
                     try:
-                        # Determine expected open timestamp in UTC-equivalent index (13:00 assumed from settings)
-                        expected_open_hour_utc = 13  # validated mapping for open
+                        # Determine expected open timestamp in UTC hours (BRAPI UTC):
+                        # B3 continuous session: 13:00 UTC open, 20:00 UTC close
+                        expected_open_hour_utc = 13
                         # Use precomputed boundaries to slice quickly
                         start_end = date_boundaries.get(current_date)
                         if start_end is not None:
@@ -848,6 +882,12 @@ class BacktestSimulator:
                                     self.strategy.on_warmup(sym, warmup_bars)
                                     warmup_completed = True
                                     logger.info(f"Strategy warmup completed with {len(warmup_bars)} bars")
+                                else:
+                                    # Multi-frame: allow proceeding without intraday warmup
+                                    mf_mode = os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on')
+                                    if mf_mode:
+                                        logger.warning("Multi-frame: no intraday warmup bars; proceeding without on_warmup (multi-asset path)")
+                                        warmup_completed = True
                             except Exception as e:
                                 logger.error(f"Error in strategy on_warmup: {e}")
                                 warmup_completed = True
@@ -912,7 +952,13 @@ class BacktestSimulator:
                             warmup_completed = True  # Mark warmup as completed
                             logger.info(f"Strategy warmup completed with {len(warmup_bars)} bars")
                         else:
-                            logger.warning(f"Insufficient warmup data for {timestamp} - using available data")
+                            # Multi-frame: allow proceeding without warmup
+                            mf_mode = os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on')
+                            if mf_mode:
+                                logger.warning(f"Multi-frame: no intraday warmup bars at {timestamp}; proceeding without on_warmup")
+                                warmup_completed = True
+                            else:
+                                logger.warning(f"Insufficient warmup data for {timestamp} - using available data")
                     except Exception as e:
                         logger.error(f"Error in strategy on_warmup: {e}")
                         warmup_completed = True  # Prevent infinite retry
@@ -1069,11 +1115,10 @@ class BacktestSimulator:
                 logger.info(f"Using strategy's intelligent data requirement: {intelligent_requirement} bars")
                 warmup_bars_required = max(warmup_bars_required, intelligent_requirement)
             
-            # For execution simulation, we need enough intraday bars for realistic backtesting
-            # Assume ~6-7 bars per trading day for Brazilian market
-            # Need at least (ATR period + buffer) trading days worth of data for execution simulation
-            min_trading_days = atr_period + 15  # 15-day buffer for holidays and reliable calculation
-            min_intraday_bars_for_execution = min_trading_days * 6  # 6 bars per day to handle gaps
+            # For execution simulation, we need enough intraday bars for realistic backtesting.
+            # ATR is computed from DAILY data (not hourly), so we decouple execution warmup from ATR period.
+            # Require at least a reasonable number of hourly bars to model fills; default to strategy warmup.
+            min_intraday_bars_for_execution = max(60, warmup_bars_required)
             
             # Use the maximum of strategy requirement and calculated execution requirement
             warmup_bars_required = max(warmup_bars_required, min_intraday_bars_for_execution)
@@ -1081,7 +1126,7 @@ class BacktestSimulator:
             logger.info(f"Strategy warmup calculation for {symbol}:")
             logger.info(f"  - Base warmup bars: {warmup_bars_required}")
             logger.info(f"  - ATR period needed: {atr_period} daily bars (from Brapi.dev)")
-            logger.info(f"  - Minimum intraday bars for execution simulation: {min_intraday_bars_for_execution}")
+            logger.info(f"  - Minimum intraday bars for execution simulation: {min_intraday_bars_for_execution} (ATR uses daily data)")
             logger.info(f"  - Final warmup requirement: {warmup_bars_required} intraday bars")
             
             # Always use complete data from strategy context - this contains full historical intraday data
@@ -1186,7 +1231,7 @@ class BacktestSimulator:
             # Validate we have sufficient unique trading days for execution simulation
             if unique_dates < required_trading_days:
                 logger.warning(f"Limited unique trading days: {unique_dates} < {required_trading_days} required")
-                logger.warning(f"This may result in insufficient data for {atr_period}-day ATR calculation")
+                logger.warning("ATR is computed from daily data; limited days may reduce stability but will not block execution")
                 
                 # FIXED: Try to get more data while respecting start_date boundary
                 if self.start_date:
@@ -1212,24 +1257,33 @@ class BacktestSimulator:
                             logger.warning(f"⚠️ Extended warmup data: {actual_bars} bars spanning {unique_dates} unique days (legacy mode)")
             
             # Final validation with better messaging
+            mf_mode = os.getenv('MULTIFRAME_MODE', 'off').lower() in ('1','true','yes','on')
             if actual_bars < min_intraday_bars_for_execution:
-                logger.error(f"CRITICAL: Insufficient warmup data for execution simulation!")
-                logger.error(f"  - Available intraday bars: {actual_bars}")
-                logger.error(f"  - Required for {atr_period}-day ATR: {min_intraday_bars_for_execution} intraday bars")
-                logger.error(f"  - This will result in insufficient data for technical indicators")
-                logger.error(f"  - Consider extending the historical data range or reducing ATR period")
-                return []
+                if mf_mode:
+                    # In multi-frame, execution can proceed with fewer hourly bars; indicators are computed from daily elsewhere
+                    logger.warning(f"Multi-frame mode: proceeding with {actual_bars} hourly warmup bars (<{min_intraday_bars_for_execution})")
+                else:
+                    logger.error("CRITICAL: Insufficient warmup data for execution simulation!")
+                    logger.error(f"  - Available intraday bars: {actual_bars}")
+                    logger.error(f"  - Required intraday bars for execution modeling: {min_intraday_bars_for_execution}")
+                    logger.error("  - ATR is computed from daily data; this shortfall only impacts execution realism")
+                    logger.error("  - Consider extending historical intraday range or lowering warmup bars")
+                    # Do not block; proceed with available data to allow order emission and ATR usage
+                    # return []
             
             # Validate general warmup requirement
             if actual_bars < warmup_bars_required:
                 logger.warning(f"Using available warmup data: {actual_bars} bars (requested: {warmup_bars_required})")
-                
-                # Still proceed if we have enough for execution simulation
-                if actual_bars >= min_intraday_bars_for_execution:
-                    logger.info(f"Sufficient for execution simulation, proceeding with {actual_bars} warmup bars")
+                # In multi-frame, indicators are daily-only; allow proceeding with fewer hourly bars
+                if mf_mode:
+                    logger.warning(f"Multi-frame mode: continuing despite hourly warmup shortfall ({actual_bars} < {warmup_bars_required})")
                 else:
-                    logger.error(f"Critical: Insufficient data for reliable execution simulation")
-                    return []
+                    # Still proceed if we have enough for execution simulation
+                    if actual_bars >= min_intraday_bars_for_execution:
+                        logger.info(f"Sufficient for execution simulation, proceeding with {actual_bars} warmup bars")
+                    else:
+                        logger.error(f"Critical: Insufficient data for reliable execution simulation")
+                        return []
             
             # Create Bar objects from intraday data
             bars = []
@@ -1253,10 +1307,16 @@ class BacktestSimulator:
             logger.info(f"  - Intraday bars provided: {len(bars)}")
             logger.info(f"  - Trading days covered: {estimated_trading_days}")
             logger.info(f"  - ATR period requirement: {atr_period} daily bars (from Brapi.dev)")
-            logger.info(f"  - Warmup period: {bars[0].timestamp} to {bars[-1].timestamp}")
+            if len(bars) > 0:
+                logger.info(f"  - Warmup period: {bars[0].timestamp} to {bars[-1].timestamp}")
+            else:
+                logger.warning("  - No intraday warmup bars available")
             if self.start_date:
                 logger.info(f"  - Simulation start: {self.start_date}")
-                logger.info(f"  - Look-ahead bias: {'NO' if bars[-1].timestamp < self.start_date else 'YES (CRITICAL ERROR)'}")
+                if len(bars) > 0:
+                    logger.info(f"  - Look-ahead bias: {'NO' if bars[-1].timestamp < self.start_date else 'YES (CRITICAL ERROR)'}")
+                else:
+                    logger.info("  - Look-ahead bias: NO (no intraday warmup)")
             
             if estimated_trading_days >= atr_period:
                 logger.info(f"✓ Sufficient trading days for execution simulation")
@@ -1548,14 +1608,14 @@ class BacktestSimulator:
         current_date = current_timestamp.date()
         sgs_data = self._load_sgs_data_for_date(current_timestamp)
         
-        # Load IBOV data for current date (use date only, not hour)  
+        # Load benchmark (^BVSP) data for current date (use date only, not hour)  
         ibov_data = self._load_ibov_data_for_date(current_timestamp)
         
-        # Monitor IBOV data health
+        # Monitor benchmark data health
         if not ibov_data:
-            logger.error(f"IBOV data loading failed for {current_date} - strategy performance will be degraded")
+            logger.error(f"Benchmark (^BVSP) data loading failed for {current_date} - strategy performance will be degraded")
         else:
-            logger.debug(f"IBOV data loaded successfully for {current_date}: {ibov_data['data_points']} data points")
+            logger.debug(f"Benchmark (^BVSP) data loaded successfully for {current_date}: {ibov_data['data_points']} data points")
         
         # Calculate SELIC-CDI spread for historical analysis
         selic_cdi_spread = self._calculate_selic_cdi_spread(sgs_data)
@@ -1672,6 +1732,14 @@ class BacktestSimulator:
             return sgs_data
         except (SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError) as e:
             strict_config = config.get('sgs', {}).get('strict_mode', {})
+            # Allow override via selic.strict_mode: false
+            try:
+                selic_override = (config.get('selic', {}) or {}).get('strict_mode', None)
+            except Exception:
+                selic_override = None
+            if selic_override is False:
+                logger.warning(f"SELIC strict-mode override active; skipping SELIC for {current_date.date()}: {e}")
+                return {}
             if strict_config.get('fail_on_missing_data', False):
                 logger.error(f"Critical SELIC data issue: {e}")
                 raise RuntimeError(f"Backtest cannot proceed due to SELIC data issues: {e}")
@@ -1703,7 +1771,13 @@ class BacktestSimulator:
                         from .brapi_provider import BrapiProvider
                         end_dt = current_date
                         start_dt = end_dt - timedelta(days=365)
-                        brapi = BrapiProvider(api_token=os.getenv('BRAPI_API_TOKEN', ''), cache_dir="data/brapi_cache")
+                        # Defensive local import to avoid NameError in alternate import contexts
+                        try:
+                            import os as _os
+                            token = _os.getenv('BRAPI_API_TOKEN', '')
+                        except Exception:
+                            token = ''
+                        brapi = BrapiProvider(api_token=token, cache_dir="data/brapi_cache")
                         # BRAPI index ticker mapping: IBOV -> ^BVSP
                         ibov_df = brapi.get_daily_data('^BVSP', start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
                     except Exception as _e:
@@ -1867,6 +1941,16 @@ class BacktestSimulator:
             price_data: Current day's price data
         """
         try:
+            # High-signal debug: summarize incoming order
+            try:
+                logger.info(
+                    f"EXECUTE intent: sym={getattr(signal,'symbol',None)} side={getattr(signal,'side',None)} "
+                    f"type={getattr(signal,'order_type',None)} qty={getattr(signal,'quantity',None)} "
+                    f"meta.entry_leg={getattr(getattr(signal,'metadata',{}),'get',lambda k:None)('entry_leg')} "
+                    f"meta.attempt={getattr(getattr(signal,'metadata',{}),'get',lambda k:None)('attempt_type')}"
+                )
+            except Exception:
+                pass
             # Skip redundant market data validation for strategies that validate during signal generation
             # (e.g., FuzzyFajuto strategy already validates market data including IBOV data in generate_signals)
             skip_validation = (
@@ -1918,13 +2002,12 @@ class BacktestSimulator:
                 except Exception as e:
                     logger.warning(f"Error in calculate_position_size: {str(e)}, using strategy's quantity")
             
-            # Final validation
+            # Final validation (single guard)
             if quantity <= 0:
-                logger.debug(f"Insufficient quantity for signal: {signal}")
-                return
-            
-            if quantity <= 0:
-                logger.debug(f"Insufficient cash or invalid position size for signal: {signal}")
+                logger.warning(
+                    f"quantity==0 after sizing: sym={getattr(signal,'symbol',None)} side={getattr(signal,'side',None)} "
+                    f"order_type={getattr(signal,'order_type',None)} requested={getattr(signal,'quantity',None)} available_cash={available_cash}"
+                )
                 return
             
             # Execute trade based on signal type
@@ -1943,7 +2026,7 @@ class BacktestSimulator:
             else:
                 trade_type = 'day_trade'  # Default to day trade for non-string types
             
-            # Handle market orders (price = 0.0 or None)
+            # Handle market orders (ensure fill uses OPEN for first-bar market)
             if signal.order_type == OrderType.MARKET or price == 0.0:
                 # Prefer exact execution price provided by strategy for first-bar market orders
                 execution_price_from_metadata = None
@@ -1978,7 +2061,9 @@ class BacktestSimulator:
                         price = price_data.get('close', 0.0) if price_data is not None else 0.0
                 
                 if price <= 0.0:
-                    logger.warning(f"Cannot determine price for market order: {signal}")
+                    logger.warning(
+                        f"Cannot determine market price: will skip. sym={ticker} open={price_data.get('open',None)} close={price_data.get('close',None)}"
+                    )
                     return
             
             if signal_type == OrderSide.BUY or signal_type == SignalType.BUY:

@@ -48,13 +48,8 @@ strategy:
   max_consecutive_errors: 3        # Maximum consecutive errors before stopping
   error_recovery_mode: "skip"      # skip, retry, or stop
   
-  # FuzzyFajuto Signal Parameters
-  buy_threshold: 1.50              # Minimum score for buy signals
-  sell_threshold: -1.50            # Maximum score for sell signals
-  ema_periods: [3, 5, 10, 15, 20]  # EMA periods for trend analysis (max period affects data requirement)
-  rsi_period: 10                   # RSI calculation period (affects minimum data requirement)
-  rsi_overbought: 65               # RSI overbought threshold
-  rsi_oversold: 35                 # RSI oversold threshold
+  # FuzzyFajuto Signal Parameters are hardcoded in strategy implementation.
+  # Intentionally left out of profile to avoid divergence.
   
   # Execution Tracking
   track_executions: true           # Track all execution attempts
@@ -88,7 +83,7 @@ strategy:
   
   # Missing open bar handling (execution policy)
   execution:
-    missing_open_bar_behavior: "skip_day"   # options: skip_day, use_first_available, alert_only
+    missing_open_bar_behavior: "use_first_available"   # options: skip_day, use_first_available, alert_only
   
   # Performance Tracking
   track_fill_rates: true           # Track fill rates by attempt type

@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 def load_ibov_data():
-    """Load IBOV data from CSV file."""
+    """Load benchmark (^BVSP) data from CSV file if present."""
     try:
         ibov_file = Path("data/IBOV/IBOV_raw.csv")
+        if not ibov_file.exists():
+            alt = Path("data") / "^BVSP_raw.csv"
+            if alt.exists():
+                ibov_file = alt
         if not ibov_file.exists():
             return None
         
@@ -39,7 +43,7 @@ def load_ibov_data():
         
         return ibov_data
     except Exception as e:
-        logger.error(f"Error loading IBOV data: {e}")
+        logger.error(f"Error loading ^BVSP data: {e}")
         return None
 
 
@@ -229,8 +233,12 @@ def test_data_quality():
         ).sum()
         print(f"   Records with invalid OHLC: {invalid_ohlc}")
         
-        # Test IBOV data quality
+        # Test ^BVSP data quality (legacy path retained)
         ibov_file = Path("data/IBOV/IBOV_raw.csv")
+        if not ibov_file.exists():
+            alt = Path("data") / "^BVSP_raw.csv"
+            if alt.exists():
+                ibov_file = alt
         if ibov_file.exists():
             ibov_data = pd.read_csv(ibov_file, index_col=0)
             ibov_data.index = pd.to_datetime(ibov_data.index, utc=True).tz_localize(None)
