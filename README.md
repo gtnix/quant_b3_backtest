@@ -248,6 +248,34 @@ portfolio = EnhancedPortfolio('config/settings.yaml')
 
 To create a custom trading strategy, subclass the `BaseStrategy` class from `engine/base_strategy.py` and place your strategy file in the `strategies/` directory. The `strategies/` directory is currently empty and intended for user strategies.
 
+### Unified Fills and MOC
+
+After a run, unified fills can be exported (CSV/JSON) via the result manager. Columns include `timestamp, symbol, side, quantity, price, lot_type, rounding, tranche_notional_brl, trade_type, order_type, attempt_type, attempt_name`. Market-on-close executions are logged with `order_type=MOC` and `attempt_type=moc`.
+
+## Mandatory Pair Trading Mode (Always On)
+
+Pair-mode is enforced for all simulations. Each trading day the engine selects the top BUY and top SELL candidates (by fuzzy score) and executes a symmetric four-leg schedule per side (market + three limit tranches), with tranche sizing derived from `config/settings.yaml`:
+
+- `pair_mode.gross_exposure_brl`: total gross notional for both legs
+- `pair_mode.tranches`: number of equal tranches per leg
+- Tranche per leg: `tranche_notional_brl = gross_exposure_brl / tranches`
+
+Execution logic:
+- P1: Market-at-open tranche sized by previous close; P2–P4: passive limits derived from close (and ATR/percent steps)
+- Uniform lot rounding enforced at 100 shares per leg/day
+- End-of-day: residual intraday positions are flattened via MOC
+
+Data flow:
+- Hourly execution data from BRAPI (UTC); daily indicators from BRAPI daily
+- Strategy emits intents; simulator validates B3 constraints and records unified fills
+
+Run example (pair-mode is automatic):
+```bash
+python run_fuzzy_fajuto.py --tickers "ALPA4,BBAS3,PETR4" --profile default --save-results --report-format json --report-level full
+```
+
+The engine will also read `data/portfolio.csv` if `--tickers` is omitted.
+
 ## Security Features
 
 ### What's Protected

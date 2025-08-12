@@ -547,6 +547,7 @@ class BrapiProvider:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("Fetching %s data for %s: %s", data_type, symbol, range_param)
                 # Reuse persistent session for performance
+                # Bound total wait with per-request timeout; caller already sets self.timeout from config
                 response = self._session.get(url, headers=headers, params=params, timeout=self.timeout)
                 
                 if response.status_code == 200:
@@ -637,6 +638,8 @@ class BrapiProvider:
                 elif response.status_code == 429:
                     # Rate limit hit
                     retry_after = int(response.headers.get('Retry-After', 60))
+                    # Cap retry-after to a sane upper bound to avoid very long blocking
+                    retry_after = max(1, min(retry_after, 10))
                     logger.warning(f"Rate limit hit for {symbol}, waiting {retry_after}s")
                     time.sleep(retry_after)
                     continue
@@ -652,7 +655,8 @@ class BrapiProvider:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Request error for {symbol} (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    # Cap exponential backoff to avoid long waits
+                    time.sleep(min(2 ** attempt, 5))
                     continue
                 else:
                     return None
