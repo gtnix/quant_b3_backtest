@@ -963,26 +963,70 @@ def main():
                     req = {'date','symbol','qualified_signal','fuzzy_score_raw'}
                     if req.issubset(df.columns):
                         pair_schedule: dict = {}
+                        match_records: list[dict] = []
+                        pm = (_cfg.get('pair_mode', {}) or {})
+                        min_strength = float(pm.get('min_signal_strength', 1.50))
+                        try:
+                            print(f"[pair_builder] min_strength={min_strength}")
+                            _buy_ct = int((df['qualified_signal']=='BUY').sum()) if 'qualified_signal' in df.columns else 0
+                            _sell_ct = int((df['qualified_signal']=='SELL').sum()) if 'qualified_signal' in df.columns else 0
+                            _abs_ct = int((df['fuzzy_score_raw'].abs()>=min_strength).sum()) if 'fuzzy_score_raw' in df.columns else 0
+                            print(f"[pair_builder] rows: BUY={_buy_ct} SELL={_sell_ct} abs>=th={_abs_ct}")
+                        except Exception:
+                            pass
+
+                        from pandas.tseries.offsets import BDay as _BDay
                         for d, g in df.groupby('date'):
                             buys = g[g['qualified_signal']=='BUY']
                             sells = g[g['qualified_signal']=='SELL']
+                            # Guards: both sides present
                             if len(buys)==0 or len(sells)==0:
                                 continue
                             b = buys.sort_values('fuzzy_score_raw', ascending=False).iloc[0]
                             s = sells.sort_values('fuzzy_score_raw', ascending=True).iloc[0]
-                            exec_date = (pd.to_datetime(d) + pd.Timedelta(days=1)).date()
-                            day_store = pair_schedule.setdefault(exec_date, {})
-                            # Ensure close for limits
-                            close_b = float(b.get('close', float('nan')) if 'close' in b else float('nan'))
-                            close_s = float(s.get('close', float('nan')) if 'close' in s else float('nan'))
-                            if not (close_b == close_b and close_s == close_s):
-                                bench = ((_cfg.get('benchmark', {}) or {}).get('symbol')) or ((_cfg.get('brapi', {}) or {}).get('data', {}) or {}).get('ibov_symbol', '^BVSP')
-                                prepared = prepare_fuzzy_data(tickers, bench, start_dt.strftime('%Y-%m-%d'), end_date)
-                                m = prepared[['date','symbol','close']].set_index(['date','symbol'])
-                                if (d, b['symbol']) in m.index:
-                                    close_b = float(m.loc[(d, b['symbol'])]['close'])
-                                if (d, s['symbol']) in m.index:
-                                    close_s = float(m.loc[(d, s['symbol'])]['close'])
+                            sb = float(b['fuzzy_score_raw']); ss = float(s['fuzzy_score_raw'])
+                            if abs(sb) < min_strength or abs(ss) < min_strength:
+                                continue
+                            sym_b = str(b['symbol']); sym_s = str(s['symbol'])
+                            # Align to next B3 business day (approximate using BDay)
+                            exec_date = (pd.to_datetime(d) + _BDay(1)).date()
+                            # Use CSV closes directly; skip if invalid
+                            try:
+                                close_b = float(b['close'])
+                            except Exception:
+                                close_b = float('nan')
+                            try:
+                                close_s = float(s['close'])
+                            except Exception:
+                                close_s = float('nan')
+                            # Verbose log of selection
+                            try:
+                                print(f"[pair_builder/day] d={d} BUY {sym_b} sb={sb:.2f} close_b={close_b} | SELL {sym_s} ss={ss:.2f} close_s={close_s}")
+                            except Exception:
+                                pass
+                            # If either close is invalid or non-positive, skip scheduling for this day
+                            invalid_b = (not (close_b == close_b)) or close_b <= 0
+                            invalid_s = (not (close_s == close_s)) or close_s <= 0
+                            if invalid_b or invalid_s:
+                                match_records.append({
+                                    'exec_date': str(exec_date),
+                                    'date': str(d),
+                                    'buy_symbol': sym_b,
+                                    'sell_symbol': sym_s,
+                                    'score_buy': float(sb),
+                                    'score_sell': float(ss),
+                                    'close_buy': None if invalid_b else float(close_b),
+                                    'close_sell': None if invalid_s else float(close_s),
+                                    'scheduled_flag': 'no',
+                                })
+                                try:
+                                    reason = []
+                                    if invalid_b: reason.append('invalid_buy_close')
+                                    if invalid_s: reason.append('invalid_sell_close')
+                                    print(f"[pair_builder/skip] d={d} reason={'+'.join(reason)}")
+                                except Exception:
+                                    pass
+                                continue
                             def limits(side: str, c: float) -> tuple[float,float,float]:
                                 try:
                                     return SignalScheduler()._limits_from_close(c, side)
@@ -994,6 +1038,9 @@ def main():
                                         return (round(c*(1+ step[0]),2), round(c*(1+ step[1]),2), round(c*(1+ step[2]),2))
                             p2b,p3b,p4b = limits('BUY', close_b)
                             p2s,p3s,p4s = limits('SELL', close_s)
+                            # No dynamic tranche scaling in ATR-free fixed-tranche mode
+                            day_store = pair_schedule.setdefault(exec_date, {})
+
                             day_store[str(b['symbol'])] = {
                                 'symbol': str(b['symbol']),
                                 'side': OrderSide.BUY,
@@ -1001,7 +1048,7 @@ def main():
                                 'base_close_t': close_b,
                                 'limits_used': {'limit_level_2': p2b, 'limit_level_3': p3b, 'limit_level_4': p4b},
                                 'current_atr_t': float('nan'),
-                                'fuzzy_score_t': float(b['fuzzy_score_raw'])
+                                'fuzzy_score_t': float(sb)
                             }
                             day_store[str(s['symbol'])] = {
                                 'symbol': str(s['symbol']),
@@ -1010,11 +1057,35 @@ def main():
                                 'base_close_t': close_s,
                                 'limits_used': {'limit_level_2': p2s, 'limit_level_3': p3s, 'limit_level_4': p4s},
                                 'current_atr_t': float('nan'),
-                                'fuzzy_score_t': float(s['fuzzy_score_raw'])
+                                'fuzzy_score_t': float(ss)
                             }
+                            match_records.append({
+                                'exec_date': str(exec_date),
+                                'date': str(d),
+                                'buy_symbol': sym_b,
+                                'sell_symbol': sym_s,
+                                'score_buy': float(sb),
+                                'score_sell': float(ss),
+                                'close_buy': float(close_b),
+                                'close_sell': float(close_s),
+                                'scheduled_flag': 'yes',
+                            })
+                            # Update rotation memory after selecting
+                            last_score[sym_b] = sb
+                            last_score[sym_s] = ss
                         if pair_schedule:
+                            # Inject schedule before simulation
                             strategy._scheduled_day_trades = pair_schedule
-                            logger.info(f"Injected pair_schedule days: {len(pair_schedule)}")
+                            try:
+                                # Print diagnostics: schedule size and first 5 entries
+                                _sched_days = sorted(pair_schedule.keys())
+                                print(f"[pair_schedule] days={len(_sched_days)}")
+                                for _d in _sched_days[:5]:
+                                    _syms = pair_schedule[_d]
+                                    _sym_list = [s for s in _syms.keys() if not str(s).startswith('__')]
+                                    print(f"  {_d}: {_sym_list}")
+                            except Exception:
+                                pass
             except Exception as e:
                 logger.warning(f"Pair-mode pre-sim selection failed: {e}")
 
@@ -1024,6 +1095,46 @@ def main():
             end_date=end_date,
             config_path="config/settings.yaml"
         )
+        # Simulation-day diagnostics: compare to schedule
+        try:
+            sim_days = sorted(set(filtered_data.index.date))
+            sched_days = sorted(getattr(strategy, '_scheduled_day_trades', {}).keys())
+            # Normalize to dates (some keys may be numpy.datetime64)
+            sched_days = [pd.Timestamp(sd).date() for sd in sched_days]
+            inter = sorted(set(sim_days).intersection(sched_days))
+            print(f"[diagnostics] sim_days={len(sim_days)} sched_days={len(sched_days)} intersect={len(inter)}")
+            if inter[:5]:
+                print(f"[diagnostics] first_intersect_sample={inter[:5]}")
+        except Exception:
+            pass
+
+        # Matching Report: intraday availability for scheduled pairs
+        try:
+            import pandas as _pd
+            _mr = []
+            sched = getattr(strategy, '_scheduled_day_trades', {}) or {}
+            if sched:
+                # Build intraday presence map from combined filtered_data
+                _day_sym = set((ts.date(), row_symbol) for ts, row_symbol in zip(filtered_data.index, filtered_data['symbol'] if 'symbol' in filtered_data.columns else [None]*len(filtered_data)))
+                for _d, _syms in sched.items():
+                    for _sym, _rec in _syms.items():
+                        if str(_sym).startswith('__'):
+                            continue
+                        intraday_ok = ( (_d, _sym) in _day_sym )
+                        _mr.append({
+                            'exec_date': str(_d),
+                            'symbol': _sym,
+                            'side': getattr(_rec.get('side'), 'name', str(_rec.get('side'))),
+                            'base_close_t': _rec.get('base_close_t'),
+                            'l2': _rec['limits_used']['limit_level_2'],
+                            'l3': _rec['limits_used']['limit_level_3'],
+                            'l4': _rec['limits_used']['limit_level_4'],
+                            'intraday_data_flag': 'yes' if intraday_ok else 'no'
+                        })
+                _pd.DataFrame(_mr).to_csv('reports/pair_matching_report.csv', index=False)
+        except Exception:
+            pass
+
         # Run simulation with timing
         t0_sim = time.perf_counter()
         # Compact single-line indicator before sim
@@ -1440,6 +1551,45 @@ def main():
                         except Exception:
                             fuzzy_rows = []
 
+                        # Attribution block per day: BUY/SELL best pair and PnL components
+                        try:
+                            daily_pairs = []
+                            if 'fuzzyByDate' in locals() or True:
+                                # Build map of best BUY/SELL per day from df
+                                fz = df[['date','symbol','fuzzy_score_raw','qualified_signal','close']].copy()
+                                for d, gday in fz.groupby('date'):
+                                    b = gday[gday['qualified_signal']=='BUY']
+                                    s = gday[gday['qualified_signal']=='SELL']
+                                    if len(b)==0 or len(s)==0:
+                                        continue
+                                    b1 = b.sort_values('fuzzy_score_raw', ascending=False).iloc[0]
+                                    s1 = s.sort_values('fuzzy_score_raw', ascending=True).iloc[0]
+                                    buy_symbol = str(b1['symbol']); sell_symbol = str(s1['symbol'])
+                                    # PnL from derived_rows (intraday to MOC close) if present
+                                    pnl_buy = pnl_sell = 0.0
+                                    try:
+                                        for r in derived_rows:
+                                            if r['date']==str(d) and r['symbol'] in (buy_symbol, sell_symbol) and r['pnl'] is not None:
+                                                if r['symbol']==buy_symbol:
+                                                    pnl_buy += float(r['pnl'])
+                                                else:
+                                                    pnl_sell += float(r['pnl'])
+                                    except Exception:
+                                        pass
+                                    daily_pairs.append({
+                                        'date': str(d),
+                                        'buy_symbol': buy_symbol,
+                                        'sell_symbol': sell_symbol,
+                                        'score_buy': float(b1['fuzzy_score_raw']),
+                                        'score_sell': float(s1['fuzzy_score_raw']),
+                                        'pnl_buy': float(pnl_buy),
+                                        'pnl_sell': float(pnl_sell),
+                                        'pnl_total': float(pnl_buy + pnl_sell)
+                                    })
+                            preflight['outcomes']['daily_pairs'] = daily_pairs
+                        except Exception:
+                            pass
+
                         report_payload = {
                             'rows': derived_rows,
                             'dailyNeutral': list(daily_neutral.values()),
@@ -1449,6 +1599,7 @@ def main():
                             'dateMin': date_min,
                             'dateMax': date_max,
                              'fuzzyByDate': fuzzy_rows,
+                             'dailyPairs': preflight['outcomes'].get('daily_pairs', []),
                             'kpis': {
                                 'totalPnl': float(sum(r['pnl'] for r in derived_rows if r['pnl'] is not None)),
                                 'totalTrades': int(sum(1 for r in derived_rows if r['filled'])),
@@ -2012,9 +2163,20 @@ def main():
 
             # Export unified fills if available
             try:
+                # Prefer simulator-level unified fills; if empty, derive from execution history payload
                 fills_df = simulator.get_unified_fills_dataframe()
+                if (fills_df is None or fills_df.empty) and 'derived_rows' in locals():
+                    try:
+                        import pandas as _pd
+                        _rows_df = _pd.DataFrame(derived_rows) if isinstance(derived_rows, list) else None
+                        if _rows_df is not None and not _rows_df.empty:
+                            fills_df = _rows_df.rename(columns={
+                                'date':'trade_date','symbol':'symbol','side':'side','quantity':'qty','execution_price':'entry_price','pnl':'pnl_leg'
+                            })
+                    except Exception:
+                        pass
                 if result_manager is not None and fills_df is not None and not fills_df.empty:
-                    art = result_manager.export_fills(fills_df, base_name='fills')
+                    art = result_manager.export_fills(fills_df, base_name='unified_fills')
                     summ = result_manager.summarize_fills(fills_df)
                     print("\nUnified Fills Summary:")
                     print(f"  Total fills: {summ.get('total_fills', 0)}  Turnover (BRL): {summ.get('turnover_brl', 0.0):,.2f}")

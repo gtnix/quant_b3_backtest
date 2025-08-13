@@ -171,6 +171,15 @@ backtest:
 pair_mode:
   gross_exposure_brl: 50000
   tranches: 4
+  # Signal selection thresholds
+  min_signal_strength: 1.80      # raised from 1.50 to reduce low-conviction days
+  min_total_strength: 4.0        # |BUY| + |SELL| must exceed this
+  rotation_improve_abs: 0.25     # require ≥0.25 absolute improvement to repeat same symbol next day
+  # ATR and dispersion gating
+  atr_min_ratio: 0.010           # require ATR(20)/Price ≥ 1.0%
+  dispersion_lookback: 60        # rolling days for median(|score|) distribution
+  dispersion_low_quantile: 0.30  # bottom 30% considered low-opportunity
+  tranche_scale_low_dispersion: 0.50  # scale tranche per leg on low-dispersion days
 
 # Brapi.dev API Configuration
 brapi:

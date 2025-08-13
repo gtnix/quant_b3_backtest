@@ -2257,16 +2257,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
             except Exception:
                 pass
         
-        # Validate current ATR availability
-        if bar.symbol not in self.current_atr_values:
-            self.context.logger.debug(f"No current ATR data for {bar.symbol}, skipping trade generation")
-            return []
-        
-        # Check ATR validity
-        atr = self._get_current_atr(bar.symbol)
-        if atr <= 0:
-            self.context.logger.debug(f"Invalid ATR for {bar.symbol}: {atr}, skipping trade generation")
-            return []
+        # ATR is calculated and available, but not used for eligibility in this mode
         
         # Maintain intraday history for general use
         if bar.symbol not in self.intraday_history:
@@ -2322,6 +2313,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
                             tranche_notional_brl = gross / tranches
                 except Exception:
                     pass
+                # No dynamic tranche scaling; fixed 12,500 per leg with 50,000 total and 4 tranches
                 # Use previous day's close as sizing anchor for all legs to keep uniform lots
                 prev_close = float(sched.get('base_close_t', float('nan')))
 

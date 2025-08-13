@@ -1184,6 +1184,9 @@ class DataRequirements:
         sym_to_days: dict[str, list[pd.Timestamp]] = {}
         for d, syms in (schedule or {}).items():
             for sym in syms.keys():
+                # Skip non-symbol metadata keys
+                if isinstance(sym, str) and sym.startswith('__'):
+                    continue
                 sym_to_days.setdefault(sym, []).append(pd.to_datetime(d))
         for sym, lst in sym_to_days.items():
             sym_to_days[sym] = sorted(list({pd.to_datetime(x).normalize() for x in lst}))

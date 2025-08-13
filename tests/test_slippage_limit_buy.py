@@ -9,7 +9,7 @@ if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
 from engine.base_strategy import Bar, StrategyConfig, StrategyContext, OrderType, OrderSide
-from quant_b3_backtest.strategies.fuzzy_fajuto_strategy import FuzzyFajutoStrategy
+from strategies.fuzzy_fajuto_strategy import FuzzyFajutoStrategy
 
 
 class DummyPortfolio:
