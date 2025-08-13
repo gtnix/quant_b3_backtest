@@ -73,7 +73,11 @@ class ResultManager:
         
         # Generate unique run ID
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id = f"{strategy_name}_{profile}_{ticker}_{start_date}_{end_date}_{timestamp}"
+        # Filename safety: hash long ticker strings to avoid path length issues
+        import hashlib as _hashlib
+        tickers_txt = str(ticker)
+        hash10 = _hashlib.sha1(tickers_txt.encode('utf-8')).hexdigest()[:10]
+        run_id = f"{strategy_name}_{profile}_{hash10}_{start_date}_{end_date}_{timestamp}"
         
         # Prepare result data
         result_data = {
@@ -111,6 +115,18 @@ class ResultManager:
                 logger.info(f"Detailed results saved: {detailed_file}")
             except Exception as e:
                 logger.error(f"Failed to save detailed results: {e}")
+            # Write hash mapping file to link hash → tickers
+            try:
+                mapping_path = self.results_dir / "tickers_hash_map.csv"
+                import csv as _csv
+                write_header = not mapping_path.exists()
+                with open(mapping_path, 'a', newline='') as mf:
+                    w = _csv.writer(mf)
+                    if write_header:
+                        w.writerow(["hash10","tickers","timestamp"]) 
+                    w.writerow([hash10, tickers_txt, timestamp])
+            except Exception:
+                pass
         
         # Update index
         self._update_index(result_data)

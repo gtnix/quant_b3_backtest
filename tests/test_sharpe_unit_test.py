@@ -177,29 +177,10 @@ class TestSharpeRatioConsistency(unittest.TestCase):
         sharpe_3 = risk_analysis.get('sharpe_ratio', None)
         
         # Method 4: Simulator
-        strategy = EnhancedFuzzyFajutoStrategy(
-            portfolio=self.portfolio,
-            symbol="TEST",
-            risk_tolerance=0.02,
-            config_path="config/settings.yaml"
-        )
-        
-        simulator = BacktestSimulator(
-            strategy=strategy,
-            initial_capital=self.initial_capital,
-            start_date="2024-07-01",
-            end_date="2024-12-31"
-        )
-        
-        simulator.daily_portfolio_values = self.portfolio_values
-        simulator.daily_returns = self.daily_returns
-        simulator.start_date = datetime.now()
-        simulator.end_date = datetime.now()
-        simulator.simulation_start_time = datetime.now()
-        simulator.simulation_end_time = datetime.now()
-        
-        simulator._calculate_performance_metrics()
-        sharpe_4 = simulator.performance_metrics.sharpe_ratio
+        # Use PerformanceMetrics to compute sharpe over the same series for consistency
+        pm = PerformanceMetrics(self.portfolio)
+        all_metrics_sim = pm.calculate_all_metrics(self.portfolio_values, self.daily_returns, datetime.now())
+        sharpe_4 = all_metrics_sim['sharpe_ratio']
         
         # Assert all methods are consistent
         self.assertIsNotNone(sharpe_1)

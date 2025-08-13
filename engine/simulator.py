@@ -1436,15 +1436,12 @@ class BacktestSimulator:
                     timestamp=close_ts,
                     metadata={'order_type': 'MOC', 'attempt_type': 'moc', 'attempt_name': 'MOC', 'reason': 'End of day position close', 'original_position': qty}
                 )
-                # Create bar data from the identified close bar; fallback to current price
+                # Create bar data from the identified close bar; if no close found, skip MOC to avoid unrealistic fills
                 import pandas as pd
                 current_price_local = None
                 if moc_close_price is None:
-                    current_price_local = self.data_portal.get_current_price(ticker)
-                    if current_price_local is None:
-                        logger.warning(f"No price available for {ticker} to execute MOC, skipping end-of-day trade")
-                        continue
-                    dummy_bar_data = pd.Series({'open': current_price_local, 'high': current_price_local, 'low': current_price_local, 'close': current_price_local, 'volume': 0})
+                    logger.warning(f"No official close available for {ticker} on {trading_day_date}; skipping MOC to avoid price bias")
+                    continue
                 else:
                     # Build dummy bar using the found bar's OHLC if available
                     if moc_bar_series is not None:
@@ -1465,13 +1462,8 @@ class BacktestSimulator:
                 if hasattr(self.strategy, 'on_fill'):
                     try:
                         from engine.base_strategy import Fill
-                        # Determine a safe fill price for on_fill without relying on possibly undefined variables
-                        fill_price = moc_intent.price
-                        if fill_price is None:
-                            if moc_close_price is not None:
-                                fill_price = moc_close_price
-                            else:
-                                fill_price = current_price_local
+                        # Determine a safe fill price for on_fill strictly from close
+                        fill_price = moc_close_price if moc_close_price is not None else moc_intent.price
                         fill = Fill(
                             order_id=f"sim_{len(self.trade_log)}",
                             symbol=moc_intent.symbol,
@@ -1497,6 +1489,29 @@ class BacktestSimulator:
         # 3) T+0 model: no end-of-day settlement processing
         
         # Record daily portfolio value at end of day
+        # Mark-to-market all positions using official close of the trading day to avoid EOD spikes
+        try:
+            price_updates = {}
+            if hasattr(self.strategy, 'context') and hasattr(self.strategy.context, 'metadata'):
+                complete_data = self.strategy.context.metadata.get('complete_data')
+            else:
+                complete_data = None
+            if complete_data is not None and hasattr(self.portfolio, 'positions'):
+                df = complete_data
+                # Normalize tz-aware index if needed
+                if getattr(df.index, 'tz', None) is not None:
+                    df = df.copy()
+                    df.index = df.index.tz_localize(None)
+                for sym in list(self.portfolio.positions.keys()):
+                    sdf = df[df['symbol'] == sym] if 'symbol' in df.columns else (df[df['ticker'] == sym] if 'ticker' in df.columns else df)
+                    same_day = sdf[(sdf.index.date == trading_day_date)]
+                    if len(same_day) > 0:
+                        price_updates[sym] = float(same_day.iloc[-1].get('close'))
+            if price_updates:
+                from datetime import datetime as _dt
+                self.portfolio.update_prices(price_updates, update_date=_dt.combine(trading_day_date, _dt.min.time()))
+        except Exception as _e:
+            logger.warning(f"EOD mark-to-market update failed: {_e}")
         portfolio_value = self.portfolio.get_portfolio_value()
         self.daily_portfolio_values.append(portfolio_value)
         
