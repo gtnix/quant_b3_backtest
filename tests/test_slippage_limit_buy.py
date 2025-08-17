@@ -44,15 +44,14 @@ def _build_daily_series(dates, highs, lows, closes):
 def test_slippage_positive_for_limit_buy_below_open():
     symbol = 'TEST3'
 
-    # Daily data for ATR: construct 20 days so ATR(14) is defined
-    # Use stable ranges to make ATR predictable
+    # Daily data window for indicator alignment
     days = pd.date_range('2025-01-01', periods=20, freq='D')
     highs = [10 + (i % 3) * 0.30 for i in range(20)]
     lows = [9.50 + (i % 3) * 0.30 for i in range(20)]
     closes = [9.80 + (i % 3) * 0.20 for i in range(20)]
     daily_df = _build_daily_series(days, highs, lows, closes)
 
-    # Target trading day D = last day; ATR[D-1] must be used
+    # Target trading day D = last day
     current_day = days[-1].date()
 
     # Create strategy with minimal config and dummy context
@@ -81,10 +80,7 @@ def test_slippage_positive_for_limit_buy_below_open():
 
     strat = FuzzyFajutoStrategy(cfg, ctx)
 
-    # Bypass external data loads: set ATR[D-1] directly and mark day as already recalculated
-    strat.current_atr_values = {symbol: 0.50}
-    strat.atr_calculation_dates = {symbol: current_day}
-    strat.last_recalculation_dates = {symbol: current_day}
+    # No ATR usage in strategy
 
     # Build first hourly bar of day D: set Open[D] = 10.00
     open_price = 10.00

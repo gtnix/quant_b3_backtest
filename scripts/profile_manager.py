@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine.result_manager import ResultManager
+from engine.brapi_provider import BrapiProvider
 
 
 def list_results(strategy_name=None, ticker=None, limit=10):
@@ -93,6 +94,30 @@ def show_detailed_result(run_id):
                 print(f"    {attempt_type}: {rate:.2%}")
 
 
+def sync_all_tickers(portfolio_csv: str = 'data/portfolio.csv', col: str = 'symbol', cache_dir: str = 'data/brapi_cache') -> int:
+    """CLI helper to run 5y/1h sync for all tickers in portfolio CSV."""
+    import pandas as pd
+    df = pd.read_csv(portfolio_csv)
+    if col not in df.columns and len(df.columns) > 0:
+        col = df.columns[0]
+    tickers = [str(s).strip().upper() for s in df[col].dropna() if str(s).strip()]
+    tickers = list(dict.fromkeys(tickers))
+
+    token = os.environ.get('BRAPI_API_TOKEN', '')
+    provider = BrapiProvider(api_token=token, cache_dir=cache_dir)
+
+    total = 0
+    for tkr in tickers:
+        try:
+            res = provider.sync_brapi_history(tkr)
+            status = 'SKIP' if res.get('skipped') else 'SYNC'
+            print(f"[{status}] {tkr} rows_downloaded={res.get('downloaded_rows')} saved_rows={res.get('saved_rows')} range={res.get('coverage_start')}→{res.get('coverage_end')}")
+            total += int(res.get('saved_rows', 0))
+        except Exception as e:
+            print(f"[ERROR] {tkr}: {e}")
+    return total
+
+
 def main():
     parser = argparse.ArgumentParser(description='Profile Manager Utility')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -111,6 +136,12 @@ def main():
     # Detail command
     detail_parser = subparsers.add_parser('detail', help='Show detailed result')
     detail_parser.add_argument('run_id', help='Run ID to show details for')
+
+    # Sync command
+    sync_parser = subparsers.add_parser('sync_all_tickers', help='Sync 5y/1h data for all tickers in portfolio.csv')
+    sync_parser.add_argument('--portfolio', default='data/portfolio.csv', help='Path to portfolio CSV')
+    sync_parser.add_argument('--col', default='symbol', help='Ticker column name')
+    sync_parser.add_argument('--cache-dir', default='data/brapi_cache', help='Cache directory')
     
     args = parser.parse_args()
     
@@ -120,6 +151,8 @@ def main():
         compare_profiles(args.strategy, args.ticker)
     elif args.command == 'detail':
         show_detailed_result(args.run_id)
+    elif args.command == 'sync_all_tickers':
+        sync_all_tickers(args.portfolio, args.col, args.cache_dir)
     else:
         parser.print_help()
 

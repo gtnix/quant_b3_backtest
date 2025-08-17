@@ -165,6 +165,566 @@ class BrapiProvider:
         """
         return self._get_data(symbol, start_date, end_date, 'hourly')
 
+    def get_earliest_timestamp(self, symbol: str, interval: str = '1h') -> Dict[str, Any]:
+        """Return earliest available timestamp for symbol and interval.
+
+        Args:
+            symbol: B3 ticker (e.g., 'PETR4')
+            interval: '1h' for hourly, '1d' for daily
+
+        Returns:
+            Dict with keys: symbol, interval, earliest_utc, earliest_local, rows, date_min, date_max
+        """
+        try:
+            interval = interval.strip().lower()
+            if interval not in ('1h', '1d'):
+                raise ValueError("interval must be '1h' or '1d'")
+
+            # Prefer local cache only to avoid network calls during discovery
+            data_type = 'daily' if interval == '1d' else 'hourly'
+            cache_file, _ = self._get_cache_info(symbol, data_type)
+            df = self._load_from_cache(cache_file) if cache_file.exists() else None
+            if df is None or df.empty:
+                return {
+                    'symbol': symbol,
+                    'interval': interval,
+                    'earliest_utc': None,
+                    'earliest_local': None,
+                    'rows': 0,
+                    'date_min': None,
+                    'date_max': None,
+                }
+
+            # Normalize index and compute earliest
+            try:
+                idx = pd.to_datetime(df.index)
+            except Exception:
+                idx = df.index
+            ts_min = pd.to_datetime(idx.min())
+            # Treat stored timestamps as UTC; convert to tz-aware
+            if getattr(ts_min, 'tzinfo', None) is None:
+                ts_min_utc = ts_min.tz_localize(pytz.UTC)
+            else:
+                ts_min_utc = ts_min.tz_convert(pytz.UTC)
+            tz_sp = pytz.timezone('America/Sao_Paulo')
+            ts_min_local = ts_min_utc.astimezone(tz_sp)
+
+            return {
+                'symbol': symbol,
+                'interval': interval,
+                'earliest_utc': ts_min_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'earliest_local': ts_min_local.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'rows': int(len(df)),
+                'date_min': ts_min_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'date_max': pd.to_datetime(idx.max()).strftime('%Y-%m-%d %H:%M:%S') if len(idx) else None,
+            }
+        except Exception as e:
+            logger.error(f"get_earliest_timestamp error for {symbol} {interval}: {e}")
+            return {
+                'symbol': symbol,
+                'interval': interval,
+                'earliest_utc': None,
+                'earliest_local': None,
+                'rows': 0,
+                'date_min': None,
+                'date_max': None,
+                'error': str(e),
+            }
+
+    # ==========================
+    # Extended intraday support
+    # ==========================
+    def get_supported_intraday_intervals(self) -> List[str]:
+        """Return supported BRAPI intraday intervals.
+
+        Based on public docs and practical behavior: 1m, 5m, 15m, 30m, 1h.
+        """
+        return ['1m', '5m', '15m', '30m', '1h']
+
+    def get_supported_timeframes(self) -> List[str]:
+        """Return all supported timeframes/intervals to scan (intraday + EOD)."""
+        # Intraday + End-of-day style intervals often seen across APIs
+        return ['1m', '5m', '15m', '30m', '1h', '1d', '1wk', '1mo']
+
+    def _fetch_brapi_data_interval(self, symbol: str, start_date: str, end_date: str, interval_param: str,
+                                   range_override: Optional[str] = None, interval_override: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """Fetch data from BRAPI specifying explicit interval (intraday or daily).
+
+        Optional overrides:
+          - range_override: one of {"1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max"}
+          - interval_override: one of {"1m","2m","5m","15m","30m","60m","90m","1h","1d","5d","1wk","1mo","3mo"}
+
+        Backwards-compatible: if overrides not provided, current earliest-date logic applies.
+        """
+        allowed_ranges = {"1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max"}
+        allowed_intervals = {"1m","2m","5m","15m","30m","60m","90m","1h","1d","5d","1wk","1mo","3mo"}
+        use_overrides = False
+        if range_override is not None or interval_override is not None:
+            # Require both or fallback
+            if range_override is None or interval_override is None:
+                logger.warning("BRAPI override requires both range and interval; falling back to default behavior")
+            else:
+                if range_override not in allowed_ranges or interval_override not in allowed_intervals:
+                    logger.warning("Invalid BRAPI range/interval override; falling back to default behavior")
+                else:
+                    use_overrides = True
+
+        range_param = self._calculate_range_parameter(start_date, end_date)
+        if use_overrides:
+            range_param = range_override
+            interval_param = interval_override
+        # Clamp intraday ranges to ~3 months when not explicitly overridden
+        if not use_overrides and interval_param in ('1m','5m','15m','30m','1h') and range_param in ('6mo','1y','2y','5y','max'):
+            range_param = '3mo'
+        url = f"{self.base_url}/quote/{symbol}"
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        # Ensure intraday conforms to BRAPI limits by default
+        params = {"range": "3mo", "interval": "1h"}
+        if self.api_token:
+            params["token"] = self.api_token
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"BRAPI GET {url} params={params}")
+        for attempt in range(self.max_retries):
+            try:
+                self._rate_limit()
+                resp = self._session.get(url, headers=headers, params=params, timeout=self.timeout)
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        if attempt < self.max_retries - 1:
+                            time.sleep(min(2 ** attempt, 5))
+                            continue
+                        return None
+                    if 'results' not in data or not data['results']:
+                        return None
+                    result = data['results'][0]
+                    if 'historicalDataPrice' not in result:
+                        return None
+                    rows = []
+                    ts_list = []
+                    for entry in result['historicalDataPrice']:
+                        ts = entry.get('date', 0)
+                        if ts:
+                            # validate timestamp range (Unix seconds reasonable bounds)
+                            if ts > 631152000 and ts < 1893456000:
+                                ts_list.append(ts)
+                                rows.append({
+                                    'open': entry.get('open', 0),
+                                    'high': entry.get('high', 0),
+                                    'low': entry.get('low', 0),
+                                    'close': entry.get('close', 0),
+                                    'volume': entry.get('volume', 0),
+                                })
+                    if not rows or not ts_list:
+                        return None
+                    df = pd.DataFrame(rows)
+                    df.index = pd.to_datetime(ts_list, unit='s')
+                    return self._clean_brapi_data(df)
+                elif resp.status_code == 429:
+                    retry_after = int(resp.headers.get('Retry-After', 60))
+                    time.sleep(max(1, min(retry_after, 10)))
+                    continue
+                else:
+                    if attempt < self.max_retries - 1:
+                        time.sleep(min(2 ** attempt, 5))
+                        continue
+                    return None
+            except requests.exceptions.RequestException:
+                if attempt < self.max_retries - 1:
+                    time.sleep(min(2 ** attempt, 5))
+                    continue
+                return None
+            except Exception:
+                return None
+        return None
+
+    def get_earliest_intraday_data(self, symbol: str, range_override: Optional[str] = None, interval_override: Optional[str] = None) -> Dict[str, Any]:
+        """Find earliest intraday timestamp across supported intervals and download full history.
+
+        Returns dict: {symbol, chosen_interval, earliest_utc, earliest_local, rows, cache_path}
+        """
+        intervals = self.get_supported_intraday_intervals()
+        best = None
+        best_interval = None
+        now = datetime.utcnow().strftime('%Y-%m-%d')
+        # Probe earliest for each interval
+        for itv in intervals:
+            df = self._fetch_brapi_data_interval(symbol, '1900-01-01', now, itv, range_override=range_override, interval_override=interval_override if range_override else None)
+            if df is None or df.empty:
+                continue
+            ts_min = pd.to_datetime(df.index.min())
+            if getattr(ts_min, 'tzinfo', None) is None:
+                ts_min_utc = ts_min.tz_localize(pytz.UTC)
+            else:
+                ts_min_utc = ts_min.tz_convert(pytz.UTC)
+            if best is None or ts_min_utc < best:
+                best = ts_min_utc
+                best_interval = itv
+        if best is None or best_interval is None:
+            return {
+                'symbol': symbol,
+                'chosen_interval': None,
+                'earliest_utc': None,
+                'earliest_local': None,
+                'rows': 0,
+                'cache_path': None,
+            }
+        # Download full history from earliest to now in chunks per BRAPI limits
+        start_dt = best.to_pydatetime().replace(tzinfo=None)
+        end_dt = datetime.utcnow()
+        parts: List[pd.DataFrame] = []
+        cur = start_dt
+        while cur < end_dt:
+            chunk_end = min(cur + timedelta(days=self.max_hourly_lookback_days), end_dt)
+            dfi = self._fetch_brapi_data_interval(symbol, cur.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'), best_interval)
+            if dfi is not None and not dfi.empty:
+                parts.append(dfi)
+            cur = chunk_end
+        if not parts:
+            return {
+                'symbol': symbol,
+                'chosen_interval': best_interval,
+                'earliest_utc': best.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'earliest_local': best.astimezone(pytz.timezone('America/Sao_Paulo')).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'rows': 0,
+                'cache_path': None,
+            }
+        merged = pd.concat(parts, axis=0, ignore_index=False)
+        merged = merged.sort_index()
+        merged = merged[~merged.index.duplicated(keep='last')]
+        # Save under intraday subdir with interval in filename
+        intraday_dir = self.cache_dir / 'intraday'
+        intraday_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = intraday_dir / f"{symbol}_{best_interval}.parquet"
+        meta_file = intraday_dir / f"{symbol}_{best_interval}_metadata.json"
+        try:
+            merged.to_parquet(cache_file)
+            meta = {
+                'symbol': symbol,
+                'interval': best_interval,
+                'start': merged.index.min().strftime('%Y-%m-%d'),
+                'end': merged.index.max().strftime('%Y-%m-%d'),
+                'rows': int(len(merged)),
+                'saved_at': datetime.utcnow().isoformat(),
+                'source': 'brapi',
+            }
+            with open(meta_file, 'w') as mf:
+                json.dump(meta, mf, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save intraday cache for {symbol} {best_interval}: {e}")
+        tz_sp = pytz.timezone('America/Sao_Paulo')
+        return {
+            'symbol': symbol,
+            'chosen_interval': best_interval,
+            'earliest_utc': best.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'earliest_local': best.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'rows': int(len(merged)),
+            'cache_path': str(cache_file),
+        }
+
+    def get_max_range_data(self, symbol: str) -> Dict[str, Any]:
+        """Scan all supported intervals (intraday + EOD) to find the earliest available
+        timestamp, then download and persist full history from that earliest point.
+
+        Returns dict:
+          {symbol, chosen_interval, earliest_utc, earliest_local, latest_utc, latest_local, rows, cache_path}
+        """
+        intervals = self.get_supported_timeframes()
+        best = None
+        best_interval = None
+        now_str = datetime.utcnow().strftime('%Y-%m-%d')
+        # Probe earliest per timeframe
+        for itv in intervals:
+            df = self._fetch_brapi_data_interval(symbol, '1900-01-01', now_str, itv)
+            if df is None or df.empty:
+                continue
+            ts_min = pd.to_datetime(df.index.min())
+            if getattr(ts_min, 'tzinfo', None) is None:
+                ts_min_utc = ts_min.tz_localize(pytz.UTC)
+            else:
+                ts_min_utc = ts_min.tz_convert(pytz.UTC)
+            if best is None or ts_min_utc < best:
+                best = ts_min_utc
+                best_interval = itv
+        if best is None or best_interval is None:
+            return {
+                'symbol': symbol,
+                'chosen_interval': None,
+                'earliest_utc': None,
+                'earliest_local': None,
+                'latest_utc': None,
+                'latest_local': None,
+                'rows': 0,
+                'cache_path': None,
+            }
+        # Download full history from earliest to now, chunked as needed
+        start_dt = best.to_pydatetime().replace(tzinfo=None)
+        end_dt = datetime.utcnow()
+        parts: List[pd.DataFrame] = []
+        cur = start_dt
+        # Choose chunk size based on interval type
+        is_intraday = best_interval in ('1m','5m','15m','30m','1h')
+        chunk_days = self.max_hourly_lookback_days if is_intraday else self.max_daily_lookback_days
+        while cur < end_dt:
+            chunk_end = min(cur + timedelta(days=chunk_days), end_dt)
+            dfi = self._fetch_brapi_data_interval(symbol, cur.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'), best_interval)
+            if dfi is not None and not dfi.empty:
+                parts.append(dfi)
+            cur = chunk_end
+        if not parts:
+            tz_sp = pytz.timezone('America/Sao_Paulo')
+            return {
+                'symbol': symbol,
+                'chosen_interval': best_interval,
+                'earliest_utc': best.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'earliest_local': best.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'latest_utc': None,
+                'latest_local': None,
+                'rows': 0,
+                'cache_path': None,
+            }
+        merged = pd.concat(parts, axis=0, ignore_index=False)
+        merged = merged.sort_index()
+        merged = merged[~merged.index.duplicated(keep='last')]
+
+        # Save under max_range directory
+        out_dir = self.cache_dir / 'max_range'
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = out_dir / f"{symbol}_{best_interval}.parquet"
+        meta_file = out_dir / f"{symbol}_{best_interval}_metadata.json"
+        try:
+            merged.to_parquet(cache_file)
+            ts_min = pd.to_datetime(merged.index.min())
+            ts_max = pd.to_datetime(merged.index.max())
+            if getattr(ts_min, 'tzinfo', None) is None:
+                ts_min_utc = ts_min.tz_localize(pytz.UTC)
+            else:
+                ts_min_utc = ts_min.tz_convert(pytz.UTC)
+            if getattr(ts_max, 'tzinfo', None) is None:
+                ts_max_utc = ts_max.tz_localize(pytz.UTC)
+            else:
+                ts_max_utc = ts_max.tz_convert(pytz.UTC)
+            tz_sp = pytz.timezone('America/Sao_Paulo')
+            meta = {
+                'symbol': symbol,
+                'interval': best_interval,
+                'earliest_utc': ts_min_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'earliest_local': ts_min_utc.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'latest_utc': ts_max_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'latest_local': ts_max_utc.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'start': ts_min_utc.strftime('%Y-%m-%d'),
+                'end': ts_max_utc.strftime('%Y-%m-%d'),
+                'rows': int(len(merged)),
+                'saved_at': datetime.utcnow().isoformat(),
+                'source': 'brapi',
+                'brapi_url': f"{self.base_url}/quote/{symbol}?range=3mo&interval=1h",
+            }
+            with open(meta_file, 'w') as mf:
+                json.dump(meta, mf, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save max_range cache for {symbol} {best_interval}: {e}")
+        tz_sp = pytz.timezone('America/Sao_Paulo')
+        return {
+            'symbol': symbol,
+            'chosen_interval': best_interval,
+            'earliest_utc': ts_min_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'earliest_local': ts_min_utc.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'latest_utc': ts_max_utc.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'latest_local': ts_max_utc.astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'rows': int(len(merged)),
+            'cache_path': str(cache_file),
+        }
+
+    def get_max_historical_dataset(self, symbol: str) -> Dict[str, Any]:
+        """Materialize the maximum historical dataset for a symbol and mirror into
+        the canonical cache layout used by the engine.
+
+        - Scans all supported timeframes and downloads the longest history (get_max_range_data)
+        - If the chosen interval is intraday (1m/5m/15m/30m/1h), also copy the parquet into
+          data/brapi_cache/intraday/{symbol}_{interval}.parquet and write metadata
+        - If chosen interval is daily-like (1d/1wk/1mo), copy into data/brapi_cache/daily/{symbol}_daily.parquet
+          with metadata so downstream code can reuse it
+
+        Returns a dict with: symbol, interval, earliest_utc/local, latest_utc/local, rows, cache_path,
+        and mirrored_path when applicable.
+        """
+        result = self.get_max_range_data(symbol)
+        interval = result.get('chosen_interval')
+        mirrored_path = None
+        try:
+            if interval in ('1m', '5m', '15m', '30m', '1h') and result.get('cache_path'):
+                # Mirror into intraday cache directory so DataLoader can pick the best
+                src = Path(result['cache_path'])
+                if src.exists():
+                    intraday_dir = self.cache_dir / 'intraday'
+                    intraday_dir.mkdir(parents=True, exist_ok=True)
+                    dst = intraday_dir / f"{symbol}_{interval}.parquet"
+                    # Load and re-save to ensure consistent parquet engine/index
+                    df = pd.read_parquet(src)
+                    df.to_parquet(dst)
+                    # Write metadata for range selection helpers
+                    meta = {
+                        'symbol': symbol,
+                        'interval': interval,
+                        'start': pd.to_datetime(df.index.min()).strftime('%Y-%m-%d'),
+                        'end': pd.to_datetime(df.index.max()).strftime('%Y-%m-%d'),
+                        'rows': int(len(df)),
+                        'saved_at': datetime.utcnow().isoformat(),
+                        'source': 'brapi',
+                    }
+                    with open(dst.with_name(dst.stem + '_metadata.json'), 'w') as mf:
+                        json.dump(meta, mf, indent=2)
+                    mirrored_path = str(dst)
+            elif interval in ('1d', '1wk', '1mo') and result.get('cache_path'):
+                # Mirror daily-like into daily cache used by get_daily_data
+                src = Path(result['cache_path'])
+                if src.exists():
+                    daily_dir = self.cache_dir / 'daily'
+                    daily_dir.mkdir(parents=True, exist_ok=True)
+                    dst = daily_dir / f"{symbol}_daily.parquet"
+                    df = pd.read_parquet(src)
+                    df.to_parquet(dst)
+                    meta = {
+                        'symbol': symbol,
+                        'start_date': pd.to_datetime(df.index.min()).strftime('%Y-%m-%d'),
+                        'end_date': pd.to_datetime(df.index.max()).strftime('%Y-%m-%d'),
+                        'data_type': 'daily',
+                        'cache_created': datetime.utcnow().isoformat(),
+                        'cache_ttl_hours': self.cache_ttl_hours,
+                        'data_points': int(len(df))
+                    }
+                    with open(daily_dir / f"{symbol}_daily_metadata.json", 'w') as mf:
+                        json.dump(meta, mf, indent=2)
+                    mirrored_path = str(dst)
+        except Exception as e:
+            logger.warning(f"Failed mirroring max dataset for {symbol}: {e}")
+
+        result['mirrored_path'] = mirrored_path
+        return result
+
+    # ==========================
+    # Five-year 5-minute sync API
+    # ==========================
+    def _now_utc(self) -> datetime:
+        return datetime.utcnow()
+
+    def _intraday_cache_paths(self, symbol: str) -> Tuple[Path, Path]:
+        intraday_dir = self.cache_dir / 'intraday'
+        intraday_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = intraday_dir / f"{symbol}_5m.parquet"
+        meta_file = intraday_dir / f"{symbol}_5m_metadata.json"
+        return cache_file, meta_file
+
+    def _load_intraday_5m(self, symbol: str) -> Optional[pd.DataFrame]:
+        cache_file, _ = self._intraday_cache_paths(symbol)
+        if not cache_file.exists():
+            return None
+        try:
+            return pd.read_parquet(cache_file)
+        except Exception as e:
+            logger.warning(f"Failed to load intraday intraday cache for {symbol}: {e}")
+            return None
+
+    def _is_up_to_date_5m(self, df: pd.DataFrame) -> bool:
+        try:
+            if df is None or df.empty:
+                return False
+            last_ts = pd.to_datetime(df.index.max())
+            now = self._now_utc()
+            # Consider up-to-date if last bar is within the last trading day window (~2 days tolerance)
+            return (now - last_ts) <= timedelta(days=2)
+        except Exception:
+            return False
+
+    def sync_brapi_history(self, symbol: str) -> Dict[str, Any]:
+        """Synchronize local 3mo/1h dataset for a ticker.
+
+        Returns dict with details: {symbol, skipped, downloaded_rows, saved_rows, coverage_start, coverage_end, full_download}
+        """
+        symbol = str(symbol).strip().upper()
+        cache_file, meta_file = self._intraday_cache_paths(symbol)
+        existing = self._load_intraday_5m(symbol)
+
+        if existing is not None and self._is_up_to_date_5m(existing):
+            logger.info(f"sync_brapi_history: up-to-date, skip {symbol}")
+            return {
+                'symbol': symbol,
+                'skipped': True,
+                'downloaded_rows': 0,
+                'saved_rows': int(len(existing)),
+                'coverage_start': pd.to_datetime(existing.index.min()).strftime('%Y-%m-%d'),
+                'coverage_end': pd.to_datetime(existing.index.max()).strftime('%Y-%m-%d'),
+                'full_download': False,
+            }
+
+        # Always request 3mo/1h per BRAPI intraday limits; merge locally to fill gaps
+        df_new = self._fetch_brapi_data(symbol, (self._now_utc() - timedelta(days=90)).strftime('%Y-%m-%d'), self._now_utc().strftime('%Y-%m-%d'), 'hourly')
+        downloaded_rows = 0 if (df_new is None or df_new.empty) else len(df_new)
+
+        if df_new is None or df_new.empty:
+            logger.warning(f"sync_brapi_history: no data returned for {symbol}")
+            return {
+                'symbol': symbol,
+                'skipped': False,
+                'downloaded_rows': 0,
+                'saved_rows': int(len(existing)) if existing is not None else 0,
+                'coverage_start': pd.to_datetime(existing.index.min()).strftime('%Y-%m-%d') if existing is not None and not existing.empty else None,
+                'coverage_end': pd.to_datetime(existing.index.max()).strftime('%Y-%m-%d') if existing is not None and not existing.empty else None,
+                'full_download': False,
+            }
+
+        try:
+            if existing is not None and not existing.empty:
+                merged = pd.concat([existing, df_new], axis=0, ignore_index=False)
+                merged = merged.sort_index()
+                merged = merged[~merged.index.duplicated(keep='last')]
+            else:
+                merged = df_new
+
+            merged.to_parquet(cache_file)
+            tz_sp = pytz.timezone('America/Sao_Paulo')
+            meta = {
+                'symbol': symbol,
+                'interval': '1h',
+                'start': pd.to_datetime(merged.index.min()).strftime('%Y-%m-%d'),
+                'end': pd.to_datetime(merged.index.max()).strftime('%Y-%m-%d'),
+                'rows': int(len(merged)),
+                'saved_at': datetime.utcnow().isoformat(),
+                'source': 'brapi',
+                'brapi_url': f"{self.base_url}/quote/{symbol}?range=3mo&interval=1h",
+                'earliest_local': pd.to_datetime(merged.index.min()).tz_localize(pytz.UTC).astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                'latest_local': pd.to_datetime(merged.index.max()).tz_localize(pytz.UTC).astimezone(tz_sp).strftime('%Y-%m-%d %H:%M:%S %Z'),
+            }
+            with open(meta_file, 'w') as mf:
+                json.dump(meta, mf, indent=2)
+
+            logger.info(
+                "sync_brapi_history: %s | downloaded=%d saved=%d range=%s→%s",
+                symbol, downloaded_rows, len(merged), meta['start'], meta['end']
+            )
+            return {
+                'symbol': symbol,
+                'skipped': False,
+                'downloaded_rows': int(downloaded_rows),
+                'saved_rows': int(len(merged)),
+                'coverage_start': meta['start'],
+                'coverage_end': meta['end'],
+                'full_download': existing is None,
+            }
+        except Exception as e:
+            logger.error(f"sync_brapi_history: failed to persist {symbol}: {e}")
+            return {
+                'symbol': symbol,
+                'skipped': False,
+                'downloaded_rows': int(downloaded_rows),
+                'saved_rows': int(len(existing)) if existing is not None else 0,
+                'coverage_start': pd.to_datetime(existing.index.min()).strftime('%Y-%m-%d') if existing is not None and not existing.empty else None,
+                'coverage_end': pd.to_datetime(existing.index.max()).strftime('%Y-%m-%d') if existing is not None and not existing.empty else None,
+                'full_download': existing is None,
+                'error': str(e),
+            }
+
     # ==========================
     # Batch quote/validation API
     # ==========================
@@ -177,13 +737,15 @@ class BrapiProvider:
         if not symbols:
             return []
         url_base = f"{self.base_url}/quote/"
-        headers = {"Authorization": f"Bearer {self.api_key}"} if hasattr(self, 'api_key') else {}
+        headers = {"Authorization": f"Bearer {self.api_token}"} if hasattr(self, 'api_token') else {}
         # Use persistent session headers that already include Authorization
         results_agg: list = []
         for i in range(0, len(symbols), self.batch_chunk_size):
             chunk = symbols[i:i + self.batch_chunk_size]
             url = url_base + ",".join(chunk)
-            params = {"range": range_param, "interval": interval}
+            params = {"range": "3mo", "interval": "1h"}
+            if self.api_token:
+                params["token"] = self.api_token
             for attempt in range(self.max_retries):
                 try:
                     self._rate_limit()
@@ -528,24 +1090,30 @@ class BrapiProvider:
         Returns:
             DataFrame with OHLCV data or None if error
         """
-        # Calculate range parameter for Brapi API
-        range_param = self._calculate_range_parameter(start_date, end_date)
-        # Clamp hourly range to provider limits (hourly typically supports up to ~3 months)
-        if data_type == 'hourly' and range_param in ('6mo', '1y', '2y', '5y', 'max'):
-            range_param = '3mo'
-        interval_param = '1d' if data_type == 'daily' else '1h'
-        
+        # Determine interval/range based on data type
         url = f"{self.base_url}/quote/{symbol}"
         headers = {"Authorization": f"Bearer {self.api_token}"}
+        
+        if data_type == 'daily':
+            # Daily data: use 1d interval and an appropriate range derived from the requested window
+            interval_param = '1d'
+            range_param = self._calculate_range_parameter(start_date, end_date)
+        else:
+            # Hourly (intraday): BRAPI caps at ~3 months for 1h interval
+            interval_param = '1h'
+            range_param = '3mo'
+        
         params = {
             "range": range_param,
             "interval": interval_param
         }
+        if self.api_token:
+            params["token"] = self.api_token
         
         for attempt in range(self.max_retries):
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("Fetching %s data for %s: %s", data_type, symbol, range_param)
+                    logger.debug("Fetching %s data for %s with params: range=%s interval=%s", data_type, symbol, range_param, interval_param)
                 # Reuse persistent session for performance
                 # Bound total wait with per-request timeout; caller already sets self.timeout from config
                 response = self._session.get(url, headers=headers, params=params, timeout=self.timeout)
@@ -621,29 +1189,31 @@ class BrapiProvider:
                     # Clean and validate data
                     df = self._clean_brapi_data(df)
 
-                    # Enforce B3 session hours in UTC for hourly data
-                    # BRAPI delivers UTC; B3 continuous session maps to 13:00-20:00 UTC (10:00-17:00 BRT)
-                    if data_type == 'hourly':
+                    # Enforce B3 session hours filter only for intraday
+                    if data_type != 'daily':
                         try:
-                            mask_session = (df.index.hour >= 13) & (df.index.hour <= 20)
+                            if df.index.tz is not None:
+                                idx_hour = df.index.tz_convert('UTC').hour
+                                mask_session = (idx_hour >= 13) & (idx_hour <= 20)
+                            else:
+                                mask_session = (df.index.hour >= 13) & (df.index.hour <= 20)
                             df = df.loc[mask_session]
                         except Exception:
-                            # If index is not datetime for any reason, leave as-is
                             pass
                     
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug("Fetched %d %s bars for %s", len(df), data_type, symbol)
                     return df
-                    
+                
                 elif response.status_code == 429:
                     # Rate limit hit
                     retry_after = int(response.headers.get('Retry-After', 60))
-                    # Cap retry-after to a sane upper bound to avoid very long blocking
+                    # Cap retry-after to a sane upper bound to avoid long waits
                     retry_after = max(1, min(retry_after, 10))
                     logger.warning(f"Rate limit hit for {symbol}, waiting {retry_after}s")
                     time.sleep(retry_after)
                     continue
-                    
+                
                 else:
                     logger.warning(f"Brapi API error for {symbol}: {response.status_code} - {response.text}")
                     if attempt < self.max_retries - 1:
@@ -651,7 +1221,7 @@ class BrapiProvider:
                         continue
                     else:
                         return None
-                        
+                
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Request error for {symbol} (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:

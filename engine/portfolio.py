@@ -1705,16 +1705,28 @@ class EnhancedPortfolio:
             # Resolve trade type (handle auto-detection)
             resolved_trade_type = self._resolve_trade_type(ticker, trade_date, trade_type, 'SELL')
             
-            # Check position
+            # Determine context: allow SELL as short entry when flat or already short
+            opening_short = False
             if ticker not in self.positions:
-                logger.warning(f"No position in {ticker} to sell")
-                return False
-            
-            position = self.positions[ticker]
-            if position.quantity < normalized_quantity:
-                logger.warning(f"Insufficient shares in {ticker}: "
-                             f"have {position.quantity}, trying to sell {normalized_quantity}")
-                return False
+                opening_short = True
+                # Create a placeholder short position context for downstream calculations
+                position = Position(
+                    ticker=ticker,
+                    quantity=0,
+                    avg_price=0.0,
+                    current_price=normalized_price,
+                    last_update=trade_date,
+                    trade_type=resolved_trade_type,
+                    position_id=trade_id,
+                    description=description
+                )
+            else:
+                position = self.positions[ticker]
+                if position.quantity < 0:
+                    opening_short = True
+                elif position.quantity < normalized_quantity:
+                    logger.warning(f"Insufficient shares in {ticker}: have {position.quantity}, trying to sell {normalized_quantity}")
+                    return False
             
             # Calculate trade details
             trade_value = normalized_quantity * normalized_price
@@ -1735,25 +1747,25 @@ class EnhancedPortfolio:
                 'cost_percentage': cost_breakdown.cost_percentage
             }
             
-            # Calculate profit/loss using normalized quantities
-            cost_basis = normalized_quantity * position.avg_price
-            gross_profit = trade_value - cost_basis
-            net_profit = gross_profit - costs['total_costs']
-            
-            # Convert trade_type to modality for loss manager
-            modality = "DAY" if resolved_trade_type == 'day_trade' else "SWING"
-            
-            # Record loss/profit for carryforward
-            self.loss_manager.record_trade_result(
-                ticker=ticker,
-                trade_profit=net_profit,
-                trade_date=trade_date,
-                modality=modality,
-                trade_id=trade_id,
-                description=description,
-                gross_sales=trade_value,  # Pass gross sales for monthly tracking
-                asset_type=asset_type
-            )
+            # Only record P&L on closing/reducing longs; opening/increasing shorts defers P&L
+            if not opening_short and position.quantity > 0:
+                cost_basis = normalized_quantity * position.avg_price
+                gross_profit = trade_value - cost_basis
+                net_profit = gross_profit - costs['total_costs']
+                modality = "DAY" if resolved_trade_type == 'day_trade' else "SWING"
+                self.loss_manager.record_trade_result(
+                    ticker=ticker,
+                    trade_profit=net_profit,
+                    trade_date=trade_date,
+                    modality=modality,
+                    trade_id=trade_id,
+                    description=description,
+                    gross_sales=trade_value,
+                    asset_type=asset_type
+                )
+            else:
+                gross_profit = 0.0
+                net_profit = -costs['total_costs']
             
             # Calculate IRRF withholding for this specific trade (this is a credit, not a deduction)
             # Brazilian law: IRRF is withheld on each sale, regardless of exemption
@@ -1784,14 +1796,33 @@ class EnhancedPortfolio:
             # Final profit for this trade (net profit - IRRF withholding only)
             final_profit = net_profit - total_taxes
             
-            # Update position
-            position.quantity -= normalized_quantity
-            position.current_price = normalized_price
-            position.last_update = trade_date
-            
-            # Remove position if empty
-            if position.quantity == 0:
-                del self.positions[ticker]
+            # Update or create position for short handling
+            if opening_short:
+                if ticker not in self.positions:
+                    self.positions[ticker] = Position(
+                        ticker=ticker,
+                        quantity=-int(normalized_quantity),
+                        avg_price=normalized_price,
+                        current_price=normalized_price,
+                        last_update=trade_date,
+                        trade_type=resolved_trade_type,
+                        position_id=trade_id,
+                        description=description
+                    )
+                else:
+                    pos = self.positions[ticker]
+                    prev_short_qty = abs(pos.quantity)
+                    new_total = prev_short_qty + int(normalized_quantity)
+                    pos.avg_price = ((prev_short_qty * pos.avg_price) + (int(normalized_quantity) * normalized_price)) / max(new_total, 1)
+                    pos.quantity -= int(normalized_quantity)  # more negative
+                    pos.current_price = normalized_price
+                    pos.last_update = trade_date
+            else:
+                position.quantity -= normalized_quantity
+                position.current_price = normalized_price
+                position.last_update = trade_date
+                if position.quantity == 0:
+                    del self.positions[ticker]
             
             # T+0: Update cash immediately
             cash_received = trade_value - costs['total_costs'] - total_taxes
@@ -1809,14 +1840,14 @@ class EnhancedPortfolio:
             else:
                 self.losing_trades += 1
             
-            # Update daily P&L
+            # Update daily P&L (only realized when not opening short)
             date_key = trade_date.date().isoformat()
             if date_key not in self.daily_pnl:
                 self.daily_pnl[date_key] = 0.0
-            self.daily_pnl[date_key] += final_profit
+            self.daily_pnl[date_key] += (final_profit if not opening_short else 0.0)
             
             # Update day trade P&L
-            if resolved_trade_type == 'day_trade':
+            if resolved_trade_type == 'day_trade' and (not opening_short):
                 self.day_trade_pnl += final_profit
             
             # Record trade with raw data for monthly consolidation

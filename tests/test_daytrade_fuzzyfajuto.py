@@ -40,8 +40,7 @@ def _prepare_strategy(universe=("PETR4",), atr=2.0) -> FuzzyFajutoStrategy:
     )
     strat = FuzzyFajutoStrategy(sc, ctx)
     strat._universe_symbols = list(universe)
-    # Seed ATR and maps
-    strat.current_atr_values = {s: atr for s in universe}
+    # No ATR usage in strategy
     strat.daily_data = {}
     strat.daily_indicators_data = {}
     strat.daily_indicators_last_update = {}
@@ -108,7 +107,7 @@ def test_signal_one_side_four_legs(monkeypatch):
     monkeypatch.setattr(strat, "_is_first_bar_of_day", lambda s, d: True)
     # Stable limits
     monkeypatch.setattr(strat, "_calculate_entry_limits_from_close",
-                        lambda close_px, atr, side: (close_px * 0.99, close_px * 0.98, close_px * 0.97))
+                        lambda close_px, side: (close_px * 0.99, close_px * 0.98, close_px * 0.97))
 
     # Day t: compute signal and schedule t+1
     sig = strat._generate_signal(_mk_bar(sym, t, 20, 10.5, 10.5, 10.5, 10.5))
@@ -157,7 +156,7 @@ def test_signal_short_side_four_legs(monkeypatch):
     strat.daily_indicators_last_update[sym] = t
     monkeypatch.setattr(strat, "_is_first_bar_of_day", lambda s, d: True)
     monkeypatch.setattr(strat, "_calculate_entry_limits_from_close",
-                        lambda close_px, atr, side: (close_px * 1.01, close_px * 1.02, close_px * 1.03))
+                        lambda close_px, side: (close_px * 1.01, close_px * 1.02, close_px * 1.03))
     sig = strat._generate_signal(_mk_bar(sym, t, 20, 9.5, 9.5, 9.5, 9.5))
     assert sig == -1, "Expected SELL signal"
     list(strat.on_end_of_day(t))
@@ -211,7 +210,7 @@ def test_execution_open_fill_and_limits_and_eod_flatten_long(monkeypatch):
     # Limits determined from close(t)
     base_close = float(df.loc[pd.to_datetime(t), 'close'])
     p2, p3, p4 = base_close * 0.995, base_close * 0.990, base_close * 0.985
-    monkeypatch.setattr(strat, "_calculate_entry_limits_from_close", lambda close_px, atr, side: (p2, p3, p4))
+    monkeypatch.setattr(strat, "_calculate_entry_limits_from_close", lambda close_px, side: (p2, p3, p4))
     # Generate signal and schedule
     assert strat._generate_signal(_mk_bar(sym, t, 20, base_close, base_close, base_close, base_close)) == 1
     list(strat.on_end_of_day(t))

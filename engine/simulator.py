@@ -43,9 +43,13 @@ from engine.market_utils import SignalType, TradeType
 from engine.performance_metrics import PerformanceMetrics, ComprehensivePerformanceAnalysis
 from engine.tca import TransactionCostAnalyzer
 from engine.sgs_data_loader import SELICDataError, SELICDataUnavailableError, SELICDataInsufficientError, SELICDataQualityError, SELICDataValidationError, get_daily_factor
+from engine import sim_components as sc
 
 # Configure logging
 logger = logging.getLogger(__name__)
+# Ensure simulator messages are visible in file logs even if root handlers are configured
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 # Reduce noisy info logs for utility availability
 if DIAS_UTEIS_AVAILABLE:
@@ -54,146 +58,12 @@ else:
     logger.debug("dias_uteis library not available, using calendar day counting for warm-up")
 
 
-class SimulationDataPortal(DataPortal):
-    """
-    Concrete implementation of DataPortal for backtesting simulation.
-    
-    Provides strategy access to market data during simulation.
-    """
-    
-    def __init__(self, data_loader=None):
-        """Initialize with data loader."""
-        self.data_loader = data_loader
-        self._current_data = None
-        self._historical_data = {}
-    
-    def set_current_data(self, data: pd.DataFrame):
-        """Set current market data for the simulation."""
-        self._current_data = data
-    
-    def get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol."""
-        if self._current_data is not None and 'close' in self._current_data.columns:
-            return float(self._current_data['close'].iloc[-1])
-        return None
-    
-    def get_historical_data(self, symbol: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
-        """Get historical market data for a symbol."""
-        if self.data_loader:
-            # Use data loader to get historical data
-            try:
-                return self.data_loader.load_raw_data(symbol)
-            except Exception as e:
-                logger.error(f"Error loading historical data for {symbol}: {e}")
-                return None
-        
-        # Return cached data if available
-        return self._historical_data.get(symbol)
-    
-    def get_market_data(self, symbol: str, timestamp: datetime) -> Optional[Dict[str, Any]]:
-        """Get market data for a specific symbol and timestamp."""
-        if self._current_data is not None:
-            # Find closest timestamp in current data
-            try:
-                if timestamp in self._current_data.index:
-                    row = self._current_data.loc[timestamp]
-                    return {
-                        'open': float(row.get('open', 0)),
-                        'high': float(row.get('high', 0)),
-                        'low': float(row.get('low', 0)),
-                        'close': float(row.get('close', 0)),
-                        'volume': int(row.get('volume', 0)),
-                        'timestamp': timestamp
-                    }
-            except Exception as e:
-                logger.debug(f"Error getting market data for {symbol} at {timestamp}: {e}")
-        
-        return None
+class SimulationDataPortal(sc.SimulationDataPortal):
+    pass
 
 
-class SimulationBroker(BrokerSimulation):
-    """
-    Concrete implementation of BrokerSimulation for backtesting.
-    
-    Provides order execution simulation during backtesting.
-    """
-    
-    def __init__(self, portfolio):
-        """Initialize with portfolio reference."""
-        self.portfolio = portfolio
-        self._order_counter = 0
-        self._pending_orders = {}
-    
-    def submit_order(self, intent: OrderIntent) -> str:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
-        """Submit an order intent and return order ID."""
-        self._order_counter += 1
-        order_id = f"sim_order_{self._order_counter}"
-        
-        # Store pending order for later execution
-        self._pending_orders[order_id] = intent
-        
-        logger.debug(f"Order submitted: {order_id} - {intent.side.value} {intent.quantity} {intent.symbol}")
-        return order_id
-    
-    def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get current position information for a symbol."""
-        if symbol in self.portfolio.positions:
-            pos = self.portfolio.positions[symbol]
-            return {
-                'symbol': symbol,
-                'quantity': pos.quantity,
-                'avg_price': pos.avg_price,
-                'market_value': pos.market_value,
-                'unrealized_pnl': pos.unrealized_pnl
-            }
-        return None
-    
-    def get_cash_balance(self) -> float:
-        """Get current cash balance."""
-        return getattr(self.portfolio, 'cash', 0.0)
-    
-    def get_portfolio_value(self) -> float:
-        """Get total portfolio value."""
-        return self.portfolio.get_portfolio_value()
-    
-    def execute_pending_orders(self, current_prices: Dict[str, float]) -> List[str]:
-        """Execute pending orders with current market prices."""
-        executed_orders = []
-        
-        for order_id, intent in list(self._pending_orders.items()):
-            try:
-                # Use current market price for execution
-                execution_price = current_prices.get(intent.symbol, intent.price)
-                if execution_price:
-                    # Execute the order through portfolio
-                    if intent.side == OrderSide.BUY:
-                        success = self.portfolio.buy(
-                            ticker=intent.symbol,
-                            quantity=intent.quantity,
-                            price=execution_price,
-                            trade_date=intent.timestamp,
-                            trade_id=order_id
-                        )
-                    else:  # SELL
-                        success = self.portfolio.sell(
-                            ticker=intent.symbol,
-                            quantity=intent.quantity,
-                            price=execution_price,
-                            trade_date=intent.timestamp,
-                            trade_id=order_id
-                        )
-                    
-                    if success:
-                        executed_orders.append(order_id)
-                        del self._pending_orders[order_id]
-                        logger.debug(f"Order executed: {order_id} at price {execution_price}")
-                    else:
-                        logger.warning(f"Order execution failed: {order_id}")
-                        
-            except Exception as e:
-                logger.error(f"Error executing order {order_id}: {e}")
-        
-        return executed_orders
+class SimulationBroker(sc.SimulationBroker):
+    pass
 
 
 @dataclass
@@ -261,10 +131,10 @@ class BacktestSimulator:
     """
     
     def __init__(
-        self, 
-        strategy: BaseStrategy, 
-        initial_capital: float = 100000.0, 
-        start_date: Optional[str] = None, 
+        self,
+        strategy: Optional[BaseStrategy] = None,
+        initial_capital: float = 100000.0,
+        start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         config_path: str = "config/settings.yaml"
     ):
@@ -278,8 +148,8 @@ class BacktestSimulator:
             end_date: Simulation end date (YYYY-MM-DD format)
             config_path: Path to configuration file
         """
-        # Validate inputs
-        if not isinstance(strategy, BaseStrategy):
+        # Validate inputs (allow None for legacy/tests that set strategy later)
+        if strategy is not None and not isinstance(strategy, BaseStrategy):
             raise ValueError("Strategy must be a BaseStrategy instance")
         
         # Validate required strategy methods - only check abstract methods
@@ -287,14 +157,15 @@ class BacktestSimulator:
             'generate_intents'
         ]
         
-        missing_methods = []
-        for method in required_methods:
-            if not hasattr(strategy, method):
-                missing_methods.append(method)
-        
-        if missing_methods:
-            raise ValueError(f"Strategy missing required abstract methods: {missing_methods}. "
-                           f"Ensure BaseStrategy is properly implemented with all abstract methods.")
+        if strategy is not None:
+            missing_methods = []
+            for method in required_methods:
+                if not hasattr(strategy, method):
+                    missing_methods.append(method)
+
+            if missing_methods:
+                raise ValueError(f"Strategy missing required abstract methods: {missing_methods}. "
+                               f"Ensure BaseStrategy is properly implemented with all abstract methods.")
         
         # Validate optional methods that should be available
         optional_methods = [
@@ -362,8 +233,8 @@ class BacktestSimulator:
         # Create broker simulation
         self.broker = SimulationBroker(self.portfolio)
         
-        # Create strategy logger
-        strategy_logger = logging.getLogger(f"{strategy.__class__.__name__}")
+        # Create strategy logger (fallback name when strategy is None)
+        strategy_logger = logging.getLogger(f"{strategy.__class__.__name__ if strategy is not None else 'NoStrategy'}")
         
         # Initialize tracking
         self.daily_portfolio_values: List[float] = []
@@ -405,32 +276,20 @@ class BacktestSimulator:
         self._setup_logging()
         
         logger.info(f"BacktestSimulator initialized with R$ {initial_capital:,.2f} initial capital")
-        logger.info(f"Strategy: {self.strategy.name}")
+        if self.strategy is not None:
+            logger.info(f"Strategy: {self.strategy.name}")
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration with error handling."""
+        """Load configuration with error handling (delegated)."""
         try:
-            with open(self.config_path, 'r') as file:
-                config = yaml.safe_load(file)
-            return config
+            return sc.load_config(self.config_path)
         except Exception as e:
             logger.error(f"Error loading configuration: {str(e)}")
             raise
     
     def _setup_logging(self) -> None:
-        """Setup simulation-specific logging."""
-        # Reduce I/O overhead: only add a file handler once per process
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = log_dir / f"backtest_simulator_{timestamp}.log"
-        if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-        logger.info(f"Simulation logging initialized: {log_file}")
+        """Setup simulation-specific logging (delegated)."""
+        sc.setup_logging(logger)
     
     def _initialize_sgs_data(self):
         """
@@ -770,7 +629,7 @@ class BacktestSimulator:
                 # If we are starting a new trading day, process the previous day's EOD BEFORE any new intents
                 if current_trading_day is not None and current_date != current_trading_day:
                     # Process previous trading day's end-of-day activities (MOC must be the last op of the day)
-                    self._process_end_of_trading_day(current_trading_day)
+                    sc.process_end_of_trading_day(self, current_trading_day)
                 
                 # Detect new trading day and handle missing open bar policy (initialize per-day metadata) BEFORE intents
                 is_new_trading_day = (current_trading_day is None) or (current_date != current_trading_day)
@@ -847,7 +706,7 @@ class BacktestSimulator:
                 # Single-asset path is handled later using fast iloc; skip here
                 
                 # Prepare market data for strategy
-                market_data = self._prepare_market_data(data, timestamp)
+                market_data = sc.prepare_market_data(self, data, timestamp)
                 
                 if not market_data:
                     logger.warning(f"Skipping bar {timestamp} due to missing market data")
@@ -919,7 +778,7 @@ class BacktestSimulator:
                                     'close': float(getattr(row, 'close')),
                                     'volume': int(getattr(row, 'volume')) if hasattr(row, 'volume') else 0
                                 }
-                                self._execute_trade(intent, bar_map)
+                                self._execute_trade(intent, row)
                     if price_updates:
                         self.portfolio.update_prices(price_updates, timestamp)
                     # Move to next timestamp after processing all symbols
@@ -1026,7 +885,7 @@ class BacktestSimulator:
             
             # Process the final trading day's end-of-day activities
             if current_trading_day is not None:
-                self._process_end_of_trading_day(current_trading_day)
+                sc.process_end_of_trading_day(self, current_trading_day)
             
             # Clear progress line
             try:
@@ -1060,7 +919,7 @@ class BacktestSimulator:
                     logger.info(f"Strategy activation ratio: {(len(data) - warm_up_calendar_days) / len(data):.1%}")
             
             # Calculate all performance metrics (including benchmark)
-            self._calculate_performance_metrics()
+            sc.calculate_performance_metrics(self)
 
             # Build unified fills DataFrame for downstream reporting
             try:
@@ -1069,7 +928,7 @@ class BacktestSimulator:
                 self.unified_fills_df = pd.DataFrame()
             
             # Create simulation result
-            result = self._create_simulation_result()
+            result = sc.create_simulation_result(self)
             
             logger.info("Backtest simulation completed successfully")
             if result.final_portfolio_value is not None:
@@ -2055,7 +1914,19 @@ class BacktestSimulator:
                 trade_type = 'day_trade'  # Default to day trade for non-string types
             
             # Handle market orders (ensure fill uses OPEN for first-bar market)
-            if signal.order_type == OrderType.MARKET or price == 0.0:
+            # Treat as market if explicit MARKET, or metadata marks first-bar market, or price==0 with first-bar hint
+            is_market_attempt = False
+            try:
+                if hasattr(signal, 'metadata') and isinstance(signal.metadata, dict):
+                    attempt_type = signal.metadata.get('attempt_type')
+                    emission_type = signal.metadata.get('emission_type')
+                    is_market_attempt = (signal.order_type == OrderType.MARKET) or (attempt_type == 'market') or (emission_type == 'first_bar')
+                else:
+                    is_market_attempt = (signal.order_type == OrderType.MARKET)
+            except Exception:
+                is_market_attempt = (signal.order_type == OrderType.MARKET)
+
+            if is_market_attempt or (getattr(signal, 'price', 0.0) or 0.0) == 0.0:
                 # Prefer exact execution price provided by strategy for first-bar market orders
                 execution_price_from_metadata = None
                 try:
@@ -2093,6 +1964,57 @@ class BacktestSimulator:
                         f"Cannot determine market price: will skip. sym={ticker} open={price_data.get('open',None)} close={price_data.get('close',None)}"
                     )
                     return
+            # Handle limit orders using bar touch logic (README spec: fill if touched)
+            elif signal.order_type == OrderType.LIMIT:
+                limit_price = None
+                try:
+                    # Prefer explicit metadata price, then signal.price
+                    if hasattr(signal, 'metadata') and isinstance(signal.metadata, dict):
+                        mp = signal.metadata.get('execution_price') or signal.metadata.get('limit_price')
+                        if mp is not None:
+                            limit_price = float(mp)
+                    if (limit_price is None) and (getattr(signal, 'price', 0.0) or 0.0) > 0.0:
+                        limit_price = float(signal.price)
+                except Exception:
+                    limit_price = None
+
+                # Require intraday bar context
+                bar_low = None
+                bar_high = None
+                try:
+                    if price_data is not None:
+                        if isinstance(price_data, dict):
+                            bar_low = price_data.get('low', None)
+                            bar_high = price_data.get('high', None)
+                        else:
+                            bar_low = price_data.get('low')  # type: ignore
+                            bar_high = price_data.get('high')  # type: ignore
+                except Exception:
+                    bar_low = bar_low if bar_low is not None else None
+                    bar_high = bar_high if bar_high is not None else None
+
+                # If we cannot resolve a limit price or bar bounds, skip
+                if (limit_price is None) or (bar_low is None) or (bar_high is None):
+                    return
+
+                # Tick-size rounding consistency (0.01)
+                try:
+                    limit_price = round(float(limit_price), 2)
+                except Exception:
+                    return
+
+                # BUY fills if bar.low <= limit <= bar.high; SELL fills if bar.high >= limit >= bar.low
+                touched = False
+                if (signal_type == OrderSide.BUY or signal_type == SignalType.BUY):
+                    touched = (float(bar_low) <= float(limit_price) <= float(bar_high))
+                elif (signal_type == OrderSide.SELL or signal_type == SignalType.SELL):
+                    touched = (float(bar_low) <= float(limit_price) <= float(bar_high))
+
+                if not touched:
+                    return
+
+                # Use limit price as execution price per README
+                price = float(limit_price)
             
             if signal_type == OrderSide.BUY or signal_type == SignalType.BUY:
                 success = self.portfolio.buy(

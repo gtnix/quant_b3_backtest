@@ -35,8 +35,16 @@ def main():
     setup_logging()
     logger = logging.getLogger(__name__)
     
-    # Configuration
-    tickers = ['PETR4', 'VALE3', 'ITUB4']
+    # Configuration: load first 3 symbols dynamically from portfolio.csv
+    try:
+        dfp = pd.read_csv('data/portfolio.csv')
+        col = 'symbol' if 'symbol' in dfp.columns else dfp.columns[0]
+        tickers = [str(s).strip().upper() for s in dfp[col].dropna() if str(s).strip()][:3]
+    except Exception:
+        tickers = []
+    if not tickers:
+        logger.warning("portfolio.csv missing or empty; skipping test run")
+        return 0
     start_date = '2025-01-01'
     end_date = '2025-07-24'
     initial_capital = 100000.0

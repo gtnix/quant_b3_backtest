@@ -1,374 +1,124 @@
-# Brazilian Stock Market Backtesting Engine
+## Introduction
 
-A comprehensive backtesting engine for Brazilian stocks (B3) with support for real-time data fetching, portfolio management, advanced transaction cost analysis, and strategy testing.
+This repository implements a professional, rules-based backtesting engine for the Brazilian market (B3) and documents the FuzzyFajuto strategy. The strategy is fully specified and instrumented for institutional auditability: indicator definitions, fuzzy scoring, position sizing under B3 board-lot rules, order placement (market + passive limits), bidirectional Buy↔Sell pairing, and daily end-of-day closing (MOC).
 
-## Features
+The ticker universe is sourced from `data/portfolio.csv` (first column = ticker). When you run without `--tickers`, the engine automatically reads this file as the single source of truth.
 
-- **Data Management**: Download and process Brazilian stock data using Alpha Vantage API
-- **Portfolio Management**: Automated Brazilian market fees, taxes, and exemptions
-- **Transaction Cost Analysis (TCA)**: Accurate, modular calculation of all trading costs (brokerage, emolument, settlement, ISS)
-- **Advanced Loss Carryforward**: Full compliance with Brazilian tax law, including indefinite and per-asset loss tracking
-- **Advanced Settlement Manager**: T+2 settlement queue, business day handling, and cash flow simulation
-- **Backtest Simulator**: Comprehensive backtesting with performance metrics and compliance (BacktestSimulator)
-- **Strategy Testing**: Framework for implementing and testing trading strategies
-- **HTML Reporting**: Interactive Plotly dashboards with PDF export capabilities
-- **Configuration**: Flexible settings for market hours, fees, portfolio, compliance, and performance
-- **Security**: Secure API key management for safe GitHub uploads
-- **Comprehensive Testing**: Extensive test suites for all advanced modules
+## Strategy Logic (FuzzyFajuto)
 
-## Brazilian Market Conventions
+The strategy computes a daily FuzzyFajuto score per symbol using daily indicators and then applies fixed execution rules on the next trading day using intraday bars. Positions are always sized in B3 board-lot multiples (100 shares).
 
-The backtesting engine enforces Brazilian market (B3) conventions to ensure realistic simulation:
+### Indicators and Scoring
+- Daily Return vs Ibov daily return: +1 if outperforming, −1 if underperforming.
+- Close vs EMAs(3, 5, 10, 15, 20): +0.25 if close > EMA(period), −0.25 if close < EMA(period) (applied per period).
+- RSI: RSI > 65 → +0.25; RSI < 35 → −0.25.
 
-### Price Tick Normalization
-- **Tick Size**: R$ 0.01 (minimum price increment)
-- **Normalization**: All prices are automatically rounded to the nearest centavo
-- **Example**: R$ 12.3456 → R$ 12.35, R$ 12.344 → R$ 12.34
+The total FuzzyFajuto score is the sum of the above contributions. It is a continuous scalar where larger positive values favor long exposure and large negative values favor short exposure.
 
-### Lot Size Validation
-- **Round Lots**: Multiples of 100 shares (100, 200, 300, etc.)
-- **Odd Lots**: Non-multiples of 100 (50, 150, 250, etc.)
-- **Order Routing**: Round lots go to main book, odd lots to fractional book
-- **Configuration**: Can disable fractional lots via `allow_fractional_lots: false`
+## Position Sizing (B3 Board-Lot)
 
-### Order Validation
-- **Automatic Validation**: All orders are validated against market conventions
-- **Price Normalization**: Prices are automatically normalized to valid ticks
-- **Lot Classification**: Orders are classified as round lot or odd lot
-- **Trade History**: Original and normalized values are tracked for audit
+- Fixed total notional per symbol per session: 50,000 BRL.
+- This is split into 4 equal tranches of 12,500 BRL.
+- Shares per tranche are computed using the last daily close (close[T−1]):
+  
+  shares_raw = 12,500 ÷ close[T−1]
+  
+- Board-lot rounding (multiples of 100 shares):
+  - If the last two digits of shares_raw are 00–49 → round down to nearest 100.
+  - If the last two digits are 50–99 → round up to nearest 100.
 
-### Configuration
-```yaml
-market:
-  tick_size: 0.01              # Price tick size
-  round_lot_size: 100          # Standard lot size
-  min_quantity: 1              # Minimum order quantity
-  allow_fractional_lots: true  # Allow odd lot orders
-  enforce_price_ticks: true    # Enforce price normalization
-  enforce_lot_sizes: true      # Enforce lot size validation
+Examples (≈ 50k total across 4 tranches; per-tranche quantities ×4):
+- PETR4 close 30.17 → 12,500 / 30.17 ≈ 414 → 400 ×4.
+- PETR3 close 32.60 → 12,500 / 32.60 ≈ 383 → 400 ×4.
+- ITUB4 close 37.49 → ≈ 333 → 300 ×4.
+- NVDA close 180.65 → ≈ 69 → 100 ×4.
+- VALE3 close 53.32 → ≈ 234 → 200 ×4.
+- GGBR4 close 16.23 → ≈ 770 → 800 ×4.
+
+The same rounding policy is used consistently whenever quantities are calculated from notional ÷ price.
+
+## Trading Rules (Entry & Exit)
+
+- If FuzzyFajuto ≥ +1.50 → Generate Buy orders for tomorrow.
+- If FuzzyFajuto ≤ −1.50 → Generate Sell/Short orders for tomorrow.
+
+For both Buy and Sell signals, four orders per side are emitted:
+1. Market at open (first intraday bar of the day).
+2. Passive limit at close[T−1] × (1 − 0.005) for Buy; (1 + 0.005) for Sell.
+3. Passive limit at close[T−1] × (1 − 0.010) for Buy; (1 + 0.010) for Sell.
+4. Passive limit at close[T−1] × (1 − 0.015) for Buy; (1 + 0.015) for Sell.
+
+All open positions are closed at the auction call (end-of-day) via Market-on-Close (MOC) orders.
+
+## Pair Matching Engine (Bidirectional)
+
+The system enforces bidirectional pairing when `RISK_PAIR_MATCHING=True`:
+- For each Sell: pair it with the Buy having the highest available FuzzyFajuto score.
+- For each Buy: pair it with the Sell having the highest available FuzzyFajuto score.
+- If counts differ: leftover Buys or Sells remain unpaired.
+- Tie-breaking: sort by descending fuzzy score, then apply a deterministic secondary key (symbol lexical order).
+
+Pairing is applied before order emission, and all four attempts (market, limit_alpha, limit_beta, limit_gamma) are sized and emitted per leg, with board-lot rounding.
+
+## Order Placement Structure
+
+- For each valid paired leg on a trading day:
+  - P1: Market at open (always filled).
+  - P2: Limit (alpha) at ±0.5% from close[T−1].
+  - P3: Limit (beta) at ±1.0% from close[T−1].
+  - P4: Limit (gamma) at ±1.5% from close[T−1].
+- All quantities per attempt type adhere to the board-lot rounding described above.
+- MOC: Positions are closed at the end of the session with Market-on-Close orders.
+
+## Testing & Validation
+
+### Unit Tests
+- `tests/test_tranche_sizing.py`: validates round-lot enforcement and level monotonicity.
+- `tests/test_pairing_logic.py`: bidirectional pairing scenarios and deterministic tie-breaking:
+  - More Buys than Sells → leftover Buys.
+  - More Sells than Buys → leftover Sells.
+  - Equal counts → all paired.
+  - Tie-breaking: equal fuzzy scores → deterministic symbol-based ordering.
+
+### Quick Backtest Validation (10–15 trading days)
+- Run with multi-frame processing and results enabled:
+```
+AUDIT_EXECUTIONS_ONLY=0 MULTIFRAME_MODE=1 \
+python3 run_fuzzy_fajuto.py \
+  --start-date 2025-07-15 --end-date 2025-08-01 \
+  --save-results
 ```
 
-## Project Structure
+Validate outputs:
+- `results/unified_fills.csv` / `.json`: both legs must show P1 market, P2–P4 limits, and end-of-day MOC.
+- `reports/portfolio_fuzzy_indicators.csv`: columns `notional_P1..P4` filled for paired symbols/dates.
+- KPIs: `total_trades > 0` (round-trips recognized) and metrics populated.
+
+## Examples
+
+Sizing examples reproduced (per-tranche results ×4):
+- PETR4 @ 30.17 → 12,500 / 30.17 ≈ 414 → 400 ×4 (≈ 50k total).
+- PETR3 @ 32.60 → ≈ 383 → 400 ×4.
+- ITUB4 @ 37.49 → ≈ 333 → 300 ×4.
+- NVDA @ 180.65 → ≈ 69 → 100 ×4.
+- VALE3 @ 53.32 → ≈ 234 → 200 ×4.
+- GGBR4 @ 16.23 → ≈ 770 → 800 ×4.
+
+Entry/Exit examples (BUY):
+- Open: market at first bar.
+- Limits: close[T−1] × (0.995, 0.990, 0.985).
+- MOC: flatten at auction call.
+
+Entry/Exit examples (SELL):
+- Open: market at first bar.
+- Limits: close[T−1] × (1.005, 1.010, 1.015).
+- MOC: flatten at auction call.
+
+## References
+
+- B3 conventions: board-lot = 100 shares (no odd-lots in main book), tick size = 0.01 BRL.
+- Strategy pairing flag: `RISK_PAIR_MATCHING=True` (bidirectional highest-fuzzy matching).
+- Data & reports:
+  - Universe: `data/portfolio.csv`.
+  - Reports: `reports/portfolio_fuzzy_indicators.csv`, `results/unified_fills.*`.
 
-```
-quant_backtest/
-├── config/
-│   ├── settings.yaml          # Market configuration (safe to share)
-│   ├── secrets.yaml.example   # Template for API keys (safe to share)
-│   └── secrets.yaml           # Your actual API keys (NOT shared)
-├── data/
-│   ├── raw/                   # Downloaded raw data (NOT shared)
-│   └── processed/             # Processed data (NOT shared)
-├── engine/
-│   ├── loader.py              # Data loading utilities
-│   ├── portfolio.py           # Portfolio management (uses advanced managers)
-│   ├── base_strategy.py  # Base strategy with Brazilian market utilities
-│   ├── tca.py                 # Transaction Cost Analysis (TCA) module
-│   ├── loss_manager.py        # Enhanced Loss Carryforward Manager
-│   ├── settlement_manager.py  # Advanced Settlement Manager (T+2)
-│   ├── base_strategy.py       # Abstract base class for strategies
-│   └── simulator.py           # Backtest simulator
-├── scripts/
-│   └── download_data.py       # Data downloader
-├── strategies/                # User trading strategies (currently empty)
-├── reports/                   # Backtest reports (NOT shared)
-├── tests/                     # Comprehensive test suites
-│   ├── test_market_utils.py   # Market utilities tests
-│   ├── test_market_integration.py # Integration tests
-│   ├── test_tca.py            # Transaction Cost Analysis tests
-│   ├── test_enhanced_managers.py # Loss carryforward and settlement manager tests
-│   └── test_simulator.py      # Backtest simulator tests
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
-```
-
-## Advanced Features
-
-- **Brazilian Market Conventions**: Enforces B3 market rules including price tick normalization (R$ 0.01), lot size validation (round lots = multiples of 100), and order routing to main/fractional books.
-- **Transaction Cost Analysis (TCA)**: Modular, accurate calculation of all trading costs, including brokerage, emolument, settlement, and ISS. Fully configurable and tested.
-- **Enhanced Loss Carryforward Manager**: Tracks losses per asset and globally, supports indefinite carryforward, and provides audit trails for compliance.
-- **Advanced Settlement Manager**: Models T+2 settlement with business day handling, cash flow simulation, and robust error handling.
-- **Backtest Simulator**: Comprehensive backtesting with performance metrics and compliance (BacktestSimulator in `engine/simulator.py`).
-- **Extensible Strategy Framework**: Implement your own trading strategies by subclassing the `BaseStrategy` class in `engine/base_strategy.py` and placing your strategy files in the `strategies/` directory.
-- **Comprehensive Testing**: Extensive unit and integration tests for TCA, loss carryforward, settlement logic, and simulation.
-
-## Setup Instructions
-
-### 1. Clone the Repository
-
-```bash
-git clone <your-repository-url>
-cd quant_backtest
-```
-
-### 2. Create Virtual Environment
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure API Keys
-
-**IMPORTANT**: Never commit your actual API keys to GitHub!
-
-1. Copy the example secrets file:
-   ```bash
-   cp config/secrets.yaml.example config/secrets.yaml
-   ```
-
-2. Edit `config/secrets.yaml` and add your Alpha Vantage API key:
-   ```yaml
-   alpha_vantage:
-     api_key: "YOUR_ACTUAL_API_KEY_HERE"
-     base_url: "https://www.alphavantage.co/query"
-   ```
-
-### 5. Get Alpha Vantage API Key
-
-1. Visit [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
-2. Sign up for a free account
-
-## Usage Examples
-
-### Market Utilities Usage
-
-```python
-from engine.base_strategy import BrazilianMarketUtils
-
-# Initialize market utilities
-utils = BrazilianMarketUtils()
-
-# Price normalization
-normalized_price = utils.normalize_price_tick(12.3456)  # Returns 12.35
-
-# Lot size validation
-is_valid, lot_type, is_fractional = utils.validate_lot_size(150)
-# Returns: (True, LotType.ODD_LOT, True)
-
-# Order validation
-validation = utils.validate_order(
-    price=12.3456,
-    quantity=150,
-    allow_fractional=True
-)
-# Returns OrderValidation with normalized values and lot classification
-```
-
-### Portfolio with Market Conventions
-
-```python
-from engine.portfolio import EnhancedPortfolio
-
-# Initialize portfolio (automatically uses market conventions)
-portfolio = EnhancedPortfolio("config/settings.yaml")
-
-# Buy with price normalization
-success = portfolio.buy(
-    ticker="PETR4",
-    quantity=100,
-    price=12.3456,  # Automatically normalized to 12.35
-    trade_date=datetime.now(),
-    trade_type="swing_trade"
-)
-
-# Trade history includes original and normalized values
-trade = portfolio.trade_history[0]
-print(f"Original price: {trade['original_price']}")  # 12.3456
-print(f"Normalized price: {trade['price']}")         # 12.35
-print(f"Lot type: {trade['lot_type']}")              # round_lot
-```
-
-### Strategy with Market Constraints
-
-```python
-from engine.base_strategy import BaseStrategy, TradingSignal, SignalType
-
-class MyStrategy(BaseStrategy):
-    def generate_signals(self, market_data):
-        # Your signal generation logic
-        signal = TradingSignal(
-            signal_type=SignalType.BUY,
-            ticker="PETR4",
-            price=12.3456,  # Will be normalized automatically
-            quantity=150,    # Will be classified as odd lot
-            confidence=1.0,
-            trade_type=TradeType.SWING_TRADE
-        )
-        return [signal]
-    
-    def execute_trade(self, signal):
-        # Market constraints are automatically validated
-        constraints_ok = self.check_brazilian_market_constraints(signal)
-        if constraints_ok:
-            # Signal price and quantity are automatically normalized
-            return self.portfolio.buy(
-                ticker=signal.ticker,
-                quantity=signal.quantity,  # Already normalized
-                price=signal.price,        # Already normalized
-                trade_date=signal.timestamp,
-                trade_type=signal.trade_type.value
-            )
-        return False
-```
-3. Get your API key
-4. Add it to `config/secrets.yaml`
-
-## Usage
-
-### Download Stock Data
-
-```bash
-python scripts/download_data.py
-```
-
-This will:
-- Download data for test symbols (VALE3, PETR4, ITUB4)
-- Save data to `data/raw/` directory
-- Create metadata files for each symbol
-
-### Run Backtests
-
-```bash
-# Example: Run a simple backtest
-python -c "
-from engine.portfolio import EnhancedPortfolio
-portfolio = EnhancedPortfolio('config/settings.yaml')
-# Add your backtest logic here
-"
-```
-
-### Implement Your Own Strategies
-
-To create a custom trading strategy, subclass the `BaseStrategy` class from `engine/base_strategy.py` and place your strategy file in the `strategies/` directory. The `strategies/` directory is currently empty and intended for user strategies.
-
-### Unified Fills and MOC
-
-After a run, unified fills can be exported (CSV/JSON) via the result manager. Columns include `timestamp, symbol, side, quantity, price, lot_type, rounding, tranche_notional_brl, trade_type, order_type, attempt_type, attempt_name`. Market-on-close executions are logged with `order_type=MOC` and `attempt_type=moc`.
-
-## Mandatory Pair Trading Mode (Always On)
-
-Pair-mode is enforced for all simulations. Each trading day the engine selects the top BUY and top SELL candidates (by fuzzy score) and executes a symmetric four-leg schedule per side (market + three limit tranches), with tranche sizing derived from `config/settings.yaml`:
-
-- `pair_mode.gross_exposure_brl`: total gross notional for both legs
-- `pair_mode.tranches`: number of equal tranches per leg
-- Tranche per leg: `tranche_notional_brl = gross_exposure_brl / tranches`
-
-Execution logic:
-- P1: Market-at-open tranche sized by previous close; P2–P4: passive limits derived from close (and ATR/percent steps)
-- Uniform lot rounding enforced at 100 shares per leg/day
-- End-of-day: residual intraday positions are flattened via MOC
-
-Data flow:
-- Hourly execution data from BRAPI (UTC); daily indicators from BRAPI daily
-- Strategy emits intents; simulator validates B3 constraints and records unified fills
-
-Run example (pair-mode is automatic):
-```bash
-python run_fuzzy_fajuto.py --tickers "ALPA4,BBAS3,PETR4" --profile default --save-results --report-format json --report-level full
-```
-
-The engine will also read `data/portfolio.csv` if `--tickers` is omitted.
-
-## Security Features
-
-### What's Protected
-
-The following files and directories are automatically excluded from Git:
-
-- **API Keys**: `config/secrets.yaml` (contains your actual keys)
-- **Data Files**: All CSV, JSON, and data files
-- **Logs**: All log files
-- **Virtual Environment**: `venv/` directory
-- **Reports**: Generated reports and outputs
-
-### What's Safe to Share
-
-- **Code**: All Python scripts and modules
-- **Configuration**: `config/settings.yaml` (market settings only)
-- **Examples**: `config/secrets.yaml.example` (template without real keys)
-- **Documentation**: README and other documentation files
-
-## Configuration
-
-### Market & Advanced Settings (`config/settings.yaml`)
-
-Configure Brazilian market parameters and advanced features:
-
-```yaml
-market:
-  trading_hours:
-    open: "10:00"
-    close: "16:55"
-    timezone: "America/Sao_Paulo"
-  costs:
-    emolument: 0.00005                 # B3 negotiation fee
-    settlement_day_trade: 0.00018      # Day-trade settlement
-    settlement_swing_trade: 0.00025    # Swing-trade settlement
-    brokerage_fee: 0.0                 # Modal brokerage (zero)
-    min_brokerage: 0.0                 # Minimum brokerage
-    iss_rate: 0.05                     # ISS tax rate
-
-taxes:
-  swing_trade: 0.15        # 15% capital gains
-  day_trade: 0.20          # 20% capital gains
-  exemption_limit: 20000   # Monthly tax-free limit
-  irrf_swing_rate: 0.00005 # IRRF withholding (swing)
-  irrf_day_rate: 0.01      # IRRF withholding (day trade)
-
-portfolio:
-  initial_cash: 100000     # Starting capital
-  max_positions: 10
-  position_sizing: "equal_weight"
-
-settlement:
-  cycle_days: 2                    # T+2 settlement cycle
-  timezone: "America/Sao_Paulo"    # Market timezone
-  strict_mode: true                # Enforce settlement rules
-  holiday_calendar: "b3"           # Use B3 holiday calendar
-
-loss_carryforward:
-  asset_specific_tracking: true    # Enable per-asset loss tracking
-  audit_trail_enabled: true        # Enable audit trail
-```
-
-## Advanced Testing
-
-Run the comprehensive test suites for TCA, loss carryforward, settlement, and simulation:
-
-```bash
-python -m unittest discover tests
-```
-
-- `tests/test_tca.py`: Transaction Cost Analysis tests
-- `tests/test_enhanced_managers.py`: Loss carryforward and settlement manager tests
-- `tests/test_simulator.py`: Backtest simulator tests
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-This project is for educational purposes. Please ensure compliance with Alpha Vantage's terms of service and Brazilian financial regulations.
-
-## Support
-
-For issues and questions:
-1. Check the documentation
-2. Review the code comments
-3. Create an issue on GitHub
-
-## Disclaimer
-
-This software is for educational and research purposes only. It is not financial advice. Always consult with qualified financial professionals before making investment decisions.

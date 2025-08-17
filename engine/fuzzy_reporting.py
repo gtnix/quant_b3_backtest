@@ -46,12 +46,14 @@ def export_fuzzy_components_to_csv(symbols: list[str], start_date: str, end_date
 
     # Order and rounding
     cols = [
-        'date','symbol','fuzzy_score','fuzzy_score_raw','stock_return','ibov_return','rs_component',
+        'date','symbol','close','fuzzy_score','fuzzy_score_raw','stock_return','ibov_return','rs_component',
         'ema_3_signal','ema_5_signal','ema_10_signal','ema_15_signal','ema_20_signal',
         'rsi_signal','atr_value','qualified_signal'
     ]
     for c in ['fuzzy_score']:
         df_all[c] = pd.to_numeric(df_all[c], errors='coerce').round(2)
+    # Ensure numeric types and rounding
+    df_all['close'] = pd.to_numeric(df_all.get('close'), errors='coerce').round(2)
     for c in ['stock_return','ibov_return','atr_value']:
         df_all[c] = pd.to_numeric(df_all[c], errors='coerce').round(4)
     for c in ['rs_component','ema_3_signal','ema_5_signal','ema_10_signal','ema_15_signal','ema_20_signal','rsi_signal']:

@@ -19,11 +19,11 @@ strategy:
   
   # ATR Parameters
   atr_period: 14                    # ATR calculation period (affects minimum data requirement)
-  alpha_factor: 0.25               # α factor for Passive-1 orders (Open ± α·ATR)
-  beta_factor: 0.50                # β factor for Passive-2 orders (Open ± β·ATR)
+  alpha_factor: 0.20               # α factor for Passive-1 orders (Open ± α·ATR) - relaxed for stress fill test
+  beta_factor: 0.40                # β factor for Passive-2 orders (Open ± β·ATR) - relaxed for stress fill test
   # Protective minimum distances relative to Open (to avoid quasi-market limits)
-  min_alpha_pct: 0.01              # 1% minimum distance for Passive-1
-  min_beta_pct: 0.02               # 2% minimum distance for Passive-2
+  min_alpha_pct: 0.0025            # 0.25% minimum distance for Passive-1 (increase hit probability)
+  min_beta_pct: 0.005              # 0.50% minimum distance for Passive-2 (increase hit probability)
   
   # Exposure and Position Sizing
   asset_exposure_pct: 0.08         # 8% of portfolio per asset

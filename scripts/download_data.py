@@ -688,8 +688,16 @@ class EnhancedB3DataDownloader:
             
             # Get tickers
             if tickers is None:
-                # Use IBRA_TICKERS as the default source
-                tickers = IBRA_TICKERS.copy()
+                # Default: load from data/portfolio.csv
+                try:
+                    p = Path("data/portfolio.csv") if Path("data/portfolio.csv").exists() else Path("portfolio.csv")
+                    dfp = pd.read_csv(p)
+                    col = 'symbol' if 'symbol' in dfp.columns else dfp.columns[0]
+                    tickers = [str(s).strip().upper() for s in dfp[col].dropna() if str(s).strip()]
+                    tickers = list(dict.fromkeys(tickers))
+                except Exception as e:
+                    self.logger.error(f"Failed to read portfolio.csv: {e}")
+                    tickers = []
             
             if not tickers:
                 self.logger.error("No tickers available for download")
@@ -735,8 +743,16 @@ def main():
         print("Note: This may take several hours due to API rate limits (5 calls/minute)")
         print()
         
-        # Use IBRA tickers
-        tickers = IBRA_TICKERS
+        # Load tickers from portfolio.csv
+        try:
+            p = Path("data/portfolio.csv") if Path("data/portfolio.csv").exists() else Path("portfolio.csv")
+            dfp = pd.read_csv(p)
+            col = 'symbol' if 'symbol' in dfp.columns else dfp.columns[0]
+            tickers = [str(s).strip().upper() for s in dfp[col].dropna() if str(s).strip()]
+            tickers = list(dict.fromkeys(tickers))
+        except Exception as e:
+            print(f"Failed to read portfolio.csv: {e}")
+            tickers = []
         
         # Run complete download process for all IBRA stocks
         success = downloader.run_complete_download(
