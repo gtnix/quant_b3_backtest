@@ -1027,8 +1027,8 @@ def main():
                             # Verbose log of selection
                             try:
                                 print(f"[pair_builder/day] d={d} BUY {sym_b} sb={sb:.2f} close_b={close_b} | SELL {sym_s} ss={ss:.2f} close_s={close_s}")
-                            except Exception as _e:
-                                logger.warning(f"[pair_builder/error] fallback_injection: {_e}")
+                            except Exception:
+                                pass
                             # If either close is invalid or non-positive, skip scheduling for this day
                             invalid_b = (not (close_b == close_b)) or close_b <= 0
                             invalid_s = (not (close_s == close_s)) or close_s <= 0
@@ -1100,81 +1100,11 @@ def main():
                             last_score[sym_b] = sb
                             last_score[sym_s] = ss
                             kept_days += 1
-                        # Report counters prior to any fallback injection
+                        # Report counters only (strict; no fallback injections)
                         try:
                             print(f"[pair_builder/counters] kept_days={kept_days} dropped_close={dropped_close} dropped_strength={dropped_strength}")
                         except Exception as _e:
                             logger.warning(f"[pair_builder/error] schedule_diagnostics: {_e}")
-
-                        # Fallback (optional): if no days kept, inject the first valid D that maps to a sim day D+1
-                        if not pair_schedule:
-                            try:
-                                for d, g in df.groupby('date'):
-                                    buys = g[g['qualified_signal']=='BUY']
-                                    sells = g[g['qualified_signal']=='SELL']
-                                    if len(buys)==0 or len(sells)==0:
-                                        continue
-                                    b = buys.sort_values('fuzzy_score_raw', ascending=False).iloc[0]
-                                    s = sells.sort_values('fuzzy_score_raw', ascending=True).iloc[0]
-                                    sb = float(b['fuzzy_score_raw']); ss = float(s['fuzzy_score_raw'])
-                                    if abs(sb) < min_strength or abs(ss) < min_strength:
-                                        continue
-                                    try:
-                                        cb = float(b['close']); cs = float(s['close'])
-                                    except Exception:
-                                        continue
-                                    if not (cb>0 and cs>0):
-                                        continue
-                                    _d_ts = pd.to_datetime(d)
-                                    if _cal is not None:
-                                        try:
-                                            _next = _cal.next_session_label(_d_ts.normalize())
-                                            exec_date = pd.Timestamp(_next).date()
-                                        except Exception:
-                                            exec_date = (_d_ts + _BDay(1)).date()
-                                    else:
-                                        exec_date = (_d_ts + _BDay(1)).date()
-                                    if sim_days_set and exec_date not in sim_days_set:
-                                        continue
-                                    # Limits
-                                    def limits(side: str, c: float) -> tuple[float,float,float]:
-                                        try:
-                                            return SignalScheduler()._limits_from_close(c, side)
-                                        except Exception:
-                                            step = (0.005, 0.010, 0.015)
-                                            if side == 'BUY':
-                                                return (round(c*(1- step[0]),2), round(c*(1- step[1]),2), round(c*(1- step[2]),2))
-                                            else:
-                                                return (round(c*(1+ step[0]),2), round(c*(1+ step[1]),2), round(c*(1+ step[2]),2))
-                                    p2b,p3b,p4b = limits('BUY', cb)
-                                    p2s,p3s,p4s = limits('SELL', cs)
-                                    day_store = pair_schedule.setdefault(exec_date, {})
-                                    day_store[str(b['symbol'])] = {
-                                        'symbol': str(b['symbol']),
-                                        'side': OrderSide.BUY,
-                                        'valid_for_date': exec_date,
-                                        'base_close_t': cb,
-                                        'limits_used': {'limit_level_2': p2b, 'limit_level_3': p3b, 'limit_level_4': p4b},
-                                        'current_atr_t': float('nan'),
-                                        'fuzzy_score_t': float(sb)
-                                    }
-                                    day_store[str(s['symbol'])] = {
-                                        'symbol': str(s['symbol']),
-                                        'side': OrderSide.SELL,
-                                        'valid_for_date': exec_date,
-                                        'base_close_t': cs,
-                                        'limits_used': {'limit_level_2': p2s, 'limit_level_3': p3s, 'limit_level_4': p4s},
-                                        'current_atr_t': float('nan'),
-                                        'fuzzy_score_t': float(ss)
-                                    }
-                                    kept_days += 1
-                                    try:
-                                        print(f"[pair_builder/fallback] injected exec_date={exec_date} BUY={b['symbol']} SELL={s['symbol']} sb={sb:.2f} ss={ss:.2f}")
-                                    except Exception:
-                                        pass
-                                    break
-                            except Exception:
-                                pass
                         # Inject schedule before simulation (always log diagnostics)
                         strategy._scheduled_day_trades = pair_schedule
                         try:
