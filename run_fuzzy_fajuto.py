@@ -1106,7 +1106,7 @@ def main():
                         except Exception as _e:
                             logger.warning(f"[pair_builder/error] schedule_diagnostics: {_e}")
 
-                        # Fallback: if no days kept, inject the first valid D that maps to a sim day D+1
+                        # Fallback (optional): if no days kept, inject the first valid D that maps to a sim day D+1
                         if not pair_schedule:
                             try:
                                 for d, g in df.groupby('date'):
@@ -1213,6 +1213,9 @@ def main():
             print(f"[diagnostics] sim_days={len(sim_days)} sched_days={len(sched_days)} intersect={len(inter)}")
             if inter[:5]:
                 print(f"[diagnostics] first_intersect_sample={inter[:5]}")
+            if len(sched_days) == 0:
+                # Explicit Case B/C diagnostic: no schedule → no fills will be produced
+                print("[FILLS] MISSING: no scheduled pairs in default window; unified_fills.csv will not be created.")
         except Exception:
             pass
 
