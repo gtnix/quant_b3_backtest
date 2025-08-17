@@ -415,10 +415,10 @@ class BaseStrategy(ABC):
     def size_intent(self, intent: OrderIntent, bar: Bar) -> OrderIntent:
         """
         Size an order intent based on portfolio constraints.
-        
+
         This method provides sensible defaults for position sizing.
         Override for custom sizing logic.
-        
+
         Args:
             intent: Original order intent
             bar: Current market data bar
@@ -438,15 +438,24 @@ class BaseStrategy(ABC):
             max_position_value
         )
         
-        # Calculate quantity
+        # Price reference
         price = intent.price if intent.price else bar.close
-        quantity = int(position_value / price)
+        if price <= 0:
+            quantity = 0
+        else:
+            raw_qty = position_value / price
+            # Enforce B3 board-lot rounding (100-share multiples)
+            # Rule: if last two digits of shares in [50..99] -> round up to nearest 100; else round down
+            shares_int = int(raw_qty)
+            remainder = shares_int % 100
+            if remainder >= 50:
+                quantity = ((shares_int // 100) + 1) * 100
+            else:
+                quantity = (shares_int // 100) * 100
         
-        # Ensure minimum quantity
         if quantity < 1:
             quantity = 0
         
-        # Create sized intent
         sized_intent = OrderIntent(
             symbol=intent.symbol,
             side=intent.side,

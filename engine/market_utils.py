@@ -116,11 +116,21 @@ class BrazilianMarketUtils:
         if price <= 0:
             raise ValueError("Price must be positive")
         
-        # Round to nearest tick using proper rounding
-        normalized = round(price / self.tick_size) * self.tick_size
-        
-        # Ensure we have exactly 2 decimal places
-        return round(normalized, 2)
+        # Round to nearest tick using HALF_UP semantics (Brazilian market convention)
+        try:
+            from decimal import Decimal, ROUND_HALF_UP
+            tick = Decimal(str(self.tick_size))
+            value = Decimal(str(price)) / tick
+            # Round the number of ticks using HALF_UP, then scale back
+            ticks_rounded = value.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+            normalized = ticks_rounded * tick
+            # Ensure exactly 2 decimal places
+            return float(normalized.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        except Exception:
+            # Fallback: float-based half-up approximation
+            import math
+            normalized = math.floor((price / self.tick_size) + 0.5) * self.tick_size
+            return round(normalized, 2)
     
     def validate_lot_size(self, quantity: int) -> Tuple[bool, LotType, bool]:
         """
@@ -1383,7 +1393,12 @@ def prepare_fuzzy_data(symbols: list[str], benchmark: str, start_date, end_date)
             base['rsi_signal'] = rsi_sig
             base['atr_value'] = atr.reindex(common)
 
+            # Align to calendar range and forward-fill close to avoid NaNs on non-intersection days
             base = base.reindex(cal)
+            try:
+                base['close'] = base['close'].ffill()
+            except Exception:
+                pass
             base.index.name = 'date'
             base = base.reset_index()
             base['symbol'] = sym

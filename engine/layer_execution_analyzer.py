@@ -53,8 +53,18 @@ class LayerExecutionAnalyzer:
             
             self.execution_data = pd.read_csv(self.execution_history_path)
             
-            # Add layer names
-            self.execution_data['layer_name'] = self.execution_data['attempt_type'].map(self.layer_mapping)
+            # Ensure required columns exist with safe defaults
+            if 'attempt_type' not in self.execution_data.columns:
+                self.execution_data['attempt_type'] = 'unknown'
+            if 'filled' not in self.execution_data.columns:
+                self.execution_data['filled'] = 0
+            if 'quantity' not in self.execution_data.columns:
+                self.execution_data['quantity'] = 0
+            if 'execution_price' not in self.execution_data.columns:
+                self.execution_data['execution_price'] = np.nan
+
+            # Add layer names (fallback to 'Unknown' if not mapped)
+            self.execution_data['layer_name'] = self.execution_data['attempt_type'].map(self.layer_mapping).fillna('Unknown')
             
             # Convert timestamp to datetime
             self.execution_data['timestamp'] = pd.to_datetime(self.execution_data['timestamp'])

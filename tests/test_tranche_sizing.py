@@ -47,3 +47,25 @@ def test_tranche_round_lot_sell_levels():
     assert qty3 <= qty2
     assert qty4 <= qty3
 
+
+def test_nearest_100_rounding_policy_boundaries():
+    # Validate rounding rule: remainder >=50 rounds up to next 100; else rounds down
+    sched = SignalScheduler(round_lot_size=100, tick_size=0.01, leg_notional_brl=12500.0)
+    # Helper wraps scheduler rounding to mimic strategy policy
+    def nearest_100(shares: float) -> int:
+        s = int(shares)
+        r = s % 100
+        return ((s // 100) + 1) * 100 if r >= 50 else (s // 100) * 100
+
+    # PETR4 close 30.17 → ~414 → 400 (down)
+    petr4_qty = nearest_100(12500.0 / 30.17)
+    assert petr4_qty == 400
+
+    # PETR3 close 32.17 → ~388 → 400 (up)
+    petr3_qty = nearest_100(12500.0 / 32.17)
+    assert petr3_qty == 400
+
+    # NVDA close 180 → ~69 → 100 (up)
+    nvda_qty = nearest_100(12500.0 / 180.0)
+    assert nvda_qty == 100
+

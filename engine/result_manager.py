@@ -41,7 +41,8 @@ class ResultManager:
         self.index_file = self.results_dir / "results_index.csv"
         self.detailed_dir = self.results_dir / "detailed"
 
-        audit_only = _os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes')
+        # Default to writing outputs unless explicitly disabled
+        audit_only = _os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes')
 
         if not audit_only:
             # Only create directories when not in audit-only mode
@@ -106,7 +107,7 @@ class ResultManager:
         }
         
         import os as _os
-        if not (_os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes')):
+        if not (_os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes')):
             # Save detailed results as JSON
             detailed_file = self.detailed_dir / f"{run_id}.json"
             try:
@@ -137,7 +138,7 @@ class ResultManager:
         """Update the results index with new entry."""
         try:
             import os as _os
-            if _os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes'):
+            if _os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes'):
                 return
             # Prepare index row
             index_row = {

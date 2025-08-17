@@ -8,9 +8,14 @@ from datetime import date
 @pytest.mark.parametrize(
     "stock_vs_ibov, ema_positions, rsi_val, expected",
     [
-        (1, 2, 50.0, 1.50),
-        (-1, -2, 50.0, -1.50),
+        # With five EMA periods (3,5,10,15,20), each contributes ±0.25 when aligned
+        # Case 1: stock>ibov (+1), all EMAs below close (+1.25), RSI neutral (0) ⇒ 2.25
+        (1, 2, 50.0, 2.25),
+        # Case 2: stock<ibov (-1), all EMAs above close (-1.25), RSI neutral (0) ⇒ -2.25
+        (-1, -2, 50.0, -2.25),
+        # Case 3: stock==ibov (0), all EMAs below close (+1.25), RSI>65 (+0.25) ⇒ 1.50
         (0, 2, 70.0, 1.50),
+        # Case 4: stock==ibov (0), all EMAs above close (-1.25), RSI<35 (-0.25) ⇒ -1.50
         (0, -2, 30.0, -1.50),
     ],
 )

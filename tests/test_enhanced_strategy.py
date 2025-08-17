@@ -3,8 +3,8 @@
 Test script for Enhanced FuzzyFajuto Strategy with Three-Attempt Execution System
 
 This script demonstrates how to use the enhanced strategy with:
-- Three execution attempts per asset per day
-- ATR-based limit order pricing
+- Four execution attempts per asset per day
+- Percent-based limit order pricing (0.5%, 1.0%, 1.5% from close[T-1])
 - Proper Brazilian market simulation
 - End-of-day position closure
 - Comprehensive execution tracking
@@ -259,7 +259,7 @@ def save_execution_report(strategy, execution_stats):
                     'close_price': summary.close_price,
                     'high_price': summary.high_price,
                     'low_price': summary.low_price,
-                    'atr_prev': summary.atr_prev,
+                    # 'atr_prev': summary.atr_prev,  # removed
                     'fuzzy_score': summary.metadata.get('fuzzy_score')
                 })
         
@@ -283,7 +283,7 @@ def main():
     """Main function to run the enhanced strategy test."""
     logger.info("=" * 60)
     logger.info("Enhanced FuzzyFajuto Strategy Test")
-    logger.info("Three-Attempt Execution System with ATR-Based Limits")
+    logger.info("Four-Attempt Execution System with Percent-Based Limits")
     logger.info("=" * 60)
     
     try:

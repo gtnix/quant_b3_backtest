@@ -16,7 +16,28 @@ def make_bar(symbol: str, d: date, h: int, o: float, hi: float, lo: float, c: fl
     return Bar(symbol=symbol, timestamp=ts, open=o, high=hi, low=lo, close=c, volume=100_000)
 
 
-def prepare_strategy(universe=("PETR4",), atr: float = 2.0) -> FuzzyFajutoStrategy:
+def _load_portfolio_symbols() -> list:
+    candidates = [
+        Path('data') / 'portfolio.csv',
+        Path('portfolio.csv'),
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                df = pd.read_csv(p)
+                col = 'symbol' if 'symbol' in df.columns else df.columns[0]
+                syms = [str(s).strip().upper() for s in df[col].dropna() if str(s).strip()]
+                if syms:
+                    return list(dict.fromkeys(syms))
+        except Exception:
+            pass
+    return []
+
+
+def prepare_strategy(universe=None, atr: float = 2.0) -> FuzzyFajutoStrategy:
+    if universe is None:
+        syms = _load_portfolio_symbols()
+        universe = tuple(syms[:1]) if syms else ("PETR4",)
     sc = StrategyConfig(universe=list(universe))
     dummy_portfolio = MagicMock()
     dummy_portfolio.get_portfolio_value.return_value = 1_000_000.0
@@ -31,7 +52,8 @@ def prepare_strategy(universe=("PETR4",), atr: float = 2.0) -> FuzzyFajutoStrate
     )
     strat = FuzzyFajutoStrategy(sc, ctx)
     strat._universe_symbols = list(universe)
-    strat.current_atr_values = {s: atr for s in universe}
+    # ATR removed from strategy; keep no-op field to avoid test coupling
+    strat.current_atr_values = {}
     strat.daily_data = {}
     strat.daily_indicators_data = {}
     strat.daily_indicators_last_update = {}
@@ -98,5 +120,14 @@ def pytest_addoption(parser):
         type=float,
         default=0.01,
         help="Absolute price tolerance in BRL (default 0.01).",
+    )
+
+    # BRAPI discovery/stress options
+    disc = parser.getgroup("brapi_discovery")
+    disc.addoption(
+        "--limit-symbols",
+        action="store_true",
+        default=False,
+        help="Enable BRAPI stress discovery tests (disabled by default)",
     )
 
