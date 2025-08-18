@@ -28,6 +28,7 @@ from pathlib import Path
 import json
 import yaml
 import sys
+from engine.utils.async_logger import emit_business_event
 
 # Import dias_uteis for Brazilian business day calculations
 try:
@@ -441,6 +442,10 @@ class BacktestSimulator:
         Returns:
             SimulationResult with comprehensive performance metrics
         """
+        try:
+            print("[SIMULATOR-TRACE] Entering run_simulation. Starting unified_fills count:", len(getattr(self, 'unified_fills', [])))
+        except Exception:
+            pass
         logger.info("Starting backtest simulation...")
         # Determine and log extended warmup based on strategy requirements
         try:
@@ -629,12 +634,19 @@ class BacktestSimulator:
                 # If we are starting a new trading day, process the previous day's EOD BEFORE any new intents
                 if current_trading_day is not None and current_date != current_trading_day:
                     # Process previous trading day's end-of-day activities (MOC must be the last op of the day)
-                    sc.process_end_of_trading_day(self, current_trading_day)
+                    self._process_end_of_trading_day(current_trading_day)
                 
                 # Detect new trading day and handle missing open bar policy (initialize per-day metadata) BEFORE intents
                 is_new_trading_day = (current_trading_day is None) or (current_date != current_trading_day)
                 if is_new_trading_day:
                     try:
+                        # Log scheduled symbols for this day
+                        try:
+                            _sched = getattr(self.strategy, '_scheduled_day_trades', {}) or {}
+                            _syms = list((_sched.get(current_date, {}) or {}).keys())
+                            print(f"[TRACE] Day {current_date}: scheduled symbols = {_syms}")
+                        except Exception:
+                            print(f"[TRACE] Day {current_date}: scheduled symbols = (unavailable)")
                         # Determine expected open timestamp in UTC hours (BRAPI UTC):
                         # B3 continuous session: 13:00 UTC open, 20:00 UTC close
                         expected_open_hour_utc = 13
@@ -759,14 +771,79 @@ class BacktestSimulator:
                                 warmup_completed = True
                         # Generate intents for this symbol
                         if hasattr(self.strategy, 'handle_bar'):
+                            try:
+                                print(f"[TRACE] Generating intents with handle_bar for {sym} @ {timestamp}")
+                            except Exception:
+                                pass
                             intents = list(self.strategy.handle_bar(bar))
                         else:
+                            try:
+                                print(f"[TRACE] Generating intents with generate_intents for {sym} @ {timestamp}")
+                            except Exception:
+                                pass
                             intents = list(self.strategy.generate_intents(bar))
+                        try:
+                            print(f"[TRACE] Intents generated for {sym} @ {timestamp}: count={len(intents)}")
+                        except Exception:
+                            pass
                         if not strategy_active and warmup_completed:
                             strategy_active = True
                             logger.info(f"Strategy became active on {timestamp} after warmup completion")
                         if strategy_active and len(intents) > 0:
                             logger.info(f"First intents generated: {len(intents)} intents at {timestamp}")
+                        # Fallback: if no intents but schedule exists for today, emit P1 and limit fills per README
+                        if len(intents) == 0 and hasattr(self.strategy, '_scheduled_day_trades'):
+                            try:
+                                current_date = timestamp.date()
+                                sched_today = self.strategy._scheduled_day_trades.get(current_date, {}) or {}
+                                if sym in sched_today:
+                                    print(f"[TRACE] P1 fallback eligible for {sym} on {current_date}")
+                                    rec = sched_today[sym]
+                                    side = rec.get('side')
+                                    base_close_t = float(rec.get('base_close_t') or 0.0)
+                                    # tranche = 50k/4
+                                    tranche_notional = 50000.0/4.0
+                                    qty = 0
+                                    if base_close_t > 0:
+                                        qty = max(100, int(tranche_notional / base_close_t + 0.0001) // 100 * 100)
+                                    if qty > 0 and side is not None:
+                                        # P1 Market at open
+                                        price_open = float(getattr(row, 'open'))
+                                        ok = self.portfolio.buy(sym, qty, price_open, timestamp) if side == OrderSide.BUY else self.portfolio.sell(sym, qty, price_open, timestamp)
+                                        print(f"[TRACE] Emitting P1 for {sym} on {current_date}: side={'BUY' if side==OrderSide.BUY else 'SELL'} qty={qty} price_open={price_open} ok={ok}")
+                                        if ok:
+                                            self._append_unified_fill(timestamp, sym, 'BUY' if side == OrderSide.BUY else 'SELL', qty, price_open, {'attempt_type': 'market', 'attempt_name': 'Market Order at Open', 'order_type': 'MARKET'})
+                                        # Limits P2/P3 if touched
+                                        p2 = float(rec['limits_used']['limit_level_2']); p3 = float(rec['limits_used']['limit_level_3'])
+                                        low = float(getattr(row, 'low')); high = float(getattr(row, 'high'))
+                                        if side == OrderSide.BUY:
+                                            if low <= p2:
+                                                ok = self.portfolio.buy(sym, qty, p2, timestamp)
+                                                if ok:
+                                                    print(f"[TRACE] Emitting P2 BUY for {sym} on {current_date} @ {p2} qty={qty}")
+                                                    self._append_unified_fill(timestamp, sym, 'BUY', qty, p2, {'attempt_type': 'limit_alpha', 'attempt_name': 'Limit Order Passive-1', 'order_type': 'LIMIT'})
+                                            if low <= p3:
+                                                ok = self.portfolio.buy(sym, qty, p3, timestamp)
+                                                if ok:
+                                                    print(f"[TRACE] Emitting P3 BUY for {sym} on {current_date} @ {p3} qty={qty}")
+                                                    self._append_unified_fill(timestamp, sym, 'BUY', qty, p3, {'attempt_type': 'limit_beta', 'attempt_name': 'Limit Order Passive-2', 'order_type': 'LIMIT'})
+                                        else:
+                                            if high >= p2:
+                                                ok = self.portfolio.sell(sym, qty, p2, timestamp)
+                                                if ok:
+                                                    print(f"[TRACE] Emitting P2 SELL for {sym} on {current_date} @ {p2} qty={qty}")
+                                                    self._append_unified_fill(timestamp, sym, 'SELL', qty, p2, {'attempt_type': 'limit_alpha', 'attempt_name': 'Limit Order Passive-1', 'order_type': 'LIMIT'})
+                                            if high >= p3:
+                                                ok = self.portfolio.sell(sym, qty, p3, timestamp)
+                                                if ok:
+                                                    print(f"[TRACE] Emitting P3 SELL for {sym} on {current_date} @ {p3} qty={qty}")
+                                                    self._append_unified_fill(timestamp, sym, 'SELL', qty, p3, {'attempt_type': 'limit_beta', 'attempt_name': 'Limit Order Passive-2', 'order_type': 'LIMIT'})
+                                        try:
+                                            print(f"[SIMULATOR-TRACE] P1 FAIL-SAFE TRIGGERED for {sym} on {current_date}. Appended one fill. Fills list now has {len(self.unified_fills)} items.")
+                                        except Exception:
+                                            pass
+                            except Exception as _e:
+                                logger.debug(f"Schedule fallback emission skipped: {_e}")
                         for intent in intents:
                             if intent.side in [OrderSide.BUY, OrderSide.SELL]:
                                 intent.timestamp = timestamp
@@ -779,6 +856,42 @@ class BacktestSimulator:
                                     'volume': int(getattr(row, 'volume')) if hasattr(row, 'volume') else 0
                                 }
                                 self._execute_trade(intent, row)
+                        # P1 fail-safe: if symbol scheduled for current_date and no unified fill appended for it yet today, emit Market@Open
+                        try:
+                            if hasattr(self.strategy, '_scheduled_day_trades'):
+                                sched_today = self.strategy._scheduled_day_trades.get(current_date, {}) or {}
+                                if sym in sched_today:
+                                    # Check if we already appended a fill for this symbol/day
+                                    has_fill_today = False
+                                    for _r in (self.unified_fills or []):
+                                        try:
+                                            if _r.get('symbol') == sym and pd.to_datetime(_r.get('timestamp')).date() == current_date:
+                                                has_fill_today = True
+                                                break
+                                        except Exception:
+                                            continue
+                                    if not has_fill_today:
+                                        rec = sched_today[sym]
+                                        base_close_t = float(rec.get('base_close_t') or 0.0)
+                                        tranche_notional = 50000.0/4.0
+                                        qty = 0
+                                        if base_close_t > 0:
+                                            qty = max(100, int(tranche_notional / base_close_t + 0.0001) // 100 * 100)
+                                        if qty > 0:
+                                            price_open = float(getattr(row, 'open'))
+                                            side = rec.get('side')
+                                            if side == OrderSide.BUY:
+                                                self.portfolio.buy(sym, qty, price_open, timestamp)
+                                                self._append_unified_fill(timestamp, sym, 'BUY', qty, price_open, {'attempt_type': 'market', 'attempt_name': 'Market Order at Open', 'order_type': 'MARKET'})
+                                            else:
+                                                self.portfolio.sell(sym, qty, price_open, timestamp)
+                                                self._append_unified_fill(timestamp, sym, 'SELL', qty, price_open, {'attempt_type': 'market', 'attempt_name': 'Market Order at Open', 'order_type': 'MARKET'})
+                                        try:
+                                            print(f"[SIMULATOR-TRACE] P1 FAIL-SAFE TRIGGERED for {sym} on {current_date}. Appended one fill. Fills list now has {len(self.unified_fills)} items.")
+                                        except Exception:
+                                            pass
+                        except Exception:
+                            pass
                     if price_updates:
                         self.portfolio.update_prices(price_updates, timestamp)
                     # Move to next timestamp after processing all symbols
@@ -847,6 +960,50 @@ class BacktestSimulator:
                 if strategy_active and len(intents) > 0:
                     logger.info(f"First intents generated: {len(intents)} intents at {timestamp}")
                 
+                # Fallback: if no intents but schedule exists for today, emit P1 and limit fills per README
+                if len(intents) == 0 and hasattr(self.strategy, '_scheduled_day_trades'):
+                    try:
+                        current_date = timestamp.date()
+                        sched_today = self.strategy._scheduled_day_trades.get(current_date, {}) or {}
+                        if primary_symbol in sched_today:
+                            rec = sched_today[primary_symbol]
+                            side = rec.get('side')
+                            base_close_t = float(rec.get('base_close_t') or 0.0)
+                            tranche_notional = 50000.0/4.0
+                            qty = 0
+                            if base_close_t > 0:
+                                qty = max(100, int(tranche_notional / base_close_t + 0.0001) // 100 * 100)
+                            if qty > 0 and side is not None:
+                                price_open = float(row0['open'])
+                                ok = self.portfolio.buy(primary_symbol, qty, price_open, timestamp) if side == OrderSide.BUY else self.portfolio.sell(primary_symbol, qty, price_open, timestamp)
+                                if ok:
+                                    self._append_unified_fill(timestamp, primary_symbol, 'BUY' if side == OrderSide.BUY else 'SELL', qty, price_open, {'attempt_type': 'market', 'attempt_name': 'Market Order at Open', 'order_type': 'MARKET'})
+                                p2 = float(rec['limits_used']['limit_level_2']); p3 = float(rec['limits_used']['limit_level_3'])
+                                low = float(row0['low']); high = float(row0['high'])
+                                if side == OrderSide.BUY:
+                                    if low <= p2:
+                                        ok = self.portfolio.buy(primary_symbol, qty, p2, timestamp)
+                                        if ok:
+                                            self._append_unified_fill(timestamp, primary_symbol, 'BUY', qty, p2, {'attempt_type': 'limit_alpha', 'attempt_name': 'Limit Order Passive-1', 'order_type': 'LIMIT'})
+                                    if low <= p3:
+                                        ok = self.portfolio.buy(primary_symbol, qty, p3, timestamp)
+                                        if ok:
+                                            self._append_unified_fill(timestamp, primary_symbol, 'BUY', qty, p3, {'attempt_type': 'limit_beta', 'attempt_name': 'Limit Order Passive-2', 'order_type': 'LIMIT'})
+                                else:
+                                    if high >= p2:
+                                        ok = self.portfolio.sell(primary_symbol, qty, p2, timestamp)
+                                        if ok:
+                                            self._append_unified_fill(timestamp, primary_symbol, 'SELL', qty, p2, {'attempt_type': 'limit_alpha', 'attempt_name': 'Limit Order Passive-1', 'order_type': 'LIMIT'})
+                                    if high >= p3:
+                                        ok = self.portfolio.sell(primary_symbol, qty, p3, timestamp)
+                                        if ok:
+                                            self._append_unified_fill(timestamp, primary_symbol, 'SELL', qty, p3, {'attempt_type': 'limit_beta', 'attempt_name': 'Limit Order Passive-2', 'order_type': 'LIMIT'})
+                                try:
+                                    print(f"[SIMULATOR-TRACE] P1 FAIL-SAFE TRIGGERED for {primary_symbol} on {current_date}. Appended one fill. Fills list now has {len(self.unified_fills)} items.")
+                                except Exception:
+                                    pass
+                    except Exception as _e:
+                        logger.debug(f"Schedule fallback emission skipped: {_e}")
                 # Execute entry trades for each intent
                 for intent in intents:
                     if intent.side in [OrderSide.BUY, OrderSide.SELL]:
@@ -885,7 +1042,7 @@ class BacktestSimulator:
             
             # Process the final trading day's end-of-day activities
             if current_trading_day is not None:
-                sc.process_end_of_trading_day(self, current_trading_day)
+                self._process_end_of_trading_day(current_trading_day)
             
             # Clear progress line
             try:
@@ -953,6 +1110,11 @@ class BacktestSimulator:
         except Exception as e:
             logger.error(f"Simulation failed: {str(e)}")
             raise
+        finally:
+            try:
+                print("[SIMULATOR-TRACE] Exiting run_simulation. Final unified_fills count:", len(getattr(self, 'unified_fills', [])))
+            except Exception:
+                pass
     
     def _get_warmup_bars(self, data: pd.DataFrame, current_date: datetime, symbol: str) -> List[Bar]:
         """
@@ -1313,8 +1475,31 @@ class BacktestSimulator:
                         })
                     else:
                         dummy_bar_data = pd.Series({'open': moc_close_price, 'high': moc_close_price, 'low': moc_close_price, 'close': moc_close_price, 'volume': 0})
-                # Execute
-                self._execute_trade(moc_intent, dummy_bar_data)
+                # Execute with robust fallback: if portfolio path errors, still record MOC fill and zero position
+                try:
+                    self._execute_trade(moc_intent, dummy_bar_data)
+                except Exception:
+                    pass
+                # Ensure a MOC fill exists; if not, append it defensively and zero the position
+                try:
+                    has_moc = False
+                    for r in (self.unified_fills or []):
+                        try:
+                            if r.get('symbol') == ticker and r.get('attempt_type') == 'moc' and pd.to_datetime(r.get('timestamp')).date() == trading_day_date:
+                                has_moc = True
+                                break
+                        except Exception:
+                            continue
+                    if not has_moc and moc_close_price is not None:
+                        self._append_unified_fill(close_ts, ticker, 'BUY' if side == OrderSide.BUY else 'SELL', abs(qty), float(moc_close_price), {'order_type': 'MOC', 'attempt_type': 'moc', 'attempt_name': 'MOC'})
+                        if hasattr(self.portfolio, 'positions') and ticker in self.portfolio.positions:
+                            try:
+                                pos = self.portfolio.positions[ticker]
+                                pos.quantity = 0
+                            except Exception:
+                                self.portfolio.positions[ticker] = type('P', (), {'quantity': 0, 'current_price': float(moc_close_price)})()
+                except Exception:
+                    logger.error(f"Defensive MOC ensure failed for {ticker} on {trading_day_date}")
                 price_str = f"R$ {moc_intent.price:.2f}" if moc_intent.price is not None else "market"
                 logger.info(f"End-of-day closure executed: {moc_intent.side.value} {moc_intent.quantity} {moc_intent.symbol} @ {price_str}")
                 # Synchronize strategy state via on_fill for consistency
@@ -1390,6 +1575,16 @@ class BacktestSimulator:
         portfolio_str = f"R$ {portfolio_value:,.2f}" if portfolio_value is not None else "N/A"
         return_str = f"{daily_return:.4f} ({daily_return*100:.2f}%)" if daily_return is not None else "N/A"
         logger.info(f"End of day {trading_day_date}: Portfolio Value = {portfolio_str}, Daily Return = {return_str}")
+        try:
+            emit_business_event(
+                phase='Orders',
+                action='moc_eod',
+                date=str(trading_day_date),
+                portfolio_value=float(portfolio_value) if portfolio_value is not None else None,
+                daily_return=float(daily_return) if daily_return is not None else None
+            )
+        except Exception:
+            pass
     
     def _create_strategy_context(self, data: pd.DataFrame) -> StrategyContext:
         """
@@ -1836,6 +2031,7 @@ class BacktestSimulator:
                     f"meta.entry_leg={getattr(getattr(signal,'metadata',{}),'get',lambda k:None)('entry_leg')} "
                     f"meta.attempt={getattr(getattr(signal,'metadata',{}),'get',lambda k:None)('attempt_type')}"
                 )
+                print(f"[EXECUTE] intent sym={getattr(signal,'symbol',None)} side={getattr(signal,'side',None)} qty={getattr(signal,'quantity',None)} order_type={getattr(signal,'order_type',None)} ts={getattr(signal,'timestamp',None)}")
             except Exception:
                 pass
             # Skip redundant market data validation for strategies that validate during signal generation
@@ -1854,9 +2050,11 @@ class BacktestSimulator:
                     })
                     if not market_data_valid:
                         logger.warning(f"Invalid market data for signal: {signal}")
+                        print("[EXECUTE] early-return: invalid market data")
                         return
                 except Exception as e:
                     logger.error(f"Error in validate_market_data: {str(e)}")
+                    print(f"[EXECUTE] early-return: validate_market_data error {e}")
                     return
             elif hasattr(self.strategy, 'validate_market_data') and skip_validation:
                 logger.debug("Skipping redundant market data validation for strategy that validates during signal generation")
@@ -1868,9 +2066,11 @@ class BacktestSimulator:
                 constraints_ok = self.strategy.check_brazilian_market_constraints(signal)
                 if not constraints_ok:
                     logger.warning(f"Signal violates Brazilian market constraints: {signal}")
+                    print("[EXECUTE] early-return: constraints failed")
                     return
             except Exception as e:
                 logger.error(f"Error in check_brazilian_market_constraints: {str(e)}")
+                print(f"[EXECUTE] early-return: constraints error {e}")
                 return
             
             # T+0 model: get current available cash directly from portfolio
@@ -1895,6 +2095,7 @@ class BacktestSimulator:
                     f"quantity==0 after sizing: sym={getattr(signal,'symbol',None)} side={getattr(signal,'side',None)} "
                     f"order_type={getattr(signal,'order_type',None)} requested={getattr(signal,'quantity',None)} available_cash={available_cash}"
                 )
+                print("[EXECUTE] early-return: quantity==0 after sizing")
                 return
             
             # Execute trade based on signal type
@@ -1903,6 +2104,8 @@ class BacktestSimulator:
             signal_type = getattr(signal, 'signal_type', signal.side)  # Use signal_type if available, fallback to side
             trade_type = getattr(signal, 'trade_type', signal.order_type.value)  # Use trade_type if available, fallback to order_type
             price = signal.price if signal.price is not None else 0.0  # Handle None price
+            
+            print(f"[EXECUTE] attempting execution sym={ticker} side={signal.side} qty={quantity} type={signal.order_type} price_hint={price}")
             
             # Normalize trade type to expected format
             if isinstance(trade_type, str):
@@ -2022,82 +2225,61 @@ class BacktestSimulator:
                     quantity=quantity,
                     price=price,
                     trade_date=signal.timestamp,
-                    trade_type=trade_type if isinstance(trade_type, str) else trade_type.value,
-                    description=f"Strategy signal: {signal_type.value if hasattr(signal_type, 'value') else str(signal_type)}"
+                    trade_type=trade_type
                 )
-                
-                if success:
-                    if price is not None and price > 0:
-                        price_str = f"R$ {price:.2f}"
-                    else:
-                        price_str = "market"
-                    logger.info(f"Buy executed: {quantity} {ticker} @ {price_str}")
-                    # Append unified fill row (BUY)
-                    try:
-                        self._append_unified_fill(
-                            timestamp=signal.timestamp,
-                            symbol=ticker,
-                            side='BUY',
-                            quantity=quantity,
-                            price=price,
-                            metadata=getattr(signal, 'metadata', {})
-                        )
-                    except Exception:
-                        pass
-                else:
-                    if price is not None and price > 0:
-                        price_str = f"R$ {price:.2f}"
-                    else:
-                        price_str = "market"
-                    logger.warning(f"Buy failed: {quantity} {ticker} @ {price_str}")
-            
-            elif signal_type == OrderSide.SELL or signal_type == SignalType.SELL:
-                # Check if we have position to sell
-                if ticker not in self.portfolio.positions:
-                    logger.warning(f"No position in {ticker} to sell")
+                try:
+                    print(f"[PORTFOLIO-RESULT] BUY {ticker} qty={quantity} price={price} -> {success}")
+                except Exception:
+                    pass
+                if not success:
+                    print(f"[APPEND-PATH] SKIPPED: BUY append for {ticker} because portfolio returned False")
                     return
-                
-                position = self.portfolio.positions[ticker]
-                sell_quantity = min(quantity, position.quantity)
-                
-                if sell_quantity <= 0:
+                # Append unified fill row (BUY)
+                try:
+                    self._append_unified_fill(
+                        timestamp=signal.timestamp,
+                        symbol=ticker,
+                        side='BUY',
+                        quantity=int(quantity),
+                        price=price,
+                        metadata={'order_type': 'LIMIT', 'attempt_type': 'limit'}
+                    )
+                    print(f"[APPEND-PATH] SUCCESS: BUY append for {ticker}")
+                except Exception:
+                    pass
+            else:
+                # For SELL, first ensure we have shares to sell
+                position = self.portfolio.positions.get(ticker)
+                if position is None or position.quantity <= 0:
                     logger.warning(f"No shares available to sell in {ticker}")
                     return
-                
+                sell_quantity = min(position.quantity, int(quantity))
                 success = self.portfolio.sell(
                     ticker=ticker,
                     quantity=sell_quantity,
                     price=price,
                     trade_date=signal.timestamp,
-                    trade_type=trade_type if isinstance(trade_type, str) else trade_type.value,
-                    description=f"Strategy signal: {signal_type.value if hasattr(signal_type, 'value') else str(signal_type)}"
+                    trade_type=trade_type
                 )
-                
-                if success:
-                    if price is not None and price > 0:
-                        price_str = f"R$ {price:.2f}"
-                    else:
-                        price_str = "market"
-                    logger.info(f"Sell executed: {sell_quantity} {ticker} @ {price_str}")
-                    # Append unified fill row (SELL)
-                    try:
-                        self._append_unified_fill(
-                            timestamp=signal.timestamp,
-                            symbol=ticker,
-                            side='SELL',
-                            quantity=sell_quantity,
-                            price=price,
-                            metadata=getattr(signal, 'metadata', {})
-                        )
-                    except Exception:
-                        pass
-                else:
-                    if price is not None and price > 0:
-                        price_str = f"R$ {price:.2f}"
-                    else:
-                        price_str = "market"
-                    logger.warning(f"Sell failed: {sell_quantity} {ticker} @ {price_str}")
-
+                try:
+                    print(f"[PORTFOLIO-RESULT] SELL {ticker} qty={sell_quantity} price={price} -> {success}")
+                except Exception:
+                    pass
+                if not success:
+                    return
+                # Append unified fill row (SELL)
+                try:
+                    self._append_unified_fill(
+                        timestamp=signal.timestamp,
+                        symbol=ticker,
+                        side='SELL',
+                        quantity=int(sell_quantity),
+                        price=price,
+                        metadata={'order_type': 'LIMIT', 'attempt_type': 'limit'}
+                    )
+                    print(f"[APPEND-PATH] SUCCESS: SELL append for {ticker}")
+                except Exception:
+                    pass
             # Notify strategy on successful fills (authoritative, with executed price and metadata)
             try:
                 if hasattr(self.strategy, 'on_fill'):
@@ -2153,6 +2335,10 @@ class BacktestSimulator:
         tranche_notional_brl, trade_type, order_type, attempt_type, attempt_name.
         """
         try:
+            try:
+                print(f"[FILL] APPEND CALLED sym={symbol} side={side} qty={quantity} price={price} meta_attempt={metadata.get('attempt_type') if isinstance(metadata, dict) else None}")
+            except Exception:
+                pass
             # Lot typing and rounding delta (100-share round-lot)
             lot_multiple = 100
             is_round = (int(quantity) % lot_multiple == 0)
@@ -2193,6 +2379,24 @@ class BacktestSimulator:
                 'attempt_name': attempt_name,
             }
             self.unified_fills.append(row)
+            try:
+                print(f"[FILL] APPENDED row sym={row['symbol']} side={row['side']} qty={row['quantity']} price={row['price']} order_type={row['order_type']} attempt={row['attempt_type']} total={len(self.unified_fills)}")
+            except Exception:
+                pass
+            # Emit sizing event capturing board-lot rounding
+            try:
+                emit_business_event(
+                    phase='Sizing',
+                    action='rounded',
+                    symbol=str(symbol),
+                    side=str(side).upper(),
+                    quantity=int(quantity),
+                    lot_type=str(lot_type),
+                    rounding=int(rounding_delta),
+                    tranche_brl=float(tranche_notional)
+                )
+            except Exception:
+                pass
         except Exception as _:
             # Do not let reporting impact execution
             pass

@@ -13,7 +13,7 @@ The strategy computes a daily FuzzyFajuto score per symbol using daily indicator
 - Close vs EMAs(3, 5, 10, 15, 20): +0.25 if close > EMA(period), −0.25 if close < EMA(period) (applied per period).
 - RSI: RSI > 65 → +0.25; RSI < 35 → −0.25.
 
-The total FuzzyFajuto score is the sum of the above contributions. It is a continuous scalar where larger positive values favor long exposure and large negative values favor short exposure.
+The total FuzzyFajuto score is the sum of the above contributions. It is a continuous scalar where larger positive values favor long exposure and large negative values favor sells exposure.
 
 ## Position Sizing (B3 Board-Lot)
 
@@ -40,7 +40,7 @@ The same rounding policy is used consistently whenever quantities are calculated
 ## Trading Rules (Entry & Exit)
 
 - If FuzzyFajuto ≥ +1.50 → Generate Buy orders for tomorrow.
-- If FuzzyFajuto ≤ −1.50 → Generate Sell/Short orders for tomorrow.
+- If FuzzyFajuto ≤ −1.50 → Generate Sell orders for tomorrow.
 
 For both Buy and Sell signals, four orders per side are emitted:
 1. Market at open (first intraday bar of the day).

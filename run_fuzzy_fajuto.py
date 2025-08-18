@@ -87,6 +87,7 @@ from engine.fuzzy_reporting import export_fuzzy_components_to_csv
 from engine.market_utils import prepare_fuzzy_data, SignalScheduler
 from engine.base_strategy import OrderSide
 from engine.utils.async_logger import AsyncJsonlLogger
+from engine.utils.async_logger import emit_business_event
 
 
 from engine.utils.terminal_table import generate_execution_table
@@ -109,10 +110,6 @@ def _load_portfolio_symbols() -> list:
                     symbols = [str(s).strip().upper() for s in df['symbol'].dropna().tolist()]
                     symbols = [s for s in symbols if len(s) > 0]
                     syms_out = list(dict.fromkeys(symbols))  # de-duplicate preserving order
-                    try:
-                        print(f"Loaded portfolio from: {path} ({len(syms_out)} symbols)")
-                    except Exception:
-                        pass
                     return syms_out
         except Exception as e:
             logger.warning(f"Failed to load portfolio from {path}: {e}")
@@ -203,6 +200,15 @@ def main():
         start_date = args.start_date or default_start
         end_date = args.end_date or default_end
         args.save_results = default_save if args.save_results is None else args.save_results
+        try:
+            emit_business_event(
+                phase='Universe',
+                action='date_range',
+                start_date=str(start_date),
+                end_date=str(end_date)
+            )
+        except Exception:
+            pass
 
         # Determine tickers universe from portfolio.csv only
         csv_symbols = _load_portfolio_symbols()
@@ -210,6 +216,14 @@ def main():
             raise SystemExit("portfolio.csv não encontrado ou sem coluna 'symbol'. Coloque sua lista em data/portfolio.csv.")
         tickers = csv_symbols
         logger.info(f"Loaded portfolio from CSV: {','.join(tickers)}")
+        try:
+            emit_business_event(
+                phase='Universe',
+                action='loaded',
+                symbols=int(len(tickers))
+            )
+        except Exception:
+            pass
 
         # Max-range auto-selection and bulk prefetch removed to simplify CLI; use explicit dates or defaults
 
@@ -254,6 +268,15 @@ def main():
                     if len(_dropped) > 0:
                         logger.info("Dropped (insufficient hourly coverage): " + ",".join([d[0] for d in _dropped[:20]]) + ("..." if len(_dropped) > 20 else ""))
                     tickers = _kept
+                    try:
+                        emit_business_event(
+                            phase='Universe',
+                            action='prefiltered',
+                            kept=int(len(_kept)),
+                            dropped=int(len(_dropped))
+                        )
+                    except Exception:
+                        pass
                 else:
                     logger.warning("No symbols met hourly coverage threshold; proceeding with original list (may cancel mid-run).")
         except Exception as _e:
@@ -586,6 +609,15 @@ def main():
             sched = {}
             if isinstance(vectors, dict) and len(vectors) > 0:
                 sched = SignalScheduler(leg_notional_brl=10000.0).build_schedule(vectors)
+                try:
+                    print(f"[PRE-RUN] Schedule days: {len(sched)} | Sample: {list(sched.items())[:3]}")
+                except Exception:
+                    print("[PRE-RUN] Schedule print failed")
+                try:
+                    strategy._scheduled_day_trades = sched
+                    print(f"[PRE-RUN] Injected schedule into strategy: days={len(sched)}")
+                except Exception as _e:
+                    print(f"[PRE-RUN] Schedule injection failed: {_e}")
 
             # Write consolidated fuzzy indicators CSV and signal matching math
             try:
@@ -1027,6 +1059,15 @@ def main():
                             # Verbose log of selection
                             try:
                                 print(f"[pair_builder/day] d={d} BUY {sym_b} sb={sb:.2f} close_b={close_b} | SELL {sym_s} ss={ss:.2f} close_s={close_s}")
+                                emit_business_event(
+                                    phase='Pairing',
+                                    action='selected_pair',
+                                    date=str(d),
+                                    buy_symbol=sym_b,
+                                    sell_symbol=sym_s,
+                                    score_buy=float(sb),
+                                    score_sell=float(ss)
+                                )
                             except Exception:
                                 pass
                             # If either close is invalid or non-positive, skip scheduling for this day
@@ -1103,6 +1144,13 @@ def main():
                         # Report counters only (strict; no fallback injections)
                         try:
                             print(f"[pair_builder/counters] kept_days={kept_days} dropped_close={dropped_close} dropped_strength={dropped_strength}")
+                            emit_business_event(
+                                phase='Pairing',
+                                action='built',
+                                kept_days=int(kept_days),
+                                dropped_close=int(dropped_close),
+                                dropped_strength=int(dropped_strength)
+                            )
                         except Exception as _e:
                             logger.warning(f"[pair_builder/error] schedule_diagnostics: {_e}")
                         # Inject schedule before simulation (always log diagnostics)
@@ -1122,6 +1170,15 @@ def main():
                                 _syms = pair_schedule[_d]
                                 _sym_list = [s for s in _syms.keys() if not str(s).startswith('__')]
                                 print(f"  {_d}: {_sym_list}")
+                            try:
+                                emit_business_event(
+                                    phase='Pairing',
+                                    action='scheduled',
+                                    days=int(len(_sched_days)),
+                                    intersect_days=int(len(_inter))
+                                )
+                            except Exception:
+                                pass
                         except Exception:
                             pass
             except Exception as e:
@@ -1141,11 +1198,30 @@ def main():
             sched_days = [pd.Timestamp(sd).date() for sd in sched_days]
             inter = sorted(set(sim_days).intersection(sched_days))
             print(f"[diagnostics] sim_days={len(sim_days)} sched_days={len(sched_days)} intersect={len(inter)}")
+            try:
+                emit_business_event(
+                    phase='Pairing',
+                    action='intersection',
+                    sim_days=int(len(sim_days)),
+                    sched_days=int(len(sched_days)),
+                    intersect_days=int(len(inter))
+                )
+            except Exception:
+                pass
             if inter[:5]:
                 print(f"[diagnostics] first_intersect_sample={inter[:5]}")
             if len(sched_days) == 0:
                 # Explicit Case B/C diagnostic: no schedule → no fills will be produced
                 print("[FILLS] MISSING: no scheduled pairs in default window; unified_fills.csv will not be created.")
+                try:
+                    emit_business_event(
+                        phase='Validation',
+                        action='fills_missing',
+                        reason='no_scheduled_pairs',
+                        sim_days=int(len(sim_days))
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1181,6 +1257,16 @@ def main():
         # Compact single-line indicator before sim
         sys.stdout.write(f"[simulate] days={len(set(filtered_data.index.date))} bars={len(filtered_data)} symbols={len(tickers)}...\r")
         sys.stdout.flush()
+        try:
+            _sched2 = getattr(strategy, '_scheduled_day_trades', {}) or {}
+            _days2 = sorted([str(pd.Timestamp(k).date()) for k in _sched2.keys()]) if _sched2 else []
+            print(f"[SCHEDULE] (run) injected days={len(_days2)} sample={_days2[:5]}")
+            if _sched2:
+                _f2 = list(_sched2.keys())[0]
+                _sy2 = list((_sched2[_f2] or {}).keys())
+                print(f"[SCHEDULE] (run) first_day={pd.Timestamp(_f2).date()} symbols={_sy2[:10]}")
+        except Exception as _e:
+            print(f"[SCHEDULE] (run) introspection failed: {_e}")
         results = simulator.run_simulation(filtered_data)
         sim_secs = time.perf_counter() - t0_sim
         sys.stdout.write("\n")
@@ -1200,6 +1286,14 @@ def main():
                     config_file=config_file
                 )
                 print(f"\nResults saved for portfolio with ID: {_run_id}")
+                try:
+                    emit_business_event(
+                        phase='Validation',
+                        action='results_saved',
+                        run_id=str(_run_id)
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -2189,10 +2283,20 @@ def main():
         
         # Run backtest
         logger.info("Running backtest...")
+        try:
+            _sched2 = getattr(strategy, '_scheduled_day_trades', {}) or {}
+            _days2 = sorted([str(pd.Timestamp(k).date()) for k in _sched2.keys()]) if _sched2 else []
+            print(f"[SCHEDULE] (run) injected days={len(_days2)} sample={_days2[:5]}")
+            if _sched2:
+                _f2 = list(_sched2.keys())[0]
+                _sy2 = list((_sched2[_f2] or {}).keys())
+                print(f"[SCHEDULE] (run) first_day={pd.Timestamp(_f2).date()} symbols={_sy2[:10]}")
+        except Exception as _e:
+            print(f"[SCHEDULE] (run) introspection failed: {_e}")
         results = simulator.run_simulation(filtered_data)
         
         # Initialize result manager
-        result_manager = ResultManager() if args.save_results else None
+        result_manager = ResultManager(results_dir='results')
 
         # Always attempt unified fills export when saving results, regardless of audit-only printing gate
         if result_manager is not None and args.save_results:
@@ -2244,8 +2348,9 @@ def main():
                     # Export via ResultManager and write unconditional CSV/JSON artifacts for validation
                     try:
                         _ = result_manager.export_fills(fills_df, base_name='unified_fills')
-                    except Exception:
-                        pass
+                        print(f"[RUNNER-TRACE] export_fills called with DataFrame rows={fills_df.shape[0]}")
+                    except Exception as _e:
+                        print(f"[RUNNER-TRACE] export_fills raised: {_e}")
                     try:
                         from pathlib import Path as _P
                         _P('results').mkdir(exist_ok=True)
@@ -2254,6 +2359,14 @@ def main():
                             fills_df.to_json('results/unified_fills.json', orient='records', indent=2, date_format='iso')
                         except Exception:
                             pass
+                        print("[RUNNER-TRACE] Wrote results/unified_fills.csv via direct to_csv")
+                    except Exception:
+                        pass
+                        try:
+                            _df_out.to_csv('results/unified_fills.csv', index=False)
+                            print("[RUNNER-TRACE] Wrote results/unified_fills.csv via consolidated _df_out to_csv")
+                        except Exception as _e:
+                            print(f"[RUNNER-TRACE] _df_out to_csv failed: {_e}")
                     except Exception:
                         pass
                 # Diagnostics + hard-write from raw unified_fills list if still missing
@@ -2392,6 +2505,7 @@ def main():
                         pass
                 if result_manager is not None and fills_df is not None and not fills_df.empty:
                     art = result_manager.export_fills(fills_df, base_name='unified_fills')
+                    print(f"[RUNNER-TRACE] Final export_fills rows={fills_df.shape[0]} artifacts={art}")
                     summ = result_manager.summarize_fills(fills_df)
                     print("\nUnified Fills Summary:")
                     print(f"  Total fills: {summ.get('total_fills', 0)}  Turnover (BRL): {summ.get('turnover_brl', 0.0):,.2f}")
