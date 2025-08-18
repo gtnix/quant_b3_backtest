@@ -79,3 +79,30 @@ class AsyncJsonlLogger:
             pass
 
 
+def emit_business_event(phase: str, action: str, **fields) -> None:
+    """Lightweight helper to emit a structured JSONL business event.
+
+    Parameters:
+        phase: Canonical process phase (e.g., 'Universe','Scoring','Sizing','Pairing','Orders','Validation').
+        action: Short verb/noun describing the event within the phase (e.g., 'loaded','built','emitted','saved').
+        **fields: Additional structured key/value details.
+    """
+    try:
+        # Lazy import to avoid circular on module import
+        import time as _t
+        from engine import event_logger as _ev
+        if _ev is None:
+            return
+        payload = {
+            'phase': str(phase),
+            'action': str(action),
+            'ts': int(_t.time()),
+            'label': f"[{str(phase)}] {str(action)}",
+        }
+        # Merge extra fields last to allow explicit overrides
+        payload.update({k: v for k, v in fields.items()})
+        _ev.emit('business', payload)
+    except Exception:
+        # Never raise from logging helpers
+        pass
+

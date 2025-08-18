@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from engine.market_utils import prepare_fuzzy_data
+from engine.utils.async_logger import emit_business_event
 
 
 def export_fuzzy_components_to_csv(symbols: list[str], start_date: str, end_date: str, cfg: dict) -> str:
@@ -64,6 +65,18 @@ def export_fuzzy_components_to_csv(symbols: list[str], start_date: str, end_date
     Path('reports').mkdir(exist_ok=True)
     out_path = Path('reports') / f"fuzzy_components_{start_date.replace('-','')}-{end_date.replace('-','')}.csv"
     df_all.to_csv(out_path, index=False)
+    # Emit structured scoring summary for audit
+    try:
+        emit_business_event(
+            phase='Scoring',
+            action='computed',
+            rows=int(len(df_all)),
+            symbols=int(df_all['symbol'].nunique()),
+            start_date=str(start_date),
+            end_date=str(end_date)
+        )
+    except Exception:
+        pass
     return str(out_path)
 
 

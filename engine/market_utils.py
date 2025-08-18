@@ -1013,29 +1013,55 @@ class IndicatorService:
         start_dt = pd.to_datetime(start)
         warmup_days = max(3 * max(ema_periods), rsi_period + 1, atr_period + 1, warmup_min_sessions) + buffer_sessions
         start_warm = (start_dt - pd.tseries.offsets.BDay(warmup_days)).date().strftime('%Y-%m-%d')
-        # Fetch benchmark
-        ibov = self._fetch_daily(benchmark, start_warm, end)
-        ibov_available = not ibov.empty
-        if ibov_available:
-            # Normalize index to tz-naive daily dates to avoid tz/clock comparisons
+        # Helper: aggregate intraday to daily OHLCV if needed
+        def _to_daily_ohlcv(df_in: pd.DataFrame) -> pd.DataFrame:
+            if df_in is None or df_in.empty:
+                return pd.DataFrame()
+            df = df_in.copy()
             try:
-                ibov.index = pd.to_datetime(ibov.index).tz_localize(None).normalize()
+                idx = pd.to_datetime(df.index)
             except Exception:
-                ibov.index = pd.to_datetime(ibov.index).normalize()
+                return pd.DataFrame()
+            # Normalize to date; aggregate OHLCV
+            dates = idx.tz_localize(None).normalize() if getattr(idx, 'tz', None) is not None else idx.normalize()
+            df = df.copy()
+            df.index = dates
+            agg_map = {}
+            for c in ('open','high','low','close','volume'):
+                if c in df.columns:
+                    if c == 'open':
+                        agg_map[c] = 'first'
+                    elif c == 'high':
+                        agg_map[c] = 'max'
+                    elif c == 'low':
+                        agg_map[c] = 'min'
+                    elif c == 'close':
+                        agg_map[c] = 'last'
+                    elif c == 'volume':
+                        agg_map[c] = 'sum'
+            if not agg_map:
+                return pd.DataFrame()
+            daily = df.groupby(df.index).agg(agg_map)
+            daily = daily.sort_index()
+            return daily
+
+        # Fetch benchmark and aggregate to daily
+        ibov_raw = self._fetch_daily(benchmark, start_warm, end)
+        ibov = _to_daily_ohlcv(ibov_raw)
+        ibov_available = (ibov is not None and not ibov.empty)
+        if ibov_available:
             ibov = ibov.sort_index()
             ibov['ret'] = ibov['close'].pct_change()
         results: dict[str, pd.DataFrame] = {}
         for sym in symbols:
             try:
-                df = self._fetch_daily(sym, start_warm, end)
+                df_raw = self._fetch_daily(sym, start_warm, end)
+                if df_raw is None or df_raw.empty:
+                    continue
+                # Aggregate to daily OHLCV
+                df = _to_daily_ohlcv(df_raw)
                 if df is None or df.empty:
                     continue
-                # Normalize to tz-naive daily dates
-                try:
-                    df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
-                except Exception:
-                    df.index = pd.to_datetime(df.index).normalize()
-                df = df.sort_index()
                 # Align dates strictly (intersection) with benchmark if available; otherwise use symbol dates
                 common = df.index.intersection(ibov.index) if ibov_available else df.index
                 if len(common) == 0:
@@ -1065,12 +1091,19 @@ class IndicatorService:
                     # Align to index; if missing values, keep at 0 contribution
                     s_al = s.reindex(common)
                     ema_sum = ema_sum + ((df['close'].reindex(common) > s_al).astype(float) - (df['close'].reindex(common) < s_al).astype(float)) * 0.25
-                rsi_term = pd.Series(0.0, index=common)
-                rsi_al = ind['rsi'].reindex(common)
-                rsi_term = rsi_term.where(True, other=0.0)  # placeholder
-                rsi_term = pd.Series(0.0, index=common)
-                rsi_term[rsi_al > 65] = 0.25
-                rsi_term[rsi_al < 35] = -0.25
+                rsi_term = pd.Series(0.0, index=pd.Index(common))
+                rsi_series = ind.get('rsi')
+                if rsi_series is not None and not rsi_series.empty:
+                    rsi_al = rsi_series.reindex(common)
+                    try:
+                        mask_hi = (rsi_al.astype(float) > 65)
+                        mask_lo = (rsi_al.astype(float) < 35)
+                        mask_hi = mask_hi.reindex(rsi_term.index).fillna(False)
+                        mask_lo = mask_lo.reindex(rsi_term.index).fillna(False)
+                        rsi_term.loc[mask_hi] = 0.25
+                        rsi_term.loc[mask_lo] = -0.25
+                    except Exception:
+                        pass
                 score = ret_vs_ibov_term.astype(float) + ema_sum.fillna(0.0) + rsi_term.fillna(0.0)
                 # Slice to requested [start, end] using daily dates (tz-naive)
                 try:
@@ -1081,19 +1114,24 @@ class IndicatorService:
                     end_d = pd.to_datetime(end).tz_localize(None).normalize()
                 except Exception:
                     end_d = pd.to_datetime(end).normalize()
-                idx = score.index[(score.index >= start_d) & (score.index <= end_d)]
-                if len(idx) == 0:
-                    continue
-                out = pd.DataFrame(index=idx)
-                out['close'] = df['close'].reindex(idx)
-                out['ibov_return'] = ibov_ret.reindex(idx)
-                out['symbol_return'] = sym_ret.reindex(idx)
+                # Build output on the common aligned index; filter to [start,end] at the end
+                out = pd.DataFrame(index=common)
+                out['close'] = df['close'].reindex(common)
+                out['ibov_return'] = ibov_ret.reindex(common)
+                out['symbol_return'] = sym_ret.reindex(common)
                 for k, s in ind.items():
-                    out[k] = s.reindex(idx)
-                out['fuzzy_score'] = score.reindex(idx)
-                # Persist
-                results[sym] = out
-            except Exception:
+                    out[k] = s.reindex(common)
+                out['fuzzy_score'] = score.reindex(common)
+                # Final window slice
+                mask = (out.index >= start_d) & (out.index <= end_d)
+                out = out.loc[mask]
+                if not out.empty:
+                    results[sym] = out
+            except Exception as e:
+                try:
+                    print(f"[compute_daily_vectors] error for {sym}: {e}")
+                except Exception:
+                    pass
                 continue
         return results
 
@@ -1241,14 +1279,58 @@ class MarketDataRouter:
     def get_hourly_for_day(self, symbol: str, day: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
         meta = {'source': 'brapi_hourly', 'date': str(pd.to_datetime(day).date())}
         try:
+            # Prefer local cache first to avoid tz/window mismatches
+            from engine.loader import DataLoader
+            df_cache = DataLoader._load_best_intraday_cache(symbol, 'data/brapi_cache')
+            if df_cache is not None and not df_cache.empty:
+                df_local = df_cache.copy()
+                try:
+                    idx = pd.to_datetime(df_local.index)
+                except Exception:
+                    idx = df_local.index
+                # Treat tz-naive as session-local; only convert when tz-aware
+                if getattr(idx, 'tz', None) is not None:
+                    try:
+                        idx = idx.tz_convert('America/Sao_Paulo').tz_localize(None)
+                    except Exception:
+                        idx = idx.tz_localize(None)
+                df_local.index = idx
+                mask = (df_local.index.date == pd.to_datetime(day).date())
+                sliced = df_local.loc[mask]
+                if sliced is not None and not sliced.empty:
+                    return sliced.sort_index(), meta
+            # Fallback to hourly/ cache if intraday not present
+            try:
+                from pathlib import Path as _Path
+                import pandas as _pd
+                hourly_dir = _Path('data/brapi_cache/hourly')
+                f = next((p for p in hourly_dir.glob(f"{symbol}_*.parquet")), None)
+                if f and f.exists():
+                    dfh = _pd.read_parquet(f)
+                    idxh = _pd.to_datetime(dfh.index)
+                    if getattr(idxh, 'tz', None) is not None:
+                        try:
+                            idxh = idxh.tz_convert('America/Sao_Paulo').tz_localize(None)
+                        except Exception:
+                            idxh = idxh.tz_localize(None)
+                    dfh.index = idxh
+                    maskh = (dfh.index.date == pd.to_datetime(day).date())
+                    slicedh = dfh.loc[maskh]
+                    if slicedh is not None and not slicedh.empty:
+                        return slicedh.sort_index(), meta
+            except Exception:
+                pass
+            # Fallback to provider
             start = pd.to_datetime(day).strftime('%Y-%m-%d')
             end = (pd.to_datetime(day) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
             df = self._bp.get_hourly_data(symbol, start, end)
             if df is None:
                 return pd.DataFrame(), meta
             df = df.copy()
-            df.index = pd.to_datetime(df.index)
-            # Keep only this day
+            idx = pd.to_datetime(df.index)
+            if getattr(idx, 'tz', None) is not None:
+                idx = idx.tz_localize(None)
+            df.index = idx
             mask = (df.index.date == pd.to_datetime(day).date())
             df = df.loc[mask]
             return df.sort_index(), meta

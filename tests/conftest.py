@@ -41,6 +41,20 @@ def prepare_strategy(universe=None, atr: float = 2.0) -> FuzzyFajutoStrategy:
     sc = StrategyConfig(universe=list(universe))
     dummy_portfolio = MagicMock()
     dummy_portfolio.get_portfolio_value.return_value = 1_000_000.0
+    # Minimal stateful positions to allow MOC flatten
+    positions = {}
+    def _buy(sym, qty, price, ts):
+        positions[sym] = positions.get(sym, 0) + int(qty)
+        return True
+    def _sell(sym, qty, price, ts):
+        positions[sym] = positions.get(sym, 0) - int(qty)
+        return True
+    dummy_portfolio.buy.side_effect = _buy
+    dummy_portfolio.sell.side_effect = _sell
+    dummy_portfolio.positions = positions
+    def _update_prices(map_prices, ts):
+        return True
+    dummy_portfolio.update_prices.side_effect = _update_prices
     dummy_logger = MagicMock()
     ctx = StrategyContext(
         data_portal=None,
