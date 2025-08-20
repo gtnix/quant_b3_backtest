@@ -741,7 +741,10 @@ class EnhancedPortfolio:
             # Update existing aggregated record
             total_qty = inv.quantity + quantity
             total_cost = inv.quantity * inv.avg_cost + quantity * price
-            inv.avg_cost = total_cost / total_qty
+            if total_qty > 0:
+                inv.avg_cost = total_cost / total_qty
+            else:
+                inv.avg_cost = 0.0
             inv.quantity = total_qty
             inv.last_update = date
             
@@ -1594,7 +1597,17 @@ class EnhancedPortfolio:
                 total_quantity = pos.quantity + normalized_quantity
                 total_cost_basis = (pos.quantity * pos.avg_price) + trade_value
                 pos.quantity = total_quantity
-                pos.avg_price = total_cost_basis / total_quantity
+                
+                # Guard against division by zero when calculating average price
+                if total_quantity > 0:
+                    pos.avg_price = total_cost_basis / total_quantity
+                elif total_quantity == 0:
+                    # Position is flat, reset average price
+                    pos.avg_price = 0.0
+                else:
+                    # Negative quantity (short position), use weighted average
+                    pos.avg_price = normalized_price
+                
                 pos.current_price = normalized_price
                 pos.last_update = trade_date
             else:

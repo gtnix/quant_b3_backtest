@@ -130,6 +130,12 @@ pair_mode:
   dispersion_lookback: 60
   dispersion_low_quantile: 0.3
   tranche_scale_low_dispersion: 0.5
+  # Enhanced pairing parameters
+  pairing:
+    enabled: true
+    synchronization_mode: "all_universe"  # all_universe, available_signals, time_based
+    execution_delay_ms: 0                  # Delay between pair execution
+    neutrality_tolerance_brl: 100         # Acceptable BUY/SELL imbalance
 brapi:
   api_token: 5c1YnnPjkXaX2PFcLYjARZ
   base_url: https://brapi.dev/api
@@ -207,3 +213,14 @@ selic:
 strategy:
   execution:
     missing_open_bar_behavior: use_first_available
+  pairing:
+    enabled: true                    # Master switch for pairing mode
+    mode: "bidirectional"           # bidirectional, long_only, short_only
+    strict_neutrality: true         # Require perfect BUY/SELL balance
+    allow_partial_pairs: false      # Execute available pairs without waiting
+    max_pair_count: null            # Maximum pairs per day (null = unlimited)
+    min_signal_strength: 1.5       # Minimum signal strength for pairing
+    logging:
+      enabled: true                 # Enable detailed pairing logs
+      log_pair_formation: true      # Log individual pair decisions
+      log_rejected_signals: true    # Log signals that don't meet criteria
