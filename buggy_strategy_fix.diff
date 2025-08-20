@@ -1,0 +1,60 @@
+--- a/strategies/fuzzy_fajuto_strategy.py
++++ b/strategies/fuzzy_fajuto_strategy.py
+@@ -2215,6 +2215,10 @@
+                 # Leg 1: MARKET at open (uniform qty)
+                 if qty_uniform > 0:
+                     price_open = round(float(bar.open), 2)
++                    # CRITICAL FIX: Check if orders already emitted today before creating P1
++                    if self._are_orders_emitted_today(bar.symbol, current_date):
++                        self.context.logger.debug(f"Orders already emitted for {bar.symbol} on {current_date}, skipping P1")
++                        return []
+                     self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} open_market qty={qty_uniform} @open {price_open:.2f}")
+                     self._track_daily_execution(bar.symbol, {'order_type': OrderType.MARKET, 'quantity': qty_uniform, 'price': None, 'execution_price': price_open, 'attempt_name': 'Open Market', 'attempt_type': 'market'}, True, bar, side)
+                     intent_mkt = OrderIntent(
+@@ -2228,6 +2232,9 @@
+                     )
+                     self._mark_market_order_executed(current_date)
+                     intents.append(intent_mkt)
++                    
++                    # CRITICAL FIX: Mark orders as emitted immediately after P1 creation
++                    self._mark_orders_emitted(bar.symbol, current_date, ['market'])
+                 # Legs 2-4: LIMIT levels
+                 p2 = round(price_data['alpha_price'], 2); p3 = round(price_data['beta_price'], 2); p4 = round(price_data['gamma_price'], 2)
+                 # Use uniform qty for all limit levels; skip entirely if qty_uniform==0
+@@ -2241,6 +2248,9 @@
+                     self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p4, 'execution_price': p4, 'attempt_name': 'Limit Level 4', 'attempt_type': 'limit_gamma'}, False, bar, side)
+ 
+                 # Update fuzzy diagnostics row for this (date, symbol, side)
++                # CRITICAL FIX: Mark limit orders as emitted (P2, P3, P4)
++                if qty_uniform > 0:
++                    self._mark_orders_emitted(bar.symbol, current_date, ['limit_alpha', 'limit_beta', 'limit_gamma'])
+                 try:
+                     date_str = str(current_date)
+                     for i, r in enumerate(self._fuzzy_rows):
+@@ -1159,8 +1159,12 @@
+     def _limits_from_close(self, close_price: float, side: str) -> tuple[float, float, float]:
+         """Calculate P2, P3, P4 limit prices from close[T-1] per README specification."""
+         if side == 'BUY' or side == OrderSide.BUY:
+-            p2 = close_price * (1 - 0.005); p3 = close_price * (1 - 0.010); p4 = close_price * (1 - 0.015)
++            # README: Limit at close[T−1] × (1 − 0.5%) for BUY
++            p2 = close_price * 0.995  # -0.5%
++            p3 = close_price * 0.990  # -1.0% 
++            p4 = close_price * 0.985  # -1.5%
+         else:  # SELL
+-            p2 = close_price * (1 + 0.005); p3 = close_price * (1 + 0.010); p4 = close_price * (1 + 0.015)
++            # README: Limit at close[T−1] × (1 + 0.5%) for SELL
++            p2 = close_price * 1.005  # +0.5%
++            p3 = close_price * 1.010  # +1.0%
++            p4 = close_price * 1.015  # +1.5%
+         return (self._round_to_tick(p2), self._round_to_tick(p3), self._round_to_tick(p4))
+@@ -2145,7 +2149,10 @@
+         # Rule 2: Check if this is first bar of day (for market orders)
+         is_first_bar = self._is_first_bar_of_day(bar.symbol, current_date)
+ 
++        # CRITICAL FIX: Only emit P1 market orders on first bar of day
++        if not is_first_bar and not self._are_orders_emitted_today(bar.symbol, current_date):
++            self.context.logger.debug(f"Not first bar of day for {bar.symbol} on {current_date}, skipping order emission")
++            return self._process_existing_orders(bar, current_date)
++        
+         # Day-trade scheduled execution path (t+1 execution)
+         try:

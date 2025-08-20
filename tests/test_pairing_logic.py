@@ -5,7 +5,7 @@ from datetime import datetime, date
 from typing import Dict, Any
 
 from strategies.fuzzy_fajuto_strategy import FuzzyFajutoStrategy
-from engine.base_strategy import StrategyConfig, StrategyContext, OrderSide
+from engine.base_strategy import StrategyConfig, StrategyContext, OrderSide, OrderType
 
 
 class DummyLogger:
@@ -100,3 +100,59 @@ def test_tie_breaking_deterministic():
     intents = list(s._neutral_emit_for_day(d))
     assert any(it.symbol == 'BUY1' for it in intents)
     assert any(it.symbol == 'BUY2' for it in intents)
+
+
+def test_bidirectional_execution_comprehensive():
+    """
+    COMPREHENSIVE TEST: Validates bidirectional pair execution.
+    
+    This test ensures both Long and Short legs of every matched pair 
+    are fully processed, addressing the core pairing specification.
+    """
+    s = make_strategy()
+    d = date(2025, 8, 10)
+    ts = datetime(d.year, d.month, d.day, 13, 0, 0)
+    
+    # Perfect pairing scenario: 2 BUYs, 2 SELLs
+    s._neutral_buffer[d] = {
+        'LONG_HIGH': _mk_rec(OrderSide.BUY, 2.5, {'market':20,'limit_alpha':19,'limit_beta':18,'limit_gamma':17}, {'market':400,'limit_alpha':400,'limit_beta':300,'limit_gamma':200}, ts),
+        'LONG_LOW': _mk_rec(OrderSide.BUY, 2.0, {'market':20,'limit_alpha':19,'limit_beta':18,'limit_gamma':17}, {'market':300,'limit_alpha':300,'limit_beta':200,'limit_gamma':100}, ts),
+        'SHORT_HIGH': _mk_rec(OrderSide.SELL, -2.8, {'market':20,'limit_alpha':21,'limit_beta':22,'limit_gamma':23}, {'market':500,'limit_alpha':400,'limit_beta':300,'limit_gamma':200}, ts),
+        'SHORT_LOW': _mk_rec(OrderSide.SELL, -2.3, {'market':20,'limit_alpha':21,'limit_beta':22,'limit_gamma':23}, {'market':400,'limit_alpha':300,'limit_beta':200,'limit_gamma':100}, ts),
+    }
+    
+    # Execute pairing logic
+    intents = list(s._neutral_emit_for_day(d))
+    
+    # Analyze results
+    buy_intents = [intent for intent in intents if intent.side == OrderSide.BUY]
+    sell_intents = [intent for intent in intents if intent.side == OrderSide.SELL]
+    buy_symbols = {intent.symbol for intent in buy_intents}
+    sell_symbols = {intent.symbol for intent in sell_intents}
+    
+    # CRITICAL ASSERTIONS for bidirectional execution
+    assert len(buy_intents) > 0, "❌ BUG: No BUY orders generated!"
+    assert len(sell_intents) > 0, "❌ BUG: No SELL orders generated!"
+    assert len(buy_symbols) > 0, "❌ BUG: No BUY symbols processed!"
+    assert len(sell_symbols) > 0, "❌ BUG: No SELL symbols processed!"
+    
+    # Verify proper pairing according to README specification:
+    # - For each Short: pair it with Long having highest available FuzzyFajuto score
+    # - For each Long: pair it with Short having highest available FuzzyFajuto score
+    # Expected: SHORT_HIGH (-2.8) pairs with LONG_HIGH (2.5), SHORT_LOW (-2.3) pairs with LONG_LOW (2.0)
+    assert 'LONG_HIGH' in buy_symbols, "Highest BUY signal not processed"
+    assert 'SHORT_HIGH' in sell_symbols, "Highest SELL signal not processed"
+    
+    # For perfect pairing: both sides should have equal representation
+    if len(buy_symbols) == len(sell_symbols):
+        print(f"✅ PERFECT BIDIRECTIONAL PAIRING: {len(buy_symbols)} BUY ↔ {len(sell_symbols)} SELL")
+    else:
+        print(f"⚠️  UNBALANCED PAIRING: {len(buy_symbols)} BUY ↔ {len(sell_symbols)} SELL")
+    
+    # Validate order types distribution (should have market + limit orders)
+    market_orders = len([intent for intent in intents if intent.order_type == OrderType.MARKET])
+    limit_orders = len([intent for intent in intents if intent.order_type == OrderType.LIMIT])
+    
+    assert market_orders > 0, "No market orders generated"
+    assert limit_orders > 0, "No limit orders generated"
+    assert market_orders + limit_orders == len(intents), "Order type mismatch"

@@ -1,6 +1,6 @@
 ## Introduction
 
-This repository implements a professional, rules-based backtesting engine for the Brazilian market (B3) and documents the FuzzyFajuto strategy. The strategy is fully specified and instrumented for institutional auditability: indicator definitions, fuzzy scoring, position sizing under B3 board-lot rules, order placement (market + passive limits), bidirectional Buy↔Sell pairing, and daily end-of-day closing (MOC).
+This repository implements a professional, rules-based backtesting engine for the Brazilian market (B3) and documents the FuzzyFajuto strategy. The strategy is fully specified and instrumented for institutional auditability: indicator definitions, fuzzy scoring, position sizing under B3 board-lot rules, order placement (market + passive limits), bidirectional Long↔Short pairing, and daily end-of-day closing (MOC).
 
 The ticker universe is sourced from `data/portfolio.csv` (first column = ticker). When you run without `--tickers`, the engine automatically reads this file as the single source of truth.
 
@@ -13,7 +13,7 @@ The strategy computes a daily FuzzyFajuto score per symbol using daily indicator
 - Close vs EMAs(3, 5, 10, 15, 20): +0.25 if close > EMA(period), −0.25 if close < EMA(period) (applied per period).
 - RSI: RSI > 65 → +0.25; RSI < 35 → −0.25.
 
-The total FuzzyFajuto score is the sum of the above contributions. It is a continuous scalar where larger positive values favor long exposure and large negative values favor sells exposure.
+The total FuzzyFajuto score is the sum of the above contributions. It is a continuous scalar where larger positive values favor long exposure and large negative values favor short exposure.
 
 ## Position Sizing (B3 Board-Lot)
 
@@ -39,23 +39,23 @@ The same rounding policy is used consistently whenever quantities are calculated
 
 ## Trading Rules (Entry & Exit)
 
-- If FuzzyFajuto ≥ +1.50 → Generate Buy orders for tomorrow.
-- If FuzzyFajuto ≤ −1.50 → Generate Sell orders for tomorrow.
+- If FuzzyFajuto ≥ +1.50 → Generate Long orders for tomorrow.
+- If FuzzyFajuto ≤ −1.50 → Generate Short orders for tomorrow.
 
-For both Buy and Sell signals, four orders per side are emitted:
+For both Long and Short signals, four orders per side are emitted:
 1. Market at open (first intraday bar of the day).
-2. Passive limit at close[T−1] × (1 − 0.005) for Buy; (1 + 0.005) for Sell.
-3. Passive limit at close[T−1] × (1 − 0.010) for Buy; (1 + 0.010) for Sell.
-4. Passive limit at close[T−1] × (1 − 0.015) for Buy; (1 + 0.015) for Sell.
+2. Passive limit at close[T−1] × (1 − 0.005) for Long; (1 + 0.005) for Short.
+3. Passive limit at close[T−1] × (1 − 0.010) for Long; (1 + 0.010) for Short.
+4. Passive limit at close[T−1] × (1 − 0.015) for Long; (1 + 0.015) for Short.
 
-All open positions are closed at the auction call (end-of-day) via Market-on-Close (MOC) orders.
+All open positions are flattened at the auction call (end-of-day) via Market-on-Close (MOC) orders.
 
 ## Pair Matching Engine (Bidirectional)
 
 The system enforces bidirectional pairing when `RISK_PAIR_MATCHING=True`:
-- For each Sell: pair it with the Buy having the highest available FuzzyFajuto score.
-- For each Buy: pair it with the Sell having the highest available FuzzyFajuto score.
-- If counts differ: leftover Buys or Sells remain unpaired.
+- For each Short: pair it with the Long having the highest available FuzzyFajuto score.
+- For each Long: pair it with the Short having the highest available FuzzyFajuto score.
+- If counts differ: leftover Long or Shorts remain unpaired.
 - Tie-breaking: sort by descending fuzzy score, then apply a deterministic secondary key (symbol lexical order).
 
 Pairing is applied before order emission, and all four attempts (market, limit_alpha, limit_beta, limit_gamma) are sized and emitted per leg, with board-lot rounding.
@@ -75,8 +75,8 @@ Pairing is applied before order emission, and all four attempts (market, limit_a
 ### Unit Tests
 - `tests/test_tranche_sizing.py`: validates round-lot enforcement and level monotonicity.
 - `tests/test_pairing_logic.py`: bidirectional pairing scenarios and deterministic tie-breaking:
-  - More Buys than Sells → leftover Buys.
-  - More Sells than Buys → leftover Sells.
+  - More Longs than Shorts → leftover Longs.
+  - More Shorts than Longs → leftover Shorts.
   - Equal counts → all paired.
   - Tie-breaking: equal fuzzy scores → deterministic symbol-based ordering.
 
@@ -104,15 +104,15 @@ Sizing examples reproduced (per-tranche results ×4):
 - VALE3 @ 53.32 → ≈ 234 → 200 ×4.
 - GGBR4 @ 16.23 → ≈ 770 → 800 ×4.
 
-Entry/Exit examples (BUY):
+Entry/Exit examples (Long):
 - Open: market at first bar.
 - Limits: close[T−1] × (0.995, 0.990, 0.985).
-- MOC: flatten at auction call.
+- MOC: flatten at last day bar.
 
-Entry/Exit examples (SELL):
+Entry/Exit examples (SHORT):
 - Open: market at first bar.
 - Limits: close[T−1] × (1.005, 1.010, 1.015).
-- MOC: flatten at auction call.
+- MOC: flatten at last day bar.
 
 ## References
 
@@ -121,4 +121,3 @@ Entry/Exit examples (SELL):
 - Data & reports:
   - Universe: `data/portfolio.csv`.
   - Reports: `reports/portfolio_fuzzy_indicators.csv`, `results/unified_fills.*`.
-

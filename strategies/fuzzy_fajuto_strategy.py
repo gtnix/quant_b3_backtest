@@ -310,7 +310,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
         self.first_bar_of_day = {}      # symbol -> {date: bool} - track first bar processing
         
         # Neutrality state (market-neutral final gate)
-        self.RISK_MARKET_NEUTRAL: bool = False
+        self.RISK_MARKET_NEUTRAL: bool = True
         # Strict pairing: emit at most one BUY and one SELL symbol per day (net-neutral pair)
         self.RISK_STRICT_ONE_PAIR: bool = True
         self._neutral_buffer: Dict[date, Dict[str, Dict[str, Any]]] = {}
@@ -1397,10 +1397,9 @@ class FuzzyFajutoStrategy(BaseStrategy):
                         px = float(prices.get(typ) or 0.0)
                         if px <= 0:
                             continue
-                        raw = notional / px
-                        shares_int = int(raw)
-                        remainder = shares_int % 100
-                        rounded = ((shares_int // 100) + 1) * 100 if remainder >= 50 else (shares_int // 100) * 100
+                        # Use standardized B3 board-lot rounding from utils
+                        from engine.utils import calculate_tranche_quantity
+                        rounded = calculate_tranche_quantity(notional, px)
                         if rounded <= 0:
                             continue
                         sym_q[typ] = int(rounded)
@@ -1410,32 +1409,6 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 return qty_map, total
             buy_qty, achieved_buy = to_qty(buy_alloc)
             sell_qty, achieved_sell = to_qty(sell_alloc)
-
-        def to_qty(alloc: Dict[str, Dict[str, float]]) -> Tuple[Dict[str, Dict[str, int]], float]:
-            qty_map: Dict[str, Dict[str, int]] = {}
-            total = 0.0
-            for sym, sym_use in alloc.items():
-                if sym.startswith('_'):
-                    continue
-                rec = buffer[sym]
-                prices = rec['prices']
-                sym_q: Dict[str, int] = {'market': 0, 'limit_alpha': 0, 'limit_beta': 0}
-                for typ in ('market', 'limit_alpha', 'limit_beta'):
-                    notional = sym_use.get(typ, 0.0)
-                    if notional <= 0:
-                        continue
-                    px = float(prices[typ] or 0.0)
-                    if px <= 0:
-                        continue
-                    raw = notional / px
-                    rounded = self._round_to_lot_size(raw)
-                    if rounded <= 0:
-                        continue
-                    sym_q[typ] = int(rounded)
-                    total += px * rounded
-                if any(v > 0 for v in sym_q.values()):
-                    qty_map[sym] = sym_q
-            return qty_map, total
 
         # In pairing mode, compute achieved totals for neutrality diagnostics
         if getattr(self, 'RISK_PAIR_MATCHING', False):
@@ -1860,6 +1833,121 @@ class FuzzyFajutoStrategy(BaseStrategy):
         
         return False
     
+    def _get_robust_prev_close(self, symbol: str, current_date: date, sched: dict, bar: Bar) -> float:
+        """
+        Get previous close price with robust fallback chain.
+        
+        This method implements multiple fallback strategies to ensure we always
+        have a valid previous close price for quantity calculation.
+        
+        Priority order:
+        1. Use scheduled base_close_t (preferred)
+        2. Get from daily_data directly (search back up to 5 days)
+        3. Use current bar's close as approximation
+        4. Use current bar's open
+        5. Return NaN and log error (last resort)
+        
+        Args:
+            symbol: Trading symbol
+            current_date: Current trading date
+            sched: Schedule dictionary for the symbol
+            bar: Current market data bar
+            
+        Returns:
+            float: Previous close price or NaN if all fallbacks fail
+        """
+        import numpy as np
+        from datetime import timedelta
+        import pandas as pd
+        
+        # Priority 1: Use scheduled base_close_t
+        prev_close = sched.get('base_close_t')
+        if prev_close is not None and not np.isnan(float(prev_close)) and prev_close > 0:
+            return float(prev_close)
+        
+        # Priority 2: Get from daily_data directly
+        try:
+            daily_df = self.daily_data.get(symbol)
+            if daily_df is not None and not daily_df.empty:
+                # Search back up to 5 days for previous trading day
+                for days_back in range(1, 6):
+                    check_date = current_date - timedelta(days=days_back)
+                    check_ts = pd.Timestamp(check_date)
+                    if check_ts in daily_df.index and 'close' in daily_df.columns:
+                        close_val = float(daily_df.loc[check_ts, 'close'])
+                        if close_val > 0:
+                            self.context.logger.info(f"✅ Using daily_data fallback for {symbol}: close[T-{days_back}] = {close_val:.2f}")
+                            return close_val
+        except Exception as e:
+            self.context.logger.warning(f"Daily_data fallback failed for {symbol}: {e}")
+        
+        # Priority 3: Use current bar's close as approximation
+        if bar.close > 0:
+            self.context.logger.warning(f"⚠️ Using current bar close as fallback for {symbol}: {bar.close:.2f}")
+            return float(bar.close)
+        
+        # Priority 4: Use current bar's open
+        if bar.open > 0:
+            self.context.logger.warning(f"⚠️ Using current bar open as fallback for {symbol}: {bar.open:.2f}")
+            return float(bar.open)
+        
+        # Priority 5: Last resort - log error and return NaN
+        self.context.logger.error(f"❌ ALL FALLBACKS FAILED for {symbol} on {current_date}")
+        self.context.logger.error(f"   Schedule keys: {list(sched.keys())}")
+        self.context.logger.error(f"   Bar: O:{bar.open} H:{bar.high} L:{bar.low} C:{bar.close}")
+        return float('nan')
+    
+    def _validate_schedule_health(self, current_date: date) -> Dict[str, Any]:
+        """
+        Validate schedule health for current date.
+        
+        This method checks for missing or invalid base_close_t values
+        in the scheduled day trades to help diagnose P1-only issues.
+        
+        Args:
+            current_date: Date to validate
+            
+        Returns:
+            Dictionary with health report
+        """
+        import numpy as np
+        from typing import Dict, Any
+        
+        scheduled_today = self._scheduled_day_trades.get(current_date, {})
+        
+        health_report = {
+            'date': current_date,
+            'total_symbols': len(scheduled_today),
+            'missing_base_close_t': [],
+            'invalid_base_close_t': [],
+            'healthy_symbols': []
+        }
+        
+        for symbol, sched in scheduled_today.items():
+            base_close_t = sched.get('base_close_t')
+            
+            if base_close_t is None:
+                health_report['missing_base_close_t'].append(symbol)
+            elif np.isnan(float(base_close_t)) or float(base_close_t) <= 0:
+                health_report['invalid_base_close_t'].append((symbol, base_close_t))
+            else:
+                health_report['healthy_symbols'].append(symbol)
+        
+        # Log issues
+        if health_report['missing_base_close_t']:
+            self.context.logger.warning(f"⚠️ Missing base_close_t for: {health_report['missing_base_close_t']}")
+            self.context.logger.warning(f"   These symbols will have qty_uniform=0 (P1-only orders)")
+        
+        if health_report['invalid_base_close_t']:
+            self.context.logger.warning(f"⚠️ Invalid base_close_t for: {health_report['invalid_base_close_t']}")
+            self.context.logger.warning(f"   These symbols will have qty_uniform=0 (P1-only orders)")
+        
+        if health_report['total_symbols'] > 0:
+            healthy_pct = len(health_report['healthy_symbols']) / health_report['total_symbols'] * 100
+            self.context.logger.info(f"📊 Schedule health for {current_date}: {healthy_pct:.1f}% healthy ({len(health_report['healthy_symbols'])}/{health_report['total_symbols']})")
+        
+        return health_report
+    
     def _simulate_fill_with_stored_prices(self, order_type: str, attempt_type: str, symbol: str, trading_date: date, bar: Bar) -> bool:
         """
         Enhanced fill simulation using stored immutable prices (Section 7 compliance).
@@ -2146,9 +2234,23 @@ class FuzzyFajutoStrategy(BaseStrategy):
         # Rule 2: Check if this is first bar of day (for market orders)
         is_first_bar = self._is_first_bar_of_day(bar.symbol, current_date)
 
+        # CRITICAL FIX: Only emit P1 market orders on first bar of day
+        if not is_first_bar and not self._are_orders_emitted_today(bar.symbol, current_date):
+            self.context.logger.debug(f"Not first bar of day for {bar.symbol} on {current_date}, skipping order emission")
+            return self._process_existing_orders(bar, current_date)
+        
         # Day-trade scheduled execution path (t+1 execution)
         try:
             scheduled_today = self._scheduled_day_trades.get(current_date, {})
+            
+            # Validate schedule health on first bar of day for any symbol
+            if hasattr(self, '_last_schedule_validation_date'):
+                if self._last_schedule_validation_date != current_date:
+                    self._validate_schedule_health(current_date)
+                    self._last_schedule_validation_date = current_date
+            else:
+                self._validate_schedule_health(current_date)
+                self._last_schedule_validation_date = current_date
             # If missing schedule (e.g., unit tests), synthesize from previous day's close
             if bar.symbol not in scheduled_today:
                 try:
@@ -2174,7 +2276,13 @@ class FuzzyFajutoStrategy(BaseStrategy):
                                     'fuzzy_score_t': float(abs(getattr(self, '_last_signal_strength', 0.0)))
                                 }
                                 scheduled_today = self._scheduled_day_trades.get(current_date, {})
-                except Exception:
+                except Exception as e:
+                    self.context.logger.error(f"❌ Schedule fallback creation failed for {bar.symbol} on {current_date}: {e}")
+                    self.context.logger.error(f"   Daily_data keys: {list(self.daily_data.keys())}")
+                    self.context.logger.error(f"   Daily_data[{bar.symbol}] exists: {bar.symbol in self.daily_data}")
+                    if bar.symbol in self.daily_data:
+                        df = self.daily_data[bar.symbol]
+                        self.context.logger.error(f"   Daily_data shape: {df.shape}, latest: {df.index.max() if not df.empty else 'empty'}")
                     pass
             if bar.symbol in scheduled_today:
                 sched = scheduled_today[bar.symbol]
@@ -2203,7 +2311,7 @@ class FuzzyFajutoStrategy(BaseStrategy):
                     pass
                 # No dynamic tranche scaling; fixed 12,500 per leg with 50,000 total and 4 tranches
                 # Use previous day's close as sizing anchor for all legs to keep uniform lots
-                prev_close = float(sched.get('base_close_t', float('nan')))
+                prev_close = self._get_robust_prev_close(bar.symbol, current_date, sched, bar)
 
                 intents: List[OrderIntent] = []
                 # Compute uniform quantity por tranche usando close T-1 e arredondamento agressivo
@@ -2216,6 +2324,10 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 # Leg 1: MARKET at open (uniform qty)
                 if qty_uniform > 0:
                     price_open = round(float(bar.open), 2)
+                    # CRITICAL FIX: Check if orders already emitted today before creating P1
+                    if self._are_orders_emitted_today(bar.symbol, current_date):
+                        self.context.logger.debug(f"Orders already emitted for {bar.symbol} on {current_date}, skipping P1")
+                        return []
                     self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} open_market qty={qty_uniform} @open {price_open:.2f}")
                     self._track_daily_execution(bar.symbol, {'order_type': OrderType.MARKET, 'quantity': qty_uniform, 'price': None, 'execution_price': price_open, 'attempt_name': 'Open Market', 'attempt_type': 'market'}, True, bar, side)
                     intent_mkt = OrderIntent(
@@ -2229,18 +2341,33 @@ class FuzzyFajutoStrategy(BaseStrategy):
                     )
                     self._mark_market_order_executed(current_date)
                     intents.append(intent_mkt)
+                    
+                    # CRITICAL FIX: Mark orders as emitted immediately after P1 creation
+                    self._mark_orders_emitted(bar.symbol, current_date, ['market'])
                 # Legs 2-4: LIMIT levels
                 p2 = round(price_data['alpha_price'], 2); p3 = round(price_data['beta_price'], 2); p4 = round(price_data['gamma_price'], 2)
                 # Use uniform qty for all limit levels; skip entirely if qty_uniform==0
                 self._store_daily_order_quantities(bar.symbol, current_date, (intents[0].quantity if intents else 0), qty_uniform, qty_uniform, qty_uniform)
                 if qty_uniform > 0:
                     self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_2 qty={qty_uniform} @ {p2:.2f}")
-                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p2, 'execution_price': p2, 'attempt_name': 'Limit Level 2', 'attempt_type': 'limit_alpha'}, False, bar, side)
+                    # FIX: Use proper fill simulation instead of hardcoded False
+                    alpha_filled = self._simulate_fill_with_stored_prices(OrderType.LIMIT, 'limit_alpha', bar.symbol, current_date, bar)
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p2, 'execution_price': p2, 'attempt_name': 'Limit Level 2', 'attempt_type': 'limit_alpha'}, alpha_filled, bar, side)
                     self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_3 qty={qty_uniform} @ {p3:.2f}")
-                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p3, 'execution_price': p3, 'attempt_name': 'Limit Level 3', 'attempt_type': 'limit_beta'}, False, bar, side)
+                    # FIX: Use proper fill simulation instead of hardcoded False
+                    beta_filled = self._simulate_fill_with_stored_prices(OrderType.LIMIT, 'limit_beta', bar.symbol, current_date, bar)
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p3, 'execution_price': p3, 'attempt_name': 'Limit Level 3', 'attempt_type': 'limit_beta'}, beta_filled, bar, side)
                     self.context.logger.info(f"Schedule t+1 legs: {bar.symbol} {side.name} limit_4 qty={qty_uniform} @ {p4:.2f}")
-                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p4, 'execution_price': p4, 'attempt_name': 'Limit Level 4', 'attempt_type': 'limit_gamma'}, False, bar, side)
+                    # FIX: Use proper fill simulation instead of hardcoded False
+                    gamma_filled = self._simulate_fill_with_stored_prices(OrderType.LIMIT, 'limit_gamma', bar.symbol, current_date, bar)
+                    self._track_daily_execution(bar.symbol, {'order_type': OrderType.LIMIT, 'quantity': qty_uniform, 'price': p4, 'execution_price': p4, 'attempt_name': 'Limit Level 4', 'attempt_type': 'limit_gamma'}, gamma_filled, bar, side)
+                else:
+                    self.context.logger.info(f"⚠️ Skipping P2-P4 for {bar.symbol}: qty_uniform=0 (prev_close issue resolved with fallback)")
+                    self.context.logger.info(f"   This prevents misleading execution metrics in JSON results")
 
+                # CRITICAL FIX: Mark limit orders as emitted (P2, P3, P4)
+                if qty_uniform > 0:
+                    self._mark_orders_emitted(bar.symbol, current_date, ['limit_alpha', 'limit_beta', 'limit_gamma'])
                 # Update fuzzy diagnostics row for this (date, symbol, side)
                 try:
                     date_str = str(current_date)
@@ -3176,7 +3303,12 @@ class FuzzyFajutoStrategy(BaseStrategy):
                     'limits_used': {'limit_level_2': p2, 'limit_level_3': p3, 'limit_level_4': p4},
                     'fuzzy_score_t': float(abs(getattr(self, '_last_signal_strength', 0.0)))
                 }
-        except Exception:
+        except Exception as e:
+            self.context.logger.error(f"❌ End-of-day schedule creation failed for date {d}: {e}")
+            self.context.logger.error(f"   This will cause base_close_t to be missing tomorrow")
+            self.context.logger.error(f"   Universe symbols: {len(universe) if 'universe' in locals() else 'unknown'}")
+            self.context.logger.error(f"   Daily_data available: {list(self.daily_data.keys())}")
+            # Continue processing other symbols
             pass
         
         moc_orders_generated = 0
