@@ -103,7 +103,10 @@ class LayerExecutionAnalyzer:
             
             # Calculate exposure percentages
             total_quantity = layer_stats['Total_Quantity'].sum()
-            layer_stats['Exposure_Pct'] = (layer_stats['Total_Quantity'] / total_quantity * 100).round(1)
+            if total_quantity > 0:
+                layer_stats['Exposure_Pct'] = (layer_stats['Total_Quantity'] / total_quantity * 100).round(1)
+            else:
+                layer_stats['Exposure_Pct'] = 0.0
             
             # Calculate effective costs (basis points)
             layer_stats['Effective_Cost_BP'] = self._calculate_effective_costs(layer_stats)

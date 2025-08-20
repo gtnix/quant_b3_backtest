@@ -2276,21 +2276,17 @@ class BacktestSimulator:
                 except Exception:
                     pass
             else:
-                # For SELL, first ensure we have shares to sell
-                position = self.portfolio.positions.get(ticker)
-                if position is None or position.quantity <= 0:
-                    logger.warning(f"No shares available to sell in {ticker}")
-                    return
-                sell_quantity = min(position.quantity, int(quantity))
+                # For SELL, allow short selling for market-neutral strategies
+                # Portfolio layer will handle position management and short selling logic
                 success = self.portfolio.sell(
                     ticker=ticker,
-                    quantity=sell_quantity,
+                    quantity=int(quantity),  # Use full requested quantity
                     price=price,
                     trade_date=signal.timestamp,
                     trade_type=trade_type
                 )
                 try:
-                    print(f"[PORTFOLIO-RESULT] SELL {ticker} qty={sell_quantity} price={price} -> {success}")
+                    print(f"[PORTFOLIO-RESULT] SELL {ticker} qty={int(quantity)} price={price} -> {success}")
                 except Exception:
                     pass
                 if not success:
@@ -2301,7 +2297,7 @@ class BacktestSimulator:
                         timestamp=signal.timestamp,
                         symbol=ticker,
                         side='SELL',
-                        quantity=int(sell_quantity),
+                        quantity=int(quantity),
                         price=price,
                         metadata={'order_type': 'LIMIT', 'attempt_type': 'limit'}
                     )
@@ -2328,7 +2324,7 @@ class BacktestSimulator:
                             order_id=f"sim_{len(self.trade_log)}",
                             symbol=ticker,
                             side=OrderSide.SELL,
-                            quantity=sell_quantity,
+                            quantity=int(quantity),
                             price=price,
                             timestamp=signal.timestamp,
                             metadata=getattr(signal, 'metadata', {})

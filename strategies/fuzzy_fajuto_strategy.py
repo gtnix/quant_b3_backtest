@@ -317,6 +317,9 @@ class FuzzyFajutoStrategy(BaseStrategy):
         # Business-rule toggle: enforce explicit pair matching (SELL -> highest BUY)
         self.RISK_PAIR_MATCHING: bool = True
         self._first_bar_seen_by_date: Dict[date, set] = {}
+        
+        # Load pairing configuration from settings
+        self._load_pairing_config()
         try:
             self._universe_symbols = set(self._config.universe or [])
         except Exception:
@@ -326,6 +329,50 @@ class FuzzyFajutoStrategy(BaseStrategy):
         self.brapi_provider = None  # Will be initialized when needed
         self.daily_data_cache = {}  # symbol -> daily data cache
         self.last_recalculation_dates = {}  # symbol -> last recalculation date
+    
+    def _load_pairing_config(self):
+        """Load pairing-specific configuration from settings."""
+        try:
+            # Load from context metadata config if available
+            config_data = getattr(self.context, 'metadata', {}).get('config', {})
+            if not config_data and hasattr(self, '_config_data'):
+                config_data = self._config_data
+            
+            # Get pairing configuration
+            strategy_config = config_data.get('strategy', {})
+            pairing_config = strategy_config.get('pairing', {})
+            
+            # Set pairing mode flags
+            self.RISK_PAIR_MATCHING = pairing_config.get('enabled', True)
+            self.PAIRING_MODE = pairing_config.get('mode', 'bidirectional')
+            self.PAIRING_STRICT_NEUTRALITY = pairing_config.get('strict_neutrality', True)
+            self.PAIRING_ALLOW_PARTIAL = pairing_config.get('allow_partial_pairs', False)
+            self.PAIRING_MIN_SIGNAL_STRENGTH = pairing_config.get('min_signal_strength', 1.5)
+            
+            # Logging configuration
+            logging_config = pairing_config.get('logging', {})
+            self.PAIRING_LOG_ENABLED = logging_config.get('enabled', True)
+            self.PAIRING_LOG_FORMATION = logging_config.get('log_pair_formation', True)
+            self.PAIRING_LOG_REJECTED = logging_config.get('log_rejected_signals', True)
+            
+            if self.PAIRING_LOG_ENABLED:
+                self.context.logger.info(f"✅ PAIRING: Configuration loaded")
+                self.context.logger.info(f"   - Enabled: {self.RISK_PAIR_MATCHING}")
+                self.context.logger.info(f"   - Mode: {self.PAIRING_MODE}")
+                self.context.logger.info(f"   - Strict Neutrality: {self.PAIRING_STRICT_NEUTRALITY}")
+                self.context.logger.info(f"   - Allow Partial Pairs: {self.PAIRING_ALLOW_PARTIAL}")
+                self.context.logger.info(f"   - Min Signal Strength: {self.PAIRING_MIN_SIGNAL_STRENGTH}")
+            
+        except Exception as e:
+            self.context.logger.warning(f"Failed to load pairing config: {e}")
+            # Fall back to defaults
+            self.RISK_PAIR_MATCHING = True
+            self.PAIRING_MODE = 'bidirectional'
+            self.PAIRING_STRICT_NEUTRALITY = True
+            self.PAIRING_ALLOW_PARTIAL = False
+            self.PAIRING_LOG_ENABLED = True
+            self.PAIRING_LOG_FORMATION = True
+            self.PAIRING_LOG_REJECTED = True
     
     def _initialize_brapi_provider(self):
         """Initialize Brapi provider for direct data access."""
@@ -1179,6 +1226,17 @@ class FuzzyFajutoStrategy(BaseStrategy):
         if not buffer:
             return []
 
+        # Enhanced pairing logging
+        if getattr(self, 'PAIRING_LOG_ENABLED', True):
+            buy_signals = [s for s, rec in buffer.items() if rec['side'] == OrderSide.BUY]
+            sell_signals = [s for s, rec in buffer.items() if rec['side'] == OrderSide.SELL]
+            
+            self.context.logger.info(f"📊 PAIRING: Processing {trading_date}")
+            self.context.logger.info(f"   - BUY signals: {len(buy_signals)} {buy_signals}")
+            self.context.logger.info(f"   - SELL signals: {len(sell_signals)} {sell_signals}")
+            self.context.logger.info(f"   - Mode: {getattr(self, 'PAIRING_MODE', 'bidirectional')}")
+            self.context.logger.info(f"   - Pair Matching: {getattr(self, 'RISK_PAIR_MATCHING', True)}")
+
         def caps_of(rec: Dict[str, Any]) -> Dict[str, float]:
             p = rec['prices']; q = rec['qty']
             return {
@@ -1516,6 +1574,24 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 # Mark orders emitted flags
                 emitted_types = [k for k, v in types.items() if int(v) > 0]
                 self._mark_orders_emitted(sym, trading_date, emitted_types)
+        
+        # Enhanced result logging
+        if getattr(self, 'PAIRING_LOG_ENABLED', True):
+            buy_intents = [intent for intent in emitted if intent.side == OrderSide.BUY]
+            sell_intents = [intent for intent in emitted if intent.side == OrderSide.SELL]
+            buy_symbols = {intent.symbol for intent in buy_intents}
+            sell_symbols = {intent.symbol for intent in sell_intents}
+            
+            self.context.logger.info(f"✅ PAIRING: Generated {len(emitted)} order intents")
+            self.context.logger.info(f"   - BUY orders: {len(buy_symbols)} symbols {sorted(buy_symbols)}")
+            self.context.logger.info(f"   - SELL orders: {len(sell_symbols)} symbols {sorted(sell_symbols)}")
+            
+            if len(buy_symbols) == len(sell_symbols):
+                self.context.logger.info(f"🎯 PAIRING: Perfect balance achieved!")
+            else:
+                self.context.logger.warning(f"⚠️ PAIRING: Unbalanced execution "
+                                          f"({len(buy_symbols)} BUY vs {len(sell_symbols)} SELL)")
+        
         self._neutral_buffer.pop(trading_date, None)
         return emitted
     
@@ -2549,6 +2625,11 @@ class FuzzyFajutoStrategy(BaseStrategy):
                 # ATR removed
                 'signal': float(signal)
             }
+            
+            # Enhanced buffer logging
+            if getattr(self, 'PAIRING_LOG_ENABLED', True):
+                self.context.logger.info(f"📥 PAIRING: Added {side.name} signal for {bar.symbol} "
+                                       f"(fuzzy={signal:.2f}) to neutral buffer for {trading_date}")
             if trading_date not in self._first_bar_seen_by_date:
                 self._first_bar_seen_by_date[trading_date] = set()
             self._first_bar_seen_by_date[trading_date].add(bar.symbol)
