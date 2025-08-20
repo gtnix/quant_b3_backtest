@@ -2014,13 +2014,50 @@ class BacktestSimulator:
         else:
             return 'very_low_inflation'  # Very low inflation environment
     
+    def _get_price_from_data(self, price_data, field: str, default=0.0):
+        """
+        Extract price field from price_data, handling both pandas Series and namedtuple types.
+        
+        Args:
+            price_data: Price data (pandas Series, namedtuple, or dict)
+            field: Field name ('open', 'high', 'low', 'close', 'volume')
+            default: Default value if field not found
+            
+        Returns:
+            float: Price value or default
+        """
+        try:
+            if price_data is None:
+                return default
+                
+            # Handle pandas Series (single-asset path)
+            if hasattr(price_data, 'get'):
+                return float(price_data.get(field, default))
+            
+            # Handle namedtuple (multi-asset path) 
+            elif hasattr(price_data, field):
+                value = getattr(price_data, field, default)
+                return float(value) if value is not None else default
+                
+            # Handle dict
+            elif isinstance(price_data, dict):
+                return float(price_data.get(field, default))
+                
+            # Fallback: try direct attribute access
+            else:
+                value = getattr(price_data, field, default)
+                return float(value) if value is not None else default
+                
+        except (ValueError, TypeError, AttributeError):
+            return default
+
     def _execute_trade(self, signal: OrderIntent, price_data: pd.Series) -> None:
         """
         Execute individual trade based on signal.
         
         Args:
             signal: Trading signal to execute
-            price_data: Current day's price data
+            price_data: Current day's price data (pandas Series, namedtuple, or dict)
         """
         try:
             # High-signal debug: summarize incoming order
@@ -2157,14 +2194,16 @@ class BacktestSimulator:
                     
                     if is_first_bar_market:
                         # Use OPEN to honor market-at-open semantics
-                        price = price_data.get('open', 0.0) if price_data is not None else 0.0
+                        price = self._get_price_from_data(price_data, 'open', 0.0)
                     else:
                         # Default to CLOSE for other market orders (e.g., MOC)
-                        price = price_data.get('close', 0.0) if price_data is not None else 0.0
+                        price = self._get_price_from_data(price_data, 'close', 0.0)
                 
                 if price <= 0.0:
+                    open_val = self._get_price_from_data(price_data, 'open', None)
+                    close_val = self._get_price_from_data(price_data, 'close', None)
                     logger.warning(
-                        f"Cannot determine market price: will skip. sym={ticker} open={price_data.get('open',None)} close={price_data.get('close',None)}"
+                        f"Cannot determine market price: will skip. sym={ticker} open={open_val} close={close_val}"
                     )
                     return
             # Handle limit orders using bar touch logic (README spec: fill if touched)
@@ -2182,19 +2221,8 @@ class BacktestSimulator:
                     limit_price = None
 
                 # Require intraday bar context
-                bar_low = None
-                bar_high = None
-                try:
-                    if price_data is not None:
-                        if isinstance(price_data, dict):
-                            bar_low = price_data.get('low', None)
-                            bar_high = price_data.get('high', None)
-                        else:
-                            bar_low = price_data.get('low')  # type: ignore
-                            bar_high = price_data.get('high')  # type: ignore
-                except Exception:
-                    bar_low = bar_low if bar_low is not None else None
-                    bar_high = bar_high if bar_high is not None else None
+                bar_low = self._get_price_from_data(price_data, 'low', None)
+                bar_high = self._get_price_from_data(price_data, 'high', None)
 
                 # If we cannot resolve a limit price or bar bounds, skip
                 if (limit_price is None) or (bar_low is None) or (bar_high is None):

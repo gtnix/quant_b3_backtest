@@ -1724,9 +1724,13 @@ class EnhancedPortfolio:
                 position = self.positions[ticker]
                 if position.quantity < 0:
                     opening_short = True
+                elif position.quantity == 0:
+                    # Allow short selling when flat (market-neutral strategy)
+                    opening_short = True
                 elif position.quantity < normalized_quantity:
-                    logger.warning(f"Insufficient shares in {ticker}: have {position.quantity}, trying to sell {normalized_quantity}")
-                    return False
+                    # For long positions, only sell what we have
+                    normalized_quantity = position.quantity
+                    logger.info(f"Adjusting sell quantity in {ticker}: have {position.quantity}, selling {normalized_quantity}")
             
             # Calculate trade details
             trade_value = normalized_quantity * normalized_price

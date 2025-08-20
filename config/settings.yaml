@@ -56,7 +56,7 @@ taxes:
   max_loss_offset_percentage: 1.0
   loss_carryforward_perpetual: true
 portfolio:
-  initial_cash: 100000
+  initial_cash: 1000000
   max_positions: 10
   position_sizing: equal_weight
 settlement:
@@ -116,8 +116,8 @@ advanced:
   lazy_loading: true
   compression_enabled: true
 backtest:
-  default_start_date: '2025-05-20'
-  default_end_date: '2025-08-11'
+  default_start_date: '2025-07-01'
+  default_end_date: '2025-07-31'
   save_results: true
 pair_mode:
   gross_exposure_brl: 50000

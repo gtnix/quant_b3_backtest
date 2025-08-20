@@ -414,47 +414,31 @@ class BaseStrategy(ABC):
     
     def size_intent(self, intent: OrderIntent, bar: Bar) -> OrderIntent:
         """
-        Size an order intent based on portfolio constraints.
+        Size an order intent based on fixed notional allocation strategy.
 
-        This method provides sensible defaults for position sizing.
-        Override for custom sizing logic.
+        This method implements the B3-compliant fixed notional allocation:
+        - Fixed total notional per symbol per session: 50,000 BRL
+        - Split into 4 equal tranches of 12,500 BRL each
+        - Shares calculated using previous day's closing price (close[T-1])
+        - B3 board-lot rounding applied (multiples of 100 shares)
 
         Args:
             intent: Original order intent
             bar: Current market data bar
             
         Returns:
-            Sized order intent
+            Sized order intent with B3-compliant quantity
         """
-        # Get portfolio value
-        portfolio_value = self.context.portfolio.get_portfolio_value()
+        from .utils import calculate_tranche_quantity
         
-        # Calculate maximum position value
-        max_position_value = portfolio_value * self.config.max_position_size
+        # Fixed notional per tranche (12,500 BRL)
+        tranche_notional_brl = 12500.0
         
-        # Calculate position value based on intent
-        position_value = min(
-            intent.price * intent.quantity if intent.price else bar.close * intent.quantity,
-            max_position_value
-        )
-        
-        # Price reference
+        # Price reference (use bar.close as close[T-1])
         price = intent.price if intent.price else bar.close
-        if price <= 0:
-            quantity = 0
-        else:
-            raw_qty = position_value / price
-            # Enforce B3 board-lot rounding (100-share multiples)
-            # Rule: if last two digits of shares in [50..99] -> round up to nearest 100; else round down
-            shares_int = int(raw_qty)
-            remainder = shares_int % 100
-            if remainder >= 50:
-                quantity = ((shares_int // 100) + 1) * 100
-            else:
-                quantity = (shares_int // 100) * 100
         
-        if quantity < 1:
-            quantity = 0
+        # Calculate B3-compliant quantity using fixed notional allocation
+        quantity = calculate_tranche_quantity(tranche_notional_brl, price)
         
         sized_intent = OrderIntent(
             symbol=intent.symbol,
@@ -466,7 +450,12 @@ class BaseStrategy(ABC):
             metadata=intent.metadata
         )
         
-        self.context.logger.debug(f"Sized intent: {quantity} shares (value: R$ {position_value:,.2f})")
+        # Calculate actual notional for logging
+        actual_notional = quantity * price if price > 0 else 0
+        self.context.logger.debug(
+            f"Sized intent: {quantity} shares @ R$ {price:.2f} = R$ {actual_notional:,.2f} "
+            f"(target: R$ {tranche_notional_brl:,.2f})"
+        )
         return sized_intent
     
     def risk_check(self, intent: OrderIntent, bar: Bar) -> bool:
