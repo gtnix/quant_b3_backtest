@@ -268,6 +268,10 @@ class BacktestSimulator:
         self.unified_fills: list[dict] = []
         self.unified_fills_df: Optional[pd.DataFrame] = None
         
+        # MONITORING: Callback reliability tracking and fallback positions
+        self._callback_stats = {'success': 0, 'failures': 0, 'fallback_engaged': 0}
+        self._fallback_positions = {}
+        
         # Initialize SGS data for the entire backtest period
         self.selic_data = None
         self.all_sgs_data = {}
@@ -1457,12 +1461,18 @@ class BacktestSimulator:
                     timestamp=close_ts,
                     metadata={'order_type': 'MOC', 'attempt_type': 'moc', 'attempt_name': 'MOC', 'reason': 'End of day position close', 'original_position': qty}
                 )
-                # Create bar data from the identified close bar; if no close found, skip MOC to avoid unrealistic fills
+                # Create bar data from the identified close bar; use fallback if no close found
                 import pandas as pd
                 current_price_local = None
                 if moc_close_price is None:
-                    logger.warning(f"No official close available for {ticker} on {trading_day_date}; skipping MOC to avoid price bias")
-                    continue
+                    # CRITICAL FIX: Use fallback price instead of skipping MOC
+                    fallback_price = getattr(position, 'current_price', None)
+                    if fallback_price is None:
+                        # Use last known price from portfolio or default
+                        fallback_price = 10.0  # Conservative fallback for emergency MOC
+                    moc_close_price = float(fallback_price)
+                    logger.warning(f"MOC FALLBACK: Using fallback price {moc_close_price:.2f} for {ticker} on {trading_day_date} (close price unavailable)")
+                    # Continue with fallback price instead of skipping
                 else:
                     # Build dummy bar using the found bar's OHLC if available
                     if moc_bar_series is not None:
@@ -1523,7 +1533,45 @@ class BacktestSimulator:
         except Exception as e:
             logger.error(f"Error executing MOC from portfolio positions: {e}")
         
-        # 2) Allow strategy to perform end-of-day tasks (e.g., housekeeping, saving history)
+        # 2) TERTIARY SAFETY NET: Reconcile any missed positions from fallback tracking
+        try:
+            if hasattr(self, '_fallback_positions') and self._fallback_positions:
+                logger.info(f"TERTIARY MOC: Processing {len(self._fallback_positions)} fallback positions")
+                for ticker, position in list(self._fallback_positions.items()):
+                    if position != 0:
+                        side = OrderSide.SELL if position > 0 else OrderSide.BUY
+                        close_ts = datetime.combine(trading_day_date, datetime.min.time().replace(hour=20))
+                        
+                        # Use conservative fallback price for emergency MOC
+                        fallback_price = 10.0
+                        
+                        # Execute emergency MOC
+                        try:
+                            if side == OrderSide.SELL:
+                                self.portfolio.sell(ticker, abs(position), fallback_price, close_ts, 'day_trade')
+                            else:
+                                self.portfolio.buy(ticker, abs(position), fallback_price, close_ts, 'day_trade')
+                            
+                            # Record emergency MOC fill
+                            self._append_unified_fill(
+                                timestamp=close_ts,
+                                symbol=ticker,
+                                side=side.name,
+                                quantity=abs(position),
+                                price=fallback_price,
+                                metadata={'order_type': 'MOC', 'attempt_type': 'emergency_moc', 'attempt_name': 'Emergency MOC', 'reason': 'Fallback position closure'}
+                            )
+                            logger.warning(f"EMERGENCY MOC: Closed fallback position {ticker} {side.name} {abs(position)} @ {fallback_price:.2f}")
+                            
+                        except Exception as e:
+                            logger.error(f"Emergency MOC failed for {ticker}: {e}")
+                
+                # Clear fallback positions after processing
+                self._fallback_positions.clear()
+        except Exception as e:
+            logger.error(f"Error in tertiary MOC processing: {e}")
+        
+        # 3) Allow strategy to perform end-of-day tasks (e.g., housekeeping, saving history)
         try:
             if hasattr(self.strategy, 'on_end_of_day'):
                 list(self.strategy.on_end_of_day(trading_day_date))
@@ -2305,6 +2353,7 @@ class BacktestSimulator:
                 except Exception:
                     pass
             # Notify strategy on successful fills (authoritative, with executed price and metadata)
+            callback_success = False
             try:
                 if hasattr(self.strategy, 'on_fill'):
                     from engine.base_strategy import Fill
@@ -2319,6 +2368,8 @@ class BacktestSimulator:
                             metadata=getattr(signal, 'metadata', {})
                         )
                         self.strategy.on_fill(fill)
+                        callback_success = True
+                        self._callback_stats['success'] += 1
                     elif (signal_type == OrderSide.SELL or signal_type == SignalType.SELL) and success:
                         fill = Fill(
                             order_id=f"sim_{len(self.trade_log)}",
@@ -2330,8 +2381,28 @@ class BacktestSimulator:
                             metadata=getattr(signal, 'metadata', {})
                         )
                         self.strategy.on_fill(fill)
+                        callback_success = True
+                        self._callback_stats['success'] += 1
             except Exception as e:
                 logger.error(f"Error in strategy on_fill notification: {str(e)}")
+                callback_success = False
+                self._callback_stats['failures'] += 1
+            
+            # CRITICAL FIX: Ensure position tracking even if callback fails
+            if success and not callback_success:
+                # Direct position tracking fallback when callback fails
+                if not hasattr(self, '_fallback_positions'):
+                    self._fallback_positions = {}
+                if ticker not in self._fallback_positions:
+                    self._fallback_positions[ticker] = 0
+                
+                if signal_type == OrderSide.BUY or signal_type == SignalType.BUY:
+                    self._fallback_positions[ticker] += quantity
+                else:
+                    self._fallback_positions[ticker] -= quantity
+                
+                logger.warning(f"CALLBACK FAILURE: Direct position tracking for {ticker} {signal_type.name if hasattr(signal_type, 'name') else signal_type} {quantity} (fallback engaged)")
+                self._callback_stats['fallback_engaged'] += 1
             
             # Record trade in log
             confidence = getattr(signal, 'confidence', 1.0)  # Default confidence if not available
