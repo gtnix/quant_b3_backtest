@@ -1,11 +1,10 @@
 """
 Result Manager for Strategy Backtests
 
-Simple, extensible system for storing and comparing backtest results across
-different parameters, profiles, and tickers. Designed to be lightweight and
-easily extensible for future comparison features.
+Refactored to use centralized output management and configuration.
+Eliminates duplicate file writes and hardcoded paths.
 
-Author: Quantitative Trading Specialist
+Author: Senior Python Developer  
 Date: 2025
 """
 
@@ -14,9 +13,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-import logging
+from .output_manager import get_output_manager
+from .config_manager import get_config_manager
+from .logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ResultManager:
@@ -30,24 +31,19 @@ class ResultManager:
     - Foundation for future comparison and analysis features
     """
     
-    def __init__(self, results_dir: str = "results"):
-        """Initialize result manager with storage directory.
-
-        In audit-only mode (AUDIT_EXECUTIONS_ONLY=true), do not create or
-        write any result directories/files. All persistence is disabled.
-        """
-        import os as _os
-        self.results_dir = Path(results_dir)
+    def __init__(self, config_manager=None, output_manager=None):
+        """Initialize result manager with centralized configuration."""
+        self.config_manager = config_manager or get_config_manager()
+        self.output_manager = output_manager or get_output_manager()
+        
+        # Get paths from configuration
+        self.results_dir = self.config_manager.get_path('results_dir')
         self.index_file = self.results_dir / "results_index.csv"
-        self.detailed_dir = self.results_dir / "detailed"
-
-        # Default to writing outputs unless explicitly disabled
-        audit_only = _os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes')
-
-        if not audit_only:
-            # Only create directories when not in audit-only mode
-            self.results_dir.mkdir(exist_ok=True)
-            self.detailed_dir.mkdir(exist_ok=True)
+        self.detailed_dir = self.results_dir / self.config_manager.get('paths', 'detailed_subdir', 'detailed')
+        
+        self.audit_only = self.config_manager.is_audit_mode()
+        
+        if not self.audit_only:
             logger.info(f"ResultManager initialized with directory: {self.results_dir}")
         else:
             logger.info("ResultManager running in audit-only mode; no filesystem writes will occur")
@@ -106,16 +102,12 @@ class ResultManager:
             "strategy_summary": strategy_summary or {}
         }
         
-        import os as _os
-        if not (_os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes')):
-            # Save detailed results as JSON
-            detailed_file = self.detailed_dir / f"{run_id}.json"
-            try:
-                with open(detailed_file, 'w') as f:
-                    json.dump(result_data, f, indent=2, default=str)
+        if not self.audit_only:
+            # Save detailed results using output manager
+            detailed_file = self.output_manager.write_backtest_results(result_data, run_id)
+            if detailed_file:
                 logger.info(f"Detailed results saved: {detailed_file}")
-            except Exception as e:
-                logger.error(f"Failed to save detailed results: {e}")
+            
             # Write hash mapping file to link hash → tickers
             try:
                 mapping_path = self.results_dir / "tickers_hash_map.csv"
@@ -137,8 +129,7 @@ class ResultManager:
     def _update_index(self, result_data: Dict):
         """Update the results index with new entry."""
         try:
-            import os as _os
-            if _os.getenv('AUDIT_EXECUTIONS_ONLY', '0').lower() in ('1', 'true', 'yes'):
+            if self.audit_only:
                 return
             # Prepare index row
             index_row = {
@@ -266,31 +257,20 @@ class ResultManager:
         return
 
     # --- New: unified fills exports ---
-    def export_fills(self, fills_df: pd.DataFrame, base_name: str = "fills") -> Dict[str, str]:
-        """Export unified fills DataFrame to CSV and JSON in results directory.
+    def export_fills(self, fills_df: pd.DataFrame, base_name: str = "unified_fills") -> Dict[str, str]:
+        """Export unified fills DataFrame using centralized output manager.
 
-        Returns map of artifact type to path. No-ops when AUDIT_EXECUTIONS_ONLY is set.
+        Returns map of artifact type to path. No-ops when in audit mode.
         """
-        artifacts: Dict[str, str] = {}
+        if self.audit_only:
+            return {}
+        
         try:
-            import os as _os
-            if _os.getenv('AUDIT_EXECUTIONS_ONLY', '1').lower() in ('1', 'true', 'yes'):
-                return artifacts
-            self.results_dir.mkdir(exist_ok=True)
-            csv_path = self.results_dir / f"{base_name}.csv"
-            json_path = self.results_dir / f"{base_name}.json"
-            if fills_df is not None and not fills_df.empty:
-                fills_df.to_csv(csv_path, index=False)
-                artifacts['csv'] = str(csv_path)
-                try:
-                    fills_df.to_json(json_path, orient='records', indent=2, date_format='iso')
-                    artifacts['json'] = str(json_path)
-                except Exception:
-                    pass
-            return artifacts
+            # Use centralized output manager to eliminate duplicates
+            return self.output_manager.write_unified_fills(fills_df, base_name)
         except Exception as e:
             logger.warning(f"Failed to export fills: {e}")
-            return artifacts
+            return {}
 
     def summarize_fills(self, fills_df: pd.DataFrame) -> Dict[str, Any]:
         """Compute concise fills summary KPIs and breakdowns suitable for reports."""
