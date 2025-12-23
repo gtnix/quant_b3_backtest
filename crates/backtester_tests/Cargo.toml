@@ -1,0 +1,35 @@
+[package]
+name = "backtester_tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Integration tests for the backtester"
+publish = false
+
+[dependencies]
+backtester_core.workspace = true
+backtester_engine.workspace = true
+backtester_portfolio.workspace = true
+backtester_execution.workspace = true
+strategy_lib.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[test]]
+name = "determinism"
+path = "tests/determinism.rs"
+
+[[test]]
+name = "invariants"
+path = "tests/invariants.rs"
+
+[[test]]
+name = "anti_look_ahead"
+path = "tests/anti_look_ahead.rs"
+
+[[bench]]
+name = "scenarios_bench"
+harness = false
+

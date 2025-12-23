@@ -1,0 +1,18 @@
+[package]
+name = "backtester_portfolio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Portfolio state, PnL, and drawdown calculations"
+
+[dependencies]
+backtester_core.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "portfolio_bench"
+harness = false
+

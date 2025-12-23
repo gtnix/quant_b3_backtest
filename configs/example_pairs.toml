@@ -1,0 +1,24 @@
+# Pairs/Spread Strategy Configuration
+# Trades PETR4 (asset 0) vs VALE3 (asset 1) spread
+
+[general]
+name = "pairs_spread_backtest"
+initial_capital = 100000.0
+
+[data]
+path = "data/sample.csv"
+skip_invalid = true
+
+[strategy]
+type = "pairs"
+asset_a = 0        # PETR4
+asset_b = 1        # VALE3
+threshold = 2.0    # Entry at 2 std dev
+lookback = 10      # 10 bar lookback for spread stats
+
+[execution]
+slippage_type = "constant"
+slippage_param = 5.0
+fixed_cost = 10.0
+proportional_bps = 10.0
+

@@ -1,0 +1,18 @@
+[package]
+name = "backtester_reports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Report generation for backtesting results"
+
+[dependencies]
+backtester_core.workspace = true
+backtester_portfolio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+

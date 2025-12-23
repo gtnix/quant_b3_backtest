@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "exported_at": "",
+  "scenarios": {
+    "intraday_net_zero": {
+      "mean_reversion_10k_events": {
+        "events": 10000,
+        "mean_ns": 834991.2132991685,
+        "std_dev_ns": 42195.646312107776,
+        "throughput_events_per_sec": 11976173.929410089
+      },
+      "noop_baseline_10k_events": {
+        "events": 10000,
+        "mean_ns": 681763.9332997538,
+        "std_dev_ns": 54427.05842613823,
+        "throughput_events_per_sec": 14667833.705429032
+      }
+    },
+    "daily_swing": {
+      "trend_200_assets": {
+        "events": 50400,
+        "mean_ns": 67314631.27464285,
+        "std_dev_ns": 5513607.394439022,
+        "throughput_events_per_sec": 748722.8117520043
+      }
+    },
+    "stress_universe": {
+      "noop_1000_assets": {
+        "events": 252000,
+        "mean_ns": 1440718373.0,
+        "std_dev_ns": 37573662.371497475,
+        "throughput_events_per_sec": 174912.74125647594
+      }
+    }
+  }
+}
