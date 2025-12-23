@@ -1,0 +1,21 @@
+[package]
+name = "backtester_engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Simulation motor and order router for the backtester"
+
+[dependencies]
+backtester_core.workspace = true
+backtester_portfolio.workspace = true
+backtester_execution.workspace = true
+backtester_reports.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "engine_bench"
+harness = false
+

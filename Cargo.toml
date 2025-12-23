@@ -1,0 +1,71 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/backtester_core",
+    "crates/backtester_io",
+    "crates/backtester_engine",
+    "crates/backtester_portfolio",
+    "crates/backtester_execution",
+    "crates/backtester_reports",
+    "crates/strategy_lib",
+    "crates/backtester_tests",
+    "crates/backtester_cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal crates
+backtester_core = { path = "crates/backtester_core" }
+backtester_io = { path = "crates/backtester_io" }
+backtester_engine = { path = "crates/backtester_engine" }
+backtester_portfolio = { path = "crates/backtester_portfolio" }
+backtester_execution = { path = "crates/backtester_execution" }
+backtester_reports = { path = "crates/backtester_reports" }
+strategy_lib = { path = "crates/strategy_lib" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Hashing
+sha2 = "0.10"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Time
+chrono = "0.4"
+
+# Benchmarking
+criterion = { version = "0.5", default-features = false }
+
+# -----------------------------------------------------------------------------
+# Profiles: Performance-first, determinism-safe
+# -----------------------------------------------------------------------------
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
+
+[profile.bench]
+inherits = "release"
+debug = true          # Enable profiling symbols for flamegraphs
+strip = "none"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+inherits = "dev"
+opt-level = 1         # Slightly faster tests
+

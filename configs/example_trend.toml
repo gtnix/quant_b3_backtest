@@ -1,0 +1,24 @@
+# Example configuration for Daily Trend Strategy
+# B3 Backtester
+
+[general]
+name = "daily_trend_example"
+initial_capital = 100000.0
+
+[data]
+path = "data/sample.csv"
+skip_invalid = false
+
+[strategy]
+type = "trend"
+short_period = 5
+long_period = 20
+
+[execution]
+slippage_type = "constant"
+slippage_param = 5.0
+fixed_cost = 10.0
+proportional_bps = 10.0
+max_participation = 0.1
+allow_partial = true
+
