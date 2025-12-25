@@ -233,6 +233,18 @@ impl EntryEngine {
         result.diagnostics.estimated_costs = total_cost;
         result.diagnostics.turnover = self.order_gen.calculate_turnover(&orders, ctx.capital);
 
+        // Calculate cash residual = capital - sum(shares * price)
+        let total_allocated: Decimal = result.targets.iter()
+            .map(|t| {
+                // Get price from order_targets for this symbol
+                order_targets.iter()
+                    .find(|ot| ot.symbol == t.symbol)
+                    .map(|ot| ot.price * Decimal::from(t.target_shares))
+                    .unwrap_or(Decimal::ZERO)
+            })
+            .sum();
+        result.diagnostics.cash_residual = ctx.capital - total_allocated;
+
         // Step 7: Build audit log
         let selected_assets: Vec<SelectedAsset> = result
             .targets

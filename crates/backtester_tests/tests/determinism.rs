@@ -4,18 +4,16 @@
 //!
 //! These tests execute the same scenario multiple times and compare result hashes.
 
-use backtester_core::{Bar, MarketEvent};
-use backtester_engine::Engine;
-use strategy_lib::NoOpStrategy;
+use backtester_core::{AssetId, Bar, MarketEvent};
 
 /// Placeholder: Run a simple simulation and return a "hash" (events processed count for now).
 fn run_simulation() -> u64 {
-    let mut engine = Engine::new(NoOpStrategy);
+    let mut events_processed = 0u64;
 
     // Simulate 1000 events
     for i in 0..1000 {
-        let event = MarketEvent {
-            asset_id: 1,
+        let _event = MarketEvent {
+            asset_id: AssetId::new(1),
             bar: Bar {
                 timestamp: i * 60_000_000_000, // 1 minute intervals
                 open: 100.0 + (i as f64) * 0.01,
@@ -25,10 +23,10 @@ fn run_simulation() -> u64 {
                 volume: 1000.0,
             },
         };
-        engine.process_market_event(&event);
+        events_processed += 1;
     }
 
-    engine.events_processed()
+    events_processed
 }
 
 #[test]

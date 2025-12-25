@@ -1,0 +1,58 @@
+# RAP HFT-Style Backtest - Máxima Performance
+# Período: 2022-2024 | 50% IS / 50% OOS | IBOV 70 ativos
+
+name = "RAP HFT Optimization IBOV"
+seed = 42
+output_dir = "output/rap_hft"
+
+[budget]
+max_trials = 50           # Menos trials, mais eficientes
+max_time_minutes = 5      # Limite 5 min
+min_trials_before_pruning = 5
+
+[algorithm]
+type = "tpe"
+gamma = 0.25              # Top 25% como "bons"
+n_candidates = 16         # Menos candidatos = mais rápido
+
+[search_space]
+entry_zscore = [1.5, 2.5]       # Range menor = convergência rápida
+exit_zscore = [0.3, 0.7]
+stop_zscore = [2.8, 3.5]
+lookback_days = [45, 90]        # Range focado
+top_n_pairs = [15, 40]
+cointegration_pvalue = [0.05, 0.15]
+kelly_fraction = [0.3, 0.6]
+max_exposure_per_pair = [0.15, 0.25]
+kalman_delta = [0.0005, 0.005]
+rebalance_frequency = ["weekly"]
+use_adf_filter = [true]
+ranking_criterion = ["quality_score"]
+
+[fitness]
+w_sharpe = 1.5            # Peso maior no Sharpe
+w_calmar = 0.3
+w_profit_factor = 0.2
+p_max_dd = 3.0
+p_turnover = 0.05
+p_neutrality = 0.5
+p_min_trades = 0.3
+max_dd_threshold = 0.12
+min_trades = 20
+max_neutrality_dev = 0.03
+
+[validation]
+validation_type = "walk_forward"
+train_days = 365          # 1 ano treino (IS)
+test_days = 180           # 6 meses teste (OOS)
+step_days = 90            # Avança 3 meses
+embargo_days = 3          # Embargo mínimo
+
+[cache]
+max_entries = 5000
+persist_to_disk = false
+
+
+
+
+

@@ -1,0 +1,107 @@
+# RAP Optimizer Configuration
+# Plataforma de Otimização para Estratégia RAP
+
+#═══════════════════════════════════════════════════════════════════════════════
+# GERAL
+#═══════════════════════════════════════════════════════════════════════════════
+
+name = "RAP Optimization IBOV"
+seed = 42
+output_dir = "output/rap_opt"
+
+#═══════════════════════════════════════════════════════════════════════════════
+# ORÇAMENTO DE TRIALS
+#═══════════════════════════════════════════════════════════════════════════════
+
+[budget]
+max_trials = 100
+max_time_minutes = 60
+min_trials_before_pruning = 10
+
+#═══════════════════════════════════════════════════════════════════════════════
+# ALGORITMO DE BUSCA
+#═══════════════════════════════════════════════════════════════════════════════
+
+[algorithm]
+type = "tpe"
+gamma = 0.20        # Fração de trials "bons" (top 20%)
+n_candidates = 24   # Candidatos para aquisição
+
+# Alternativa: Random Search
+# [algorithm]
+# type = "random"
+
+#═══════════════════════════════════════════════════════════════════════════════
+# ESPAÇO DE BUSCA
+#═══════════════════════════════════════════════════════════════════════════════
+
+[search_space]
+# Z-Score Thresholds
+entry_zscore = [1.0, 3.0]
+exit_zscore = [0.0, 1.0]
+stop_zscore = [2.5, 4.0]
+
+# Seleção de Pares
+lookback_days = [30, 120]
+top_n_pairs = [5, 50]
+cointegration_pvalue = [0.01, 0.20]
+
+# Gestão de Risco
+kelly_fraction = [0.1, 1.0]
+max_exposure_per_pair = [0.05, 0.30]
+
+# Kalman Filter (log scale)
+kalman_delta = [0.00001, 0.01]
+
+# Parâmetros Discretos
+rebalance_frequency = ["weekly", "biweekly"]
+use_adf_filter = [false, true]
+ranking_criterion = ["quality_score", "half_life_target", "sharpe_predicted"]
+
+#═══════════════════════════════════════════════════════════════════════════════
+# FUNÇÃO FITNESS (Multi-Objetivo)
+#═══════════════════════════════════════════════════════════════════════════════
+
+[fitness]
+# Pesos positivos (maximizar)
+w_sharpe = 1.0
+w_calmar = 0.5
+w_profit_factor = 0.3
+
+# Penalidades (minimizar)
+p_max_dd = 2.0
+p_turnover = 0.1
+p_neutrality = 1.0
+p_min_trades = 0.5
+
+# Thresholds
+max_dd_threshold = 0.15
+min_trades = 10
+max_neutrality_dev = 0.05
+
+#═══════════════════════════════════════════════════════════════════════════════
+# VALIDAÇÃO TEMPORAL (Walk-Forward)
+#═══════════════════════════════════════════════════════════════════════════════
+
+[validation]
+validation_type = "walk_forward"
+train_days = 180      # 6 meses de treino
+test_days = 30        # 1 mês de teste
+step_days = 21        # Avança 1 mês por split
+embargo_days = 5      # 1 semana de embargo
+
+# Alternativa: Purged K-Fold
+# validation_type = { "purged_k_fold" = { n_splits = 5 } }
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CACHE
+#═══════════════════════════════════════════════════════════════════════════════
+
+[cache]
+max_entries = 10000
+persist_to_disk = false
+
+
+
+
+

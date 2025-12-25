@@ -7,9 +7,9 @@ members = [
     "crates/backtester_portfolio",
     "crates/backtester_execution",
     "crates/backtester_reports",
-    "crates/strategy_lib",
     "crates/backtester_tests",
     "crates/backtester_cli",
+    "crates/backtester_intelligence",
     "crates/market_data",
 ]
 
@@ -27,7 +27,7 @@ backtester_engine = { path = "crates/backtester_engine" }
 backtester_portfolio = { path = "crates/backtester_portfolio" }
 backtester_execution = { path = "crates/backtester_execution" }
 backtester_reports = { path = "crates/backtester_reports" }
-strategy_lib = { path = "crates/strategy_lib" }
+backtester_intelligence = { path = "crates/backtester_intelligence" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -42,6 +42,11 @@ clap = { version = "4.5", features = ["derive"] }
 
 # Time
 chrono = "0.4"
+
+# Performance
+rayon = "1.10"
+wide = "0.7"
+memmap2 = "0.9"
 
 # Benchmarking
 criterion = { version = "0.5", default-features = false }

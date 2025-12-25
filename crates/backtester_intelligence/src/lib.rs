@@ -19,9 +19,19 @@
 //! - **Weighting**: Apply risk-parity (1/volatility)
 //! - **Orders**: Generate buy/sell with costs and lot sizes
 //! - **Audit**: Log all decisions for traceability
+//!
+//! # Exit Module
+//!
+//! The `exit` module handles position exits and risk management:
+//! - **Stop-Loss**: Exit on excessive loss
+//! - **Take-Profit**: Exit on target gain
+//! - **Time-Based Exit**: Exit after max holding period
+//! - **Trailing Stop**: Exit on drawdown from high-water mark
+//! - **Risk Guards**: Exposure limits, turnover limits, drawdown guard
 
 pub mod config;
 pub mod entry;
+pub mod exit;
 pub mod filters;
 pub mod risk_free;
 pub mod scorer;
@@ -40,6 +50,16 @@ pub use entry::{
     EntryExclusion, EntryDiagnostics, GatingFilter, GatingConfig, Selector, SelectionConfig, 
     Weighter, WeightingConfig, WeightingMethod, OrderGenerator, OrderGeneratorConfig, Order, 
     OrderSide, AuditLogger, RebalanceAuditLog, ExclusionReason, ExclusionStage, SelectionReason,
+};
+
+// Exit module exports
+pub use exit::{
+    ExitEngine, ExitEngineConfig, ExitContext, ExitResult, ExitTarget, ExitReason,
+    ExitDiagnostics, Position, RiskViolation, DrawdownAction,
+    ExitPolicy, ExitPolicyConfig, StopLossConfig, StopLossPolicy,
+    TakeProfitConfig, TakeProfitPolicy, TimeExitConfig, TimeExitPolicy,
+    TrailingStopConfig, TrailingStopPolicy, RiskConfig, RiskGuard,
+    ExitAuditLog, ExitedPosition,
 };
 
 /// Prelude for common imports.
@@ -61,5 +81,12 @@ pub mod prelude {
         Weighter, WeightingConfig, WeightingMethod,
         OrderGenerator, OrderGeneratorConfig, Order, OrderSide,
         AuditLogger, RebalanceAuditLog,
+    };
+    
+    // Exit module
+    pub use crate::exit::{
+        ExitEngine, ExitEngineConfig, ExitContext, ExitResult, ExitTarget, ExitReason,
+        Position, RiskViolation, DrawdownAction, RiskConfig, RiskGuard,
+        ExitAuditLog,
     };
 }

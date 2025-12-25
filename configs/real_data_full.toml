@@ -1,0 +1,31 @@
+# Backtest with ALL historical data (relaxed validation)
+# Note: Data has OHLC violations - close prices appear to be adjusted prices
+
+[general]
+name = "real_data_backtest_full"
+initial_capital = 100000.0
+
+[data]
+path = "data/portfolio_historical.csv"
+skip_invalid = false  # Don't skip any bars - use all data
+
+[strategy]
+type = "trend"
+short_period = 5
+long_period = 20
+
+[execution]
+slippage_type = "constant"
+slippage_param = 0.5
+fixed_cost = 5.0
+proportional_bps = 5.0
+max_participation = 0.05
+allow_partial = true
+
+
+
+
+
+
+
+

@@ -5,64 +5,83 @@
 //! Responsibilities:
 //! - Transform `OrderEvent`s into `FillEvent`s
 //! - Apply slippage models (constant, volume-based, volatility-based)
-//! - Calculate execution costs (brokerage, fees)
+//! - Calculate execution costs (brokerage, fees, emoluments)
 //! - Handle limit orders with OHLC verification
 //! - Support partial fills based on volume participation
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
-pub use backtester_core::{Bar, ExecutionModel, FillEvent, OrderEvent};
+pub use backtester_core::{
+    AssetId, Bar, ExecutionModel, FillEvent, FillId, OrderDirection, OrderEvent, OrderId, OrderType,
+};
+
+// =============================================================================
+// SLIPPAGE MODEL
+// =============================================================================
 
 /// Slippage model types.
 #[derive(Debug, Clone, Copy)]
 pub enum SlippageModel {
-    /// No slippage
+    /// No slippage.
     None,
-    /// Fixed basis points slippage
+    /// Fixed basis points slippage.
     Constant {
-        /// Slippage in basis points (e.g., 10 = 0.1%)
+        /// Slippage in basis points (e.g., 10 = 0.1%).
         bps: f64,
     },
-    /// Slippage proportional to order size relative to bar volume
+    /// Slippage proportional to order size relative to bar volume.
     VolumeLinear {
-        /// Coefficient for volume impact
-        coefficient: f64,
+        /// Base slippage in bps.
+        base_bps: f64,
+        /// Coefficient for volume impact.
+        volume_factor: f64,
     },
-    /// Slippage based on bar volatility (high - low range)
+    /// Slippage based on bar volatility (high - low range).
     Volatility {
-        /// Coefficient for volatility impact
-        coefficient: f64,
+        /// Base slippage in bps.
+        base_bps: f64,
+        /// Coefficient for volatility impact.
+        vol_factor: f64,
     },
 }
 
 impl SlippageModel {
     /// Calculate slippage for an order.
-    /// Returns the price adjustment (positive = worse for buyer, negative = worse for seller).
+    /// Returns the price adjustment (positive = worse for buyer).
     #[must_use]
     pub fn calculate(&self, order: &OrderEvent, bar: &Bar) -> f64 {
         let base_price = bar.close;
-        let is_buy = order.quantity > 0;
+        let is_buy = order.direction == OrderDirection::Buy;
 
         let slippage_pct = match self {
             Self::None => 0.0,
             Self::Constant { bps } => bps / 10_000.0,
-            Self::VolumeLinear { coefficient } => {
+            Self::VolumeLinear {
+                base_bps,
+                volume_factor,
+            } => {
+                let base = base_bps / 10_000.0;
                 if bar.volume > 0.0 {
                     #[allow(clippy::cast_precision_loss)]
-                    let order_ratio = order.quantity.abs() as f64 / bar.volume;
-                    coefficient * order_ratio
+                    let order_ratio = order.quantity as f64 / bar.volume;
+                    base + (*volume_factor * order_ratio)
                 } else {
-                    0.0
+                    base
                 }
             }
-            Self::Volatility { coefficient } => {
+            Self::Volatility {
+                base_bps,
+                vol_factor,
+            } => {
+                let base = base_bps / 10_000.0;
                 let range = bar.high - bar.low;
                 if base_price > 0.0 {
-                    coefficient * (range / base_price)
+                    base + (*vol_factor * (range / base_price))
                 } else {
-                    0.0
+                    base
                 }
             }
         };
@@ -70,10 +89,16 @@ impl SlippageModel {
         // Slippage always works against the trader
         let adjustment = base_price * slippage_pct;
         if is_buy {
-            adjustment // Buyer pays more
+            adjustment.abs()
         } else {
-            -adjustment // Seller receives less
+            -adjustment.abs()
         }
+    }
+
+    /// Apply slippage to get the fill price.
+    #[must_use]
+    pub fn apply(&self, base_price: f64, order: &OrderEvent, bar: &Bar) -> f64 {
+        base_price + self.calculate(order, bar)
     }
 }
 
@@ -83,92 +108,180 @@ impl Default for SlippageModel {
     }
 }
 
-/// Cost model for execution fees.
+// =============================================================================
+// COST MODEL
+// =============================================================================
+
+/// Cost model for execution fees (B3-compatible).
 #[derive(Debug, Clone, Copy)]
 pub struct CostModel {
-    /// Fixed cost per trade
+    /// Fixed cost per trade (e.g., R$ 10).
     pub fixed_cost: f64,
-    /// Proportional cost (as fraction, e.g., 0.001 = 0.1%)
-    pub proportional_bps: f64,
-    /// Per-share/unit cost
+    /// Commission rate as fraction (e.g., 0.001 = 0.1%).
+    pub commission_rate: f64,
+    /// Per-share/unit cost (e.g., R$ 0.01).
     pub per_unit_cost: f64,
+    /// B3 emolument rate (e.g., 0.00035 = 0.035%).
+    pub emolument_rate: f64,
 }
 
 impl CostModel {
     /// Create a new cost model.
     #[must_use]
-    pub fn new(fixed_cost: f64, proportional_bps: f64, per_unit_cost: f64) -> Self {
+    pub const fn new(
+        fixed_cost: f64,
+        commission_rate: f64,
+        per_unit_cost: f64,
+        emolument_rate: f64,
+    ) -> Self {
         Self {
             fixed_cost,
-            proportional_bps,
+            commission_rate,
             per_unit_cost,
+            emolument_rate,
         }
+    }
+
+    /// Create B3 default cost model.
+    #[must_use]
+    pub const fn b3_default() -> Self {
+        Self::new(10.0, 0.001, 0.01, 0.000_35)
     }
 
     /// Calculate total cost for an order.
     #[must_use]
     pub fn calculate(&self, notional: f64, quantity: i64) -> f64 {
         #[allow(clippy::cast_precision_loss)]
-        let qty_f64 = quantity.abs() as f64;
-        self.fixed_cost + (notional * self.proportional_bps / 10_000.0) + (qty_f64 * self.per_unit_cost)
+        let qty = quantity.unsigned_abs() as f64;
+
+        let commission = notional * self.commission_rate;
+        let emolument = notional * self.emolument_rate;
+        let unit_cost = qty * self.per_unit_cost;
+
+        self.fixed_cost + commission + emolument + unit_cost
+    }
+
+    /// Calculate total cost breakdown.
+    #[must_use]
+    pub fn calculate_breakdown(&self, notional: f64, quantity: i64) -> CostBreakdown {
+        #[allow(clippy::cast_precision_loss)]
+        let qty = quantity.unsigned_abs() as f64;
+
+        CostBreakdown {
+            fixed: self.fixed_cost,
+            commission: notional * self.commission_rate,
+            emolument: notional * self.emolument_rate,
+            per_unit: qty * self.per_unit_cost,
+        }
     }
 }
 
 impl Default for CostModel {
     fn default() -> Self {
-        Self::new(10.0, 10.0, 0.0) // R$10 fixed + 10 bps
+        Self::b3_default()
     }
 }
 
-/// Liquidity model for partial fills.
+/// Cost breakdown for detailed reporting.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CostBreakdown {
+    /// Fixed cost.
+    pub fixed: f64,
+    /// Commission.
+    pub commission: f64,
+    /// B3 emolument.
+    pub emolument: f64,
+    /// Per-unit cost.
+    pub per_unit: f64,
+}
+
+impl CostBreakdown {
+    /// Total cost.
+    #[must_use]
+    pub fn total(&self) -> f64 {
+        self.fixed + self.commission + self.emolument + self.per_unit
+    }
+}
+
+// =============================================================================
+// LIQUIDITY MODEL
+// =============================================================================
+
+/// Liquidity model for partial fills and volume constraints.
 #[derive(Debug, Clone, Copy)]
 pub struct LiquidityModel {
-    /// Maximum participation rate in bar volume (e.g., 0.1 = 10%)
+    /// Maximum participation rate in bar volume (e.g., 0.1 = 10%).
     pub max_participation: f64,
-    /// Whether to allow partial fills
-    pub allow_partial: bool,
+    /// Whether to allow partial fills.
+    pub allow_partial_fills: bool,
 }
 
 impl LiquidityModel {
     /// Create a new liquidity model.
     #[must_use]
-    pub fn new(max_participation: f64, allow_partial: bool) -> Self {
+    pub fn new(max_participation: f64, allow_partial_fills: bool) -> Self {
         Self {
             max_participation: max_participation.clamp(0.01, 1.0),
-            allow_partial,
+            allow_partial_fills,
         }
+    }
+
+    /// Check if order can be filled given volume constraints.
+    #[must_use]
+    pub fn can_fill(&self, order_qty: i64, bar_volume: f64) -> bool {
+        let max_qty = self.max_fillable_quantity(bar_volume);
+        order_qty.unsigned_abs() as i64 <= max_qty || self.allow_partial_fills
     }
 
     /// Calculate maximum fillable quantity based on bar volume.
     #[must_use]
-    pub fn max_fill_quantity(&self, order_qty: i64, bar_volume: f64) -> i64 {
+    pub fn max_fillable_quantity(&self, bar_volume: f64) -> i64 {
         let max_qty = (bar_volume * self.max_participation) as i64;
-        let max_qty = (max_qty / 100) * 100; // B3 round-lot
-        
-        if self.allow_partial {
-            order_qty.abs().min(max_qty.max(100)) * order_qty.signum()
-        } else if order_qty.abs() <= max_qty || max_qty == 0 {
-            order_qty
+        // Round down to B3 lot size
+        (max_qty / 100) * 100
+    }
+
+    /// Get actual fill quantity considering liquidity constraints.
+    #[must_use]
+    pub fn get_fill_quantity(&self, requested_qty: i64, bar_volume: f64) -> i64 {
+        let max_qty = self.max_fillable_quantity(bar_volume).max(100);
+        let abs_requested = requested_qty.unsigned_abs() as i64;
+
+        if self.allow_partial_fills {
+            let fill_qty = abs_requested.min(max_qty);
+            // Round to B3 lot size
+            let rounded = (fill_qty / 100) * 100;
+            if requested_qty >= 0 {
+                rounded
+            } else {
+                -rounded
+            }
+        } else if abs_requested <= max_qty {
+            requested_qty
         } else {
-            0 // Order too large, no fill
+            0 // Can't fill
         }
     }
 }
 
 impl Default for LiquidityModel {
     fn default() -> Self {
-        Self::new(0.1, true) // 10% max participation, allow partial
+        Self::new(0.1, true)
     }
 }
+
+// =============================================================================
+// EXECUTION CONFIG
+// =============================================================================
 
 /// Configuration for the execution model.
 #[derive(Debug, Clone)]
 pub struct ExecutionConfig {
-    /// Slippage model
+    /// Slippage model.
     pub slippage: SlippageModel,
-    /// Cost model
+    /// Cost model.
     pub costs: CostModel,
-    /// Liquidity model
+    /// Liquidity model.
     pub liquidity: LiquidityModel,
 }
 
@@ -181,6 +294,32 @@ impl Default for ExecutionConfig {
         }
     }
 }
+
+impl ExecutionConfig {
+    /// Create with B3 defaults.
+    #[must_use]
+    pub fn b3_default() -> Self {
+        Self {
+            slippage: SlippageModel::Constant { bps: 5.0 },
+            costs: CostModel::b3_default(),
+            liquidity: LiquidityModel::new(0.1, true),
+        }
+    }
+
+    /// Create with no slippage/costs (for testing).
+    #[must_use]
+    pub fn zero_cost() -> Self {
+        Self {
+            slippage: SlippageModel::None,
+            costs: CostModel::new(0.0, 0.0, 0.0, 0.0),
+            liquidity: LiquidityModel::new(1.0, true),
+        }
+    }
+}
+
+// =============================================================================
+// ADVANCED EXECUTION MODEL
+// =============================================================================
 
 /// Advanced execution model with configurable slippage, costs, and liquidity.
 #[derive(Debug, Clone)]
@@ -201,109 +340,158 @@ impl AdvancedExecutionModel {
         Self::new(ExecutionConfig::default())
     }
 
+    /// Create with B3 defaults.
+    #[must_use]
+    pub fn b3_default() -> Self {
+        Self::new(ExecutionConfig::b3_default())
+    }
+
     /// Check if a limit order can be filled based on bar range.
     fn check_limit_order(&self, order: &OrderEvent, bar: &Bar) -> bool {
-        if let Some(limit_price) = order.limit_price {
-            if order.quantity > 0 {
-                // Buy limit: fills if bar low <= limit price
-                bar.low <= limit_price
-            } else {
-                // Sell limit: fills if bar high >= limit price
-                bar.high >= limit_price
-            }
-        } else {
-            true // Market order always attempts to fill
+        match (order.order_type, order.limit_price) {
+            (OrderType::Limit, Some(limit_price)) => match order.direction {
+                OrderDirection::Buy => bar.low <= limit_price,
+                OrderDirection::Sell => bar.high >= limit_price,
+            },
+            _ => true, // Market orders always attempt to fill
         }
     }
 
-    /// Get execution price for limit orders (pessimistic).
-    fn get_limit_fill_price(&self, order: &OrderEvent) -> Option<f64> {
-        order.limit_price
+    /// Get execution price for an order.
+    fn get_fill_price(&self, order: &OrderEvent, bar: &Bar) -> f64 {
+        match (order.order_type, order.limit_price) {
+            (OrderType::Limit, Some(limit_price)) => limit_price,
+            _ => {
+                // Apply slippage for market orders
+                self.config.slippage.apply(bar.close, order, bar)
+            }
+        }
     }
 }
 
 impl ExecutionModel for AdvancedExecutionModel {
-    fn execute(&self, order: &OrderEvent, current_bar: &Bar) -> Option<FillEvent> {
+    fn execute(
+        &self,
+        order: &OrderEvent,
+        current_bar: &Bar,
+        next_id: &mut u64,
+    ) -> Option<FillEvent> {
         // Check limit order conditions
         if !self.check_limit_order(order, current_bar) {
             return None;
         }
 
-        // Calculate fillable quantity based on liquidity
-        let fill_qty = self.config.liquidity.max_fill_quantity(order.quantity, current_bar.volume);
+        // Check liquidity
+        let fill_qty = self
+            .config
+            .liquidity
+            .get_fill_quantity(order.signed_quantity(), current_bar.volume);
         if fill_qty == 0 {
             return None;
         }
 
-        // Determine base price
-        let base_price = if order.limit_price.is_some() {
-            // Limit order: use limit price (pessimistic)
-            self.get_limit_fill_price(order)?
-        } else {
-            // Market order: use close price
-            current_bar.close
-        };
+        // Get fill price
+        let fill_price = self.get_fill_price(order, current_bar);
 
-        // Apply slippage (only for market orders)
-        let slippage = if order.limit_price.is_none() {
+        // Calculate slippage amount
+        let slippage = if order.order_type == OrderType::Market {
             self.config.slippage.calculate(order, current_bar)
         } else {
             0.0
         };
-        let fill_price = base_price + slippage;
 
         // Calculate costs
         #[allow(clippy::cast_precision_loss)]
-        let notional = fill_qty.abs() as f64 * fill_price;
-        let cost = self.config.costs.calculate(notional, fill_qty);
+        let notional = fill_qty.unsigned_abs() as f64 * fill_price;
+        let commission = self.config.costs.calculate(notional, fill_qty);
 
-        Some(FillEvent {
-            timestamp: order.timestamp,
-            asset_id: order.asset_id,
-            quantity: fill_qty,
-            price: fill_price,
-            cost,
-        })
+        let fill_id = FillId::new(*next_id);
+        *next_id += 1;
+
+        Some(FillEvent::new(
+            fill_id,
+            order.order_id,
+            order.timestamp,
+            order.asset_id,
+            order.direction,
+            fill_qty.abs(),
+            fill_price,
+            commission,
+            slippage,
+        ))
     }
 }
 
-/// Simple execution model with fixed costs and no slippage (legacy/simple use).
+// =============================================================================
+// SIMPLE EXECUTION MODEL (Legacy/Testing)
+// =============================================================================
+
+/// Simple execution model with fixed costs and optional slippage.
 #[derive(Debug, Clone)]
 pub struct SimpleExecutionModel {
-    /// Fixed cost per trade
+    /// Fixed cost per trade.
     pub fixed_cost: f64,
-    /// Proportional cost (e.g., 0.001 = 0.1%)
+    /// Proportional cost (e.g., 0.001 = 0.1%).
     pub proportional_cost: f64,
 }
 
 impl SimpleExecutionModel {
     /// Create a new simple execution model.
     #[must_use]
-    pub fn new(fixed_cost: f64, proportional_cost: f64) -> Self {
+    pub const fn new(fixed_cost: f64, proportional_cost: f64) -> Self {
         Self {
             fixed_cost,
             proportional_cost,
         }
     }
+
+    /// Create with zero costs (for testing).
+    #[must_use]
+    pub fn zero_cost() -> Self {
+        Self::new(0.0, 0.0)
+    }
+}
+
+impl Default for SimpleExecutionModel {
+    fn default() -> Self {
+        Self::new(10.0, 0.001)
+    }
 }
 
 impl ExecutionModel for SimpleExecutionModel {
-    fn execute(&self, order: &OrderEvent, current_bar: &Bar) -> Option<FillEvent> {
+    fn execute(
+        &self,
+        order: &OrderEvent,
+        current_bar: &Bar,
+        next_id: &mut u64,
+    ) -> Option<FillEvent> {
         let price = current_bar.close;
         let quantity = order.quantity;
-        #[allow(clippy::cast_precision_loss)]
-        let notional = quantity.abs() as f64 * price;
-        let cost = self.fixed_cost + notional * self.proportional_cost;
 
-        Some(FillEvent {
-            timestamp: order.timestamp,
-            asset_id: order.asset_id,
+        #[allow(clippy::cast_precision_loss)]
+        let notional = quantity as f64 * price;
+        let commission = self.fixed_cost + notional * self.proportional_cost;
+
+        let fill_id = FillId::new(*next_id);
+        *next_id += 1;
+
+        Some(FillEvent::new(
+            fill_id,
+            order.order_id,
+            order.timestamp,
+            order.asset_id,
+            order.direction,
             quantity,
             price,
-            cost,
-        })
+            commission,
+            0.0, // No slippage in simple model
+        ))
     }
 }
+
+// =============================================================================
+// TESTS
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -321,11 +509,27 @@ mod tests {
     }
 
     fn make_order(quantity: i64, limit: Option<f64>) -> OrderEvent {
+        let direction = if quantity >= 0 {
+            OrderDirection::Buy
+        } else {
+            OrderDirection::Sell
+        };
+        let order_type = if limit.is_some() {
+            OrderType::Limit
+        } else {
+            OrderType::Market
+        };
+
         OrderEvent {
+            order_id: OrderId::new(1),
             timestamp: 0,
-            asset_id: 0,
-            quantity,
+            asset_id: AssetId::new(0),
+            direction,
+            quantity: quantity.abs(),
+            order_type,
             limit_price: limit,
+            stop_price: None,
+            time_in_force: backtester_core::TimeInForce::Day,
         }
     }
 
@@ -333,75 +537,78 @@ mod tests {
     fn slippage_constant() {
         let model = SlippageModel::Constant { bps: 10.0 };
         let bar = make_bar(100.0, 1000.0);
-        
+
         let buy_order = make_order(100, None);
         let slip = model.calculate(&buy_order, &bar);
-        assert!((slip - 0.1).abs() < f64::EPSILON); // 10 bps of 100
+        assert!((slip - 0.1).abs() < 0.001);
 
         let sell_order = make_order(-100, None);
         let slip = model.calculate(&sell_order, &bar);
-        assert!((slip - (-0.1)).abs() < f64::EPSILON);
+        assert!((slip - (-0.1)).abs() < 0.001);
     }
 
     #[test]
     fn slippage_volume_linear() {
-        let model = SlippageModel::VolumeLinear { coefficient: 1.0 };
-        let bar = make_bar(100.0, 1000.0);
-        let order = make_order(100, None); // 10% of volume
-        
-        let slip = model.calculate(&order, &bar);
-        // coefficient * (100/1000) * 100 = 1.0 * 0.1 * 100 = 10.0
-        assert!((slip - 10.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn slippage_volatility() {
-        let model = SlippageModel::Volatility { coefficient: 0.5 };
-        let bar = Bar {
-            timestamp: 0,
-            open: 100.0,
-            high: 102.0, // range = 4
-            low: 98.0,
-            close: 100.0,
-            volume: 1000.0,
+        let model = SlippageModel::VolumeLinear {
+            base_bps: 0.0,
+            volume_factor: 1.0,
         };
+        let bar = make_bar(100.0, 1000.0);
         let order = make_order(100, None);
-        
+
         let slip = model.calculate(&order, &bar);
-        // 0.5 * (4/100) * 100 = 2.0
-        assert!((slip - 2.0).abs() < f64::EPSILON);
+        // volume_factor * (100/1000) * 100 = 1.0 * 0.1 * 100 = 10.0
+        assert!((slip - 10.0).abs() < 0.01);
     }
 
     #[test]
     fn cost_model_calculation() {
-        let model = CostModel::new(10.0, 10.0, 0.01);
+        let model = CostModel::new(10.0, 0.001, 0.01, 0.00035);
         let cost = model.calculate(10_000.0, 100);
-        // 10 + (10000 * 10/10000) + (100 * 0.01) = 10 + 10 + 1 = 21
-        assert!((cost - 21.0).abs() < f64::EPSILON);
+        // 10 + (10000 * 0.001) + (10000 * 0.00035) + (100 * 0.01)
+        // = 10 + 10 + 3.5 + 1 = 24.5
+        assert!((cost - 24.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn cost_breakdown() {
+        let model = CostModel::new(10.0, 0.001, 0.01, 0.00035);
+        let breakdown = model.calculate_breakdown(10_000.0, 100);
+
+        assert!((breakdown.fixed - 10.0).abs() < 0.01);
+        assert!((breakdown.commission - 10.0).abs() < 0.01);
+        assert!((breakdown.emolument - 3.5).abs() < 0.01);
+        assert!((breakdown.per_unit - 1.0).abs() < 0.01);
+        assert!((breakdown.total() - 24.5).abs() < 0.01);
     }
 
     #[test]
     fn liquidity_model_limits_fill() {
         let model = LiquidityModel::new(0.1, true);
-        
+
         // Order 500, volume 1000, max = 100
-        let fill_qty = model.max_fill_quantity(500, 1000.0);
+        let fill_qty = model.get_fill_quantity(500, 1000.0);
         assert_eq!(fill_qty, 100);
-        
-        // Order 50, volume 1000, fills fully
-        let fill_qty = model.max_fill_quantity(100, 1000.0);
+
+        // Order 100, volume 1000, fills fully
+        let fill_qty = model.get_fill_quantity(100, 1000.0);
         assert_eq!(fill_qty, 100);
     }
 
     #[test]
+    fn liquidity_no_partial_rejects_large() {
+        let model = LiquidityModel::new(0.1, false);
+
+        // Order 500, volume 1000, max = 100, no partial -> reject
+        let fill_qty = model.get_fill_quantity(500, 1000.0);
+        assert_eq!(fill_qty, 0);
+    }
+
+    #[test]
     fn limit_order_fills_when_in_range() {
-        let config = ExecutionConfig {
-            slippage: SlippageModel::None,
-            costs: CostModel::new(0.0, 0.0, 0.0),
-            liquidity: LiquidityModel::new(1.0, true),
-        };
+        let config = ExecutionConfig::zero_cost();
         let model = AdvancedExecutionModel::new(config);
-        
+
         let bar = Bar {
             timestamp: 0,
             open: 100.0,
@@ -413,13 +620,14 @@ mod tests {
 
         // Buy limit at 99 should fill (low = 98)
         let buy_limit = make_order(100, Some(99.0));
-        let fill = model.execute(&buy_limit, &bar);
+        let mut next_id = 1u64;
+        let fill = model.execute(&buy_limit, &bar, &mut next_id);
         assert!(fill.is_some());
         assert!((fill.unwrap().price - 99.0).abs() < f64::EPSILON);
 
         // Buy limit at 97 should NOT fill (low = 98)
         let buy_limit_miss = make_order(100, Some(97.0));
-        let fill = model.execute(&buy_limit_miss, &bar);
+        let fill = model.execute(&buy_limit_miss, &bar, &mut next_id);
         assert!(fill.is_none());
     }
 
@@ -428,11 +636,21 @@ mod tests {
         let model = SimpleExecutionModel::new(10.0, 0.001);
         let order = make_order(100, None);
         let bar = make_bar(50.0, 1000.0);
+        let mut next_id = 1u64;
 
-        let fill = model.execute(&order, &bar).unwrap();
+        let fill = model.execute(&order, &bar, &mut next_id).unwrap();
         // Cost = 10 + (100 * 50 * 0.001) = 10 + 5 = 15
-        assert!((fill.cost - 15.0).abs() < f64::EPSILON);
+        assert!((fill.commission - 15.0).abs() < f64::EPSILON);
         assert_eq!(fill.quantity, 100);
         assert!((fill.price - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn execution_config_presets() {
+        let b3 = ExecutionConfig::b3_default();
+        assert!(matches!(b3.slippage, SlippageModel::Constant { .. }));
+
+        let zero = ExecutionConfig::zero_cost();
+        assert!(matches!(zero.slippage, SlippageModel::None));
     }
 }

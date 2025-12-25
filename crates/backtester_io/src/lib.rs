@@ -7,17 +7,310 @@
 //! - Normalize timestamps to UTC
 //! - Validate OHLC invariants
 //! - Generate ordered `MarketEvent` stream
+//! - Load benchmark data (IBOV) for relative return calculations
 
-#![deny(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
+
+pub mod mmap;
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-pub use backtester_core::{AssetId, Bar, MarketEvent, Timestamp};
+pub use backtester_core::{AssetId, Bar, MarketEvent};
+
+// =============================================================================
+// Benchmark Data (IBOV) for FuzzyFajuto
+// =============================================================================
+
+/// Single benchmark (index) bar data.
+#[derive(Debug, Clone)]
+pub struct BenchmarkBar {
+    /// Timestamp (date) in nanoseconds UTC
+    pub timestamp: i64,
+    /// Opening price
+    pub open: f64,
+    /// High price
+    pub high: f64,
+    /// Low price
+    pub low: f64,
+    /// Close price
+    pub close: f64,
+    /// Volume
+    pub volume: f64,
+    /// Daily return (close[t] / close[t-1] - 1)
+    pub daily_return: f64,
+}
+
+/// Benchmark data container indexed by date.
+/// Provides O(1) lookup of benchmark returns by timestamp.
+#[derive(Debug, Clone, Default)]
+pub struct BenchmarkData {
+    /// Map from date (truncated to day) to benchmark bar
+    bars_by_date: HashMap<i64, BenchmarkBar>,
+    /// Ordered list of timestamps (for iteration)
+    dates: Vec<i64>,
+    /// Ticker symbol (e.g., "^BVSP")
+    pub ticker: String,
+}
+
+impl BenchmarkData {
+    /// Create empty benchmark data.
+    #[must_use]
+    pub fn new(ticker: &str) -> Self {
+        Self {
+            bars_by_date: HashMap::new(),
+            dates: Vec::new(),
+            ticker: ticker.to_string(),
+        }
+    }
+
+    /// Load benchmark data from a CSV file.
+    /// Expected format: timestamp,ticker,open,high,low,close,volume
+    pub fn from_csv<P: AsRef<Path>>(path: P, ticker: &str) -> Result<Self, DataError> {
+        let loader = CsvLoader::new().skip_invalid(true);
+        let raw_bars = loader.load(path)?;
+
+        // Filter for the specific benchmark ticker
+        let mut filtered: Vec<RawBar> = raw_bars
+            .into_iter()
+            .filter(|b| b.ticker == ticker)
+            .collect();
+
+        // Sort by timestamp
+        filtered.sort_by_key(|b| b.timestamp);
+
+        let mut benchmark = Self::new(ticker);
+        let mut prev_close: Option<f64> = None;
+
+        for raw in filtered {
+            let daily_return = if let Some(prev) = prev_close {
+                if prev > 0.0 {
+                    (raw.close / prev) - 1.0
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            let bar = BenchmarkBar {
+                timestamp: raw.timestamp,
+                open: raw.open,
+                high: raw.high,
+                low: raw.low,
+                close: raw.close,
+                volume: raw.volume,
+                daily_return,
+            };
+
+            // Truncate timestamp to day for indexing
+            let day_ts = Self::truncate_to_day(raw.timestamp);
+            benchmark.bars_by_date.insert(day_ts, bar);
+            benchmark.dates.push(raw.timestamp);
+
+            prev_close = Some(raw.close);
+        }
+
+        Ok(benchmark)
+    }
+
+    /// Truncate nanosecond timestamp to start of day.
+    fn truncate_to_day(ts: i64) -> i64 {
+        // 86400 seconds per day, converted to nanoseconds
+        const NANOS_PER_DAY: i64 = 86_400_000_000_000;
+        (ts / NANOS_PER_DAY) * NANOS_PER_DAY
+    }
+
+    /// Get benchmark bar for a given timestamp.
+    #[must_use]
+    pub fn get_bar(&self, timestamp: i64) -> Option<&BenchmarkBar> {
+        let day_ts = Self::truncate_to_day(timestamp);
+        self.bars_by_date.get(&day_ts)
+    }
+
+    /// Get benchmark return for a given date.
+    #[must_use]
+    pub fn get_return(&self, timestamp: i64) -> Option<f64> {
+        self.get_bar(timestamp).map(|b| b.daily_return)
+    }
+
+    /// Get benchmark close price for a given date.
+    #[must_use]
+    pub fn get_close(&self, timestamp: i64) -> Option<f64> {
+        self.get_bar(timestamp).map(|b| b.close)
+    }
+
+    /// Get number of benchmark bars loaded.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bars_by_date.len()
+    }
+
+    /// Check if benchmark data is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bars_by_date.is_empty()
+    }
+
+    /// Get all dates with benchmark data.
+    #[must_use]
+    pub fn dates(&self) -> &[i64] {
+        &self.dates
+    }
+}
+
+/// Asset with daily returns computed for FuzzyFajuto.
+#[derive(Debug, Clone)]
+pub struct AssetDailyData {
+    /// Asset identifier
+    pub asset_id: AssetId,
+    /// Ticker symbol
+    pub ticker: String,
+    /// Timestamp (date)
+    pub timestamp: i64,
+    /// Bar data
+    pub bar: Bar,
+    /// Daily return of the asset
+    pub daily_return: f64,
+    /// Previous day's close (for reference)
+    pub prev_close: Option<f64>,
+}
+
+/// Normalized data with benchmark for FuzzyFajuto strategy.
+#[derive(Debug, Clone)]
+pub struct FuzzyDataset {
+    /// Asset daily data indexed by (timestamp_day, asset_id)
+    pub asset_data: HashMap<(i64, AssetId), AssetDailyData>,
+    /// Benchmark data
+    pub benchmark: BenchmarkData,
+    /// All unique trading dates (sorted)
+    pub trading_dates: Vec<i64>,
+    /// Ticker to AssetId mapping
+    pub ticker_map: HashMap<String, AssetId>,
+    /// AssetId to Ticker mapping (reverse)
+    pub id_to_ticker: HashMap<AssetId, String>,
+    /// Number of assets
+    pub num_assets: usize,
+}
+
+impl FuzzyDataset {
+    /// Load a FuzzyDataset from asset CSV and benchmark CSV.
+    pub fn load<P: AsRef<Path>>(
+        asset_path: P,
+        benchmark_path: P,
+        benchmark_ticker: &str,
+    ) -> Result<Self, DataError> {
+        // Load benchmark
+        let benchmark = BenchmarkData::from_csv(&benchmark_path, benchmark_ticker)?;
+
+        // Load asset data
+        let loader = CsvLoader::new().skip_invalid(true);
+        let raw_bars = loader.load(&asset_path)?;
+
+        // Build normalizer and compute returns
+        let mut normalizer = Normalizer::new();
+        let mut prev_closes: HashMap<AssetId, f64> = HashMap::new();
+        let mut asset_data: HashMap<(i64, AssetId), AssetDailyData> = HashMap::new();
+        let mut trading_dates_set: std::collections::HashSet<i64> =
+            std::collections::HashSet::new();
+
+        // Sort by timestamp first
+        let mut sorted_bars = raw_bars;
+        sorted_bars.sort_by_key(|b| (b.timestamp, b.ticker.clone()));
+
+        for raw in sorted_bars {
+            let asset_id = normalizer.register_ticker(raw.ticker.clone());
+            let day_ts = BenchmarkData::truncate_to_day(raw.timestamp);
+
+            let prev_close = prev_closes.get(&asset_id).copied();
+            let daily_return = if let Some(prev) = prev_close {
+                if prev > 0.0 {
+                    (raw.close / prev) - 1.0
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            let bar = Bar {
+                timestamp: raw.timestamp,
+                open: raw.open,
+                high: raw.high,
+                low: raw.low,
+                close: raw.close,
+                volume: raw.volume,
+            };
+
+            let data = AssetDailyData {
+                asset_id,
+                ticker: raw.ticker.clone(),
+                timestamp: raw.timestamp,
+                bar,
+                daily_return,
+                prev_close,
+            };
+
+            asset_data.insert((day_ts, asset_id), data);
+            trading_dates_set.insert(day_ts);
+            prev_closes.insert(asset_id, raw.close);
+        }
+
+        // Sort trading dates
+        let mut trading_dates: Vec<i64> = trading_dates_set.into_iter().collect();
+        trading_dates.sort();
+
+        // Build reverse ticker map
+        let mut id_to_ticker = HashMap::new();
+        for (ticker, &id) in &normalizer.ticker_map {
+            id_to_ticker.insert(id, ticker.clone());
+        }
+
+        let num_assets = normalizer.asset_count();
+
+        Ok(Self {
+            asset_data,
+            benchmark,
+            trading_dates,
+            ticker_map: normalizer.ticker_map,
+            id_to_ticker,
+            num_assets,
+        })
+    }
+
+    /// Get asset data for a specific date and asset.
+    #[must_use]
+    pub fn get_asset(&self, timestamp: i64, asset_id: AssetId) -> Option<&AssetDailyData> {
+        let day_ts = BenchmarkData::truncate_to_day(timestamp);
+        self.asset_data.get(&(day_ts, asset_id))
+    }
+
+    /// Get all assets for a specific date.
+    #[must_use]
+    pub fn get_assets_for_date(&self, timestamp: i64) -> Vec<&AssetDailyData> {
+        let day_ts = BenchmarkData::truncate_to_day(timestamp);
+        self.asset_data
+            .iter()
+            .filter(|((ts, _), _)| *ts == day_ts)
+            .map(|(_, data)| data)
+            .collect()
+    }
+
+    /// Get benchmark return for a date.
+    #[must_use]
+    pub fn get_benchmark_return(&self, timestamp: i64) -> Option<f64> {
+        self.benchmark.get_return(timestamp)
+    }
+
+    /// Get ticker for an AssetId.
+    #[must_use]
+    pub fn get_ticker(&self, asset_id: AssetId) -> Option<&str> {
+        self.id_to_ticker.get(&asset_id).map(|s| s.as_str())
+    }
+}
 
 /// Error types for data loading.
 #[derive(Debug)]
@@ -51,7 +344,7 @@ pub struct RawBar {
     /// Ticker symbol
     pub ticker: String,
     /// Timestamp in nanoseconds (UTC)
-    pub timestamp: Timestamp,
+    pub timestamp: i64,
     /// Opening price
     pub open: f64,
     /// Highest price
@@ -65,10 +358,10 @@ pub struct RawBar {
 }
 
 impl RawBar {
-    /// Validate OHLC invariants.
-    /// - high >= all other prices
-    /// - low <= all other prices
+    /// Validate OHLC invariants (lenient mode).
     /// - all prices non-negative
+    /// - volume non-negative
+    /// Note: We allow close outside high/low range to support adjusted prices
     pub fn validate(&self) -> Result<(), DataError> {
         if self.open < 0.0 || self.high < 0.0 || self.low < 0.0 || self.close < 0.0 {
             return Err(DataError::ValidationError(format!(
@@ -82,16 +375,12 @@ impl RawBar {
                 self.ticker, self.volume
             )));
         }
-        if self.high < self.open || self.high < self.close || self.high < self.low {
+        // Lenient validation: only check high >= low
+        // Note: close can be outside this range for adjusted prices
+        if self.high < self.low {
             return Err(DataError::ValidationError(format!(
-                "High {} is not the highest for {}",
-                self.high, self.ticker
-            )));
-        }
-        if self.low > self.open || self.low > self.close || self.low > self.high {
-            return Err(DataError::ValidationError(format!(
-                "Low {} is not the lowest for {}",
-                self.low, self.ticker
+                "High {} < Low {} for {}",
+                self.high, self.low, self.ticker
             )));
         }
         Ok(())
@@ -107,7 +396,9 @@ impl CsvLoader {
     /// Create a new CSV loader.
     #[must_use]
     pub fn new() -> Self {
-        Self { skip_invalid: false }
+        Self {
+            skip_invalid: false,
+        }
     }
 
     /// Configure whether to skip invalid bars (default: false, return error).
@@ -130,7 +421,7 @@ impl CsvLoader {
         for line_result in reader.lines() {
             line_num += 1;
             let line = line_result.map_err(|e| DataError::IoError(e.to_string()))?;
-            
+
             // Skip header and empty lines
             if line_num == 1 && line.to_lowercase().contains("timestamp") {
                 continue;
@@ -184,12 +475,11 @@ impl Default for CsvLoader {
 }
 
 fn parse_f64(s: &str, line: usize, field: &str) -> Result<f64, DataError> {
-    s.parse().map_err(|_| {
-        DataError::ParseError(format!("Line {line}: invalid {field} value '{s}'"))
-    })
+    s.parse()
+        .map_err(|_| DataError::ParseError(format!("Line {line}: invalid {field} value '{s}'")))
 }
 
-fn parse_timestamp(s: &str) -> Result<Timestamp, String> {
+fn parse_timestamp(s: &str) -> Result<i64, String> {
     // Try epoch nanoseconds first
     if let Ok(ts) = s.parse::<i64>() {
         return Ok(ts);
@@ -211,8 +501,9 @@ fn parse_timestamp(s: &str) -> Result<Timestamp, String> {
 
 /// Normalizer: maps tickers to AssetIds and orders events chronologically.
 pub struct Normalizer {
-    ticker_map: HashMap<String, AssetId>,
-    next_id: AssetId,
+    /// Map from ticker string to AssetId
+    pub ticker_map: HashMap<String, AssetId>,
+    next_id: u16,
 }
 
 impl Normalizer {
@@ -240,7 +531,7 @@ impl Normalizer {
         if let Some(&id) = self.ticker_map.get(&ticker) {
             return id;
         }
-        let id = self.next_id;
+        let id = AssetId::new(self.next_id);
         self.ticker_map.insert(ticker, id);
         self.next_id += 1;
         id
@@ -289,7 +580,8 @@ impl Normalizer {
 
         // Sort by (timestamp, asset_id) for stable deterministic order
         events.sort_by(|a, b| {
-            a.bar.timestamp
+            a.bar
+                .timestamp
                 .cmp(&b.bar.timestamp)
                 .then_with(|| a.asset_id.cmp(&b.asset_id))
         });
@@ -381,7 +673,12 @@ impl BrapiLoader {
     /// Fetch historical data for a ticker.
     /// Range: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     /// Interval: 1d, 1wk, 1mo
-    pub fn fetch(&self, ticker: &str, range: &str, interval: &str) -> Result<Vec<RawBar>, DataError> {
+    pub fn fetch(
+        &self,
+        ticker: &str,
+        range: &str,
+        interval: &str,
+    ) -> Result<Vec<RawBar>, DataError> {
         let url = format!(
             "{}/quote/{}?range={}&interval={}",
             self.base_url, ticker, range, interval
@@ -406,7 +703,9 @@ impl BrapiLoader {
             .ok_or_else(|| DataError::ParseError("Missing 'results' array".into()))?;
 
         if results.is_empty() {
-            return Err(DataError::ParseError(format!("No data for ticker: {ticker}")));
+            return Err(DataError::ParseError(format!(
+                "No data for ticker: {ticker}"
+            )));
         }
 
         let historical = results[0]["historicalDataPrice"]
@@ -425,9 +724,9 @@ impl BrapiLoader {
                 open: item["open"].as_f64().unwrap_or(0.0),
                 high: item["high"].as_f64().unwrap_or(0.0),
                 low: item["low"].as_f64().unwrap_or(0.0),
-                close: item["adjustedClose"].as_f64().unwrap_or(
-                    item["close"].as_f64().unwrap_or(0.0)
-                ),
+                close: item["adjustedClose"]
+                    .as_f64()
+                    .unwrap_or(item["close"].as_f64().unwrap_or(0.0)),
                 volume: item["volume"].as_f64().unwrap_or(0.0),
             };
 
@@ -524,7 +823,7 @@ impl B3HistoricalLoader {
 
             let data_pregao = &line[2..10];
             let cod_neg = line[12..24].trim();
-            
+
             // Parse date YYYYMMDD to timestamp
             let timestamp = parse_b3_date(data_pregao)?;
 
@@ -612,7 +911,7 @@ impl B3HistoricalLoader {
 
                     let data_pregao = &line[2..10];
                     let cod_neg = line[12..24].trim();
-                    
+
                     if let Ok(timestamp) = parse_b3_date(data_pregao) {
                         let preabe = parse_b3_price(&line[56..69]).unwrap_or(0.0);
                         let premax = parse_b3_price(&line[69..82]).unwrap_or(0.0);
@@ -650,7 +949,7 @@ impl B3HistoricalLoader {
     }
 }
 
-fn parse_b3_date(s: &str) -> Result<Timestamp, DataError> {
+fn parse_b3_date(s: &str) -> Result<i64, DataError> {
     use chrono::NaiveDate;
     let date = NaiveDate::parse_from_str(s, "%Y%m%d")
         .map_err(|_| DataError::ParseError(format!("Invalid B3 date: {s}")))?;
@@ -660,16 +959,18 @@ fn parse_b3_date(s: &str) -> Result<Timestamp, DataError> {
 }
 
 fn parse_b3_price(s: &str) -> Result<f64, DataError> {
-    let val: i64 = s.trim().parse().map_err(|_| {
-        DataError::ParseError(format!("Invalid B3 price: '{s}'"))
-    })?;
+    let val: i64 = s
+        .trim()
+        .parse()
+        .map_err(|_| DataError::ParseError(format!("Invalid B3 price: '{s}'")))?;
     Ok(val as f64 / 100.0)
 }
 
 fn parse_b3_volume(s: &str) -> Result<f64, DataError> {
-    let val: i64 = s.trim().parse().map_err(|_| {
-        DataError::ParseError(format!("Invalid B3 volume: '{s}'"))
-    })?;
+    let val: i64 = s
+        .trim()
+        .parse()
+        .map_err(|_| DataError::ParseError(format!("Invalid B3 volume: '{s}'")))?;
     Ok(val as f64)
 }
 
@@ -714,8 +1015,8 @@ mod tests {
         let id1 = normalizer.register_ticker("PETR4".to_string());
         let id2 = normalizer.register_ticker("VALE3".to_string());
         let id1_again = normalizer.register_ticker("PETR4".to_string());
-        assert_eq!(id1, 0);
-        assert_eq!(id2, 1);
+        assert_eq!(id1, AssetId::new(0));
+        assert_eq!(id2, AssetId::new(1));
         assert_eq!(id1, id1_again);
     }
 
@@ -725,12 +1026,20 @@ mod tests {
             RawBar {
                 ticker: "A".into(),
                 timestamp: 2000,
-                open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0,
+                open: 1.0,
+                high: 1.0,
+                low: 1.0,
+                close: 1.0,
+                volume: 1.0,
             },
             RawBar {
                 ticker: "B".into(),
                 timestamp: 1000,
-                open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0,
+                open: 1.0,
+                high: 1.0,
+                low: 1.0,
+                close: 1.0,
+                volume: 1.0,
             },
         ];
         let mut normalizer = Normalizer::new();
@@ -743,12 +1052,26 @@ mod tests {
     fn event_stream_iterates() {
         let events = vec![
             MarketEvent {
-                asset_id: 0,
-                bar: Bar { timestamp: 1000, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+                asset_id: AssetId::new(0),
+                bar: Bar {
+                    timestamp: 1000,
+                    open: 1.0,
+                    high: 1.0,
+                    low: 1.0,
+                    close: 1.0,
+                    volume: 1.0,
+                },
             },
             MarketEvent {
-                asset_id: 1,
-                bar: Bar { timestamp: 2000, open: 2.0, high: 2.0, low: 2.0, close: 2.0, volume: 2.0 },
+                asset_id: AssetId::new(1),
+                bar: Bar {
+                    timestamp: 2000,
+                    open: 2.0,
+                    high: 2.0,
+                    low: 2.0,
+                    close: 2.0,
+                    volume: 2.0,
+                },
             },
         ];
         let stream = MarketEventStream::new(events);

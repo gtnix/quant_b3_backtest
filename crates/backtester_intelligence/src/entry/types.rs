@@ -70,7 +70,7 @@ pub struct EntryTarget {
 }
 
 /// Reason for excluding an asset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExclusionReason {
     /// Volume below minimum threshold
     InsufficientLiquidity,
@@ -169,6 +169,8 @@ pub struct EntryDiagnostics {
     pub estimated_costs: Decimal,
     /// Sum of weights (should be ~1.0)
     pub total_weight: f64,
+    /// Cash residual after allocation (capital - sum(shares * price))
+    pub cash_residual: Decimal,
 }
 
 /// Result of entry policy evaluation.

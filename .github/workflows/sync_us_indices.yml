@@ -1,0 +1,102 @@
+name: Sync US Indices
+
+on:
+  schedule:
+    # Executa às 22:00 UTC (após fechamento NYSE)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      indices:
+        description: 'Índices para sincronizar (vazio = todos)'
+        required: false
+        default: ''
+      sync_intraday:
+        description: 'Sincronizar dados intraday (true/false)'
+        required: false
+        default: 'true'
+      sync_daily:
+        description: 'Sincronizar dados diários (true/false)'
+        required: false
+        default: 'true'
+      sync_dividends:
+        description: 'Sincronizar dividendos (true/false)'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-us-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          pip install httpx psycopg2-binary python-dotenv pandas lxml typer rich yfinance asyncpg
+      
+      - name: Sync US Indices Composition
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          python -m datahub_us indices-sync ${{ github.event.inputs.indices && format('--indices {0}', github.event.inputs.indices) || '' }}
+      
+      - name: Sync US Intraday Data (30m)
+        if: github.event.inputs.sync_intraday != 'false'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          python -m datahub_us intraday-sync --interval 30m --period 5d
+      
+      - name: Sync US Daily Data
+        if: github.event.inputs.sync_daily != 'false'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          python -m datahub_us daily-sync --period 1mo
+      
+      - name: Sync US Dividends
+        id: dividends
+        if: github.event.inputs.sync_dividends != 'false'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          python -m datahub_us dividends-sync --skip-existing 2>&1 | tee /tmp/dividends.log
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## US Data Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "Executed at: $(TZ=America/New_York date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Indices composition | synced |" >> $GITHUB_STEP_SUMMARY
+          echo "| Intraday (30m) | ${{ github.event.inputs.sync_intraday != 'false' && 'synced' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Daily OHLCV | ${{ github.event.inputs.sync_daily != 'false' && 'synced' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dividends | ${{ github.event.inputs.sync_dividends != 'false' && 'synced' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f /tmp/dividends.log ]; then
+            echo "### Dividends Details" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -15 /tmp/dividends.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi

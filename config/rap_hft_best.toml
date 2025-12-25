@@ -1,0 +1,61 @@
+# RAP HFT Best Config - Otimizada via TPE
+# Período: 2022-2024 | IBOV | Máxima Performance
+
+name = "RAP HFT Best"
+initial_capital = 100000.0
+equity = 100000.0
+leverage_max = 3.0
+gross_exposure_max = 300000.0
+
+# Dados
+data_source = "cache"
+universe = "IBOV"
+min_avg_volume = 2000000
+cache_dir = "cache"
+
+# Seleção de Pares (relaxado para gerar mais sinais)
+lookback_days = 60
+top_n_pairs = 30
+cointegration_test = "engle_granger"
+cointegration_pvalue = 0.15
+max_pairs_per_asset = 4
+
+# Rebalanceamento
+rebalance_frequency = "weekly"
+daily_exit_monitoring = true
+max_entry_day = 20
+
+# Z-Scores (relaxado)
+entry_zscore = 1.5
+exit_zscore = 0.5
+stop_zscore = 2.5
+
+# Kalman (otimizado)
+kalman_delta = 0.0035
+kalman_ve = 0.001
+
+# Gestão de Risco (otimizado)
+kelly_fraction = 0.53
+max_exposure_per_pair = 0.22
+max_total_exposure = 1.0
+kelly_lookback_trades = 20
+
+# Execução
+execution_price = "close"
+slippage_bps = 2.0
+lot_size = 100
+
+# Custos B3
+brokerage_per_order = 5.0
+brokerage_bps = 3.0
+b3_emoluments_bps = 3.25
+stock_loan_rate_pa = 0.03
+
+# Validação
+fail_fast = true
+neutrality_tolerance = 0.02
+
+# Período 
+start_date = "2022-01-01"
+end_date = "2024-12-31"
+
