@@ -2,6 +2,29 @@
 //!
 //! Tests the entry pipeline with N=100, 1000, 10000 assets to validate
 //! scalability and identify hot spots.
+//!
+//! # Performance Budgets (Target Thresholds)
+//!
+//! These are the target performance budgets for the entry pipeline:
+//!
+//! | N      | Budget   | Complexity |
+//! |--------|----------|------------|
+//! | 100    | < 500µs  | O(N + K log K) |
+//! | 1,000  | < 5ms    | O(N + K log K) |
+//! | 10,000 | < 50ms   | O(N + K log K) |
+//!
+//! Where K = top_n (typically 20-50).
+//!
+//! # Running Benchmarks
+//!
+//! ```bash
+//! cargo bench -p backtester_intelligence
+//! ```
+//!
+//! # Regression Detection
+//!
+//! The `perf_smoke_1k_under_50ms` test in `entry_stress.rs` provides
+//! lightweight regression detection in CI without full criterion overhead.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_decimal::Decimal;

@@ -60,3 +60,31 @@ cargo bench -p backtester_engine
 
 See `/docs` for full architecture documentation.
 
+## Interest Rates & Carry Filter (Technique 7)
+
+Sync risk-free rates for BR (SELIC) and US (T-Bill 3M):
+
+```bash
+# Set FRED API key (get free at fred.stlouisfed.org)
+export FRED_API_KEY="your_api_key_here"
+
+# Sync all rates (5 years default)
+cargo run -p market_data -- sync-interest-rates --all
+
+# Check status
+cargo run -p market_data -- interest-rates-status
+```
+
+Enable in backtest config:
+```toml
+[risk_free]
+source = "db"
+allow_fallback = false
+```
+
+
+
+
+
+
+

@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Core types, traits, and events for the backtester"
 
 [dependencies]
+wide = { workspace = true }
 
 [dev-dependencies]
 criterion.workspace = true
@@ -14,4 +15,10 @@ criterion.workspace = true
 [[bench]]
 name = "core_bench"
 harness = false
+
+
+
+
+
+
 

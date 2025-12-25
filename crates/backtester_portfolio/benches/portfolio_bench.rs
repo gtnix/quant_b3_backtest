@@ -44,5 +44,10 @@ fn bench_mark_to_market(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_process_fill, bench_update_drawdown, bench_mark_to_market);
+criterion_group!(
+    benches,
+    bench_process_fill,
+    bench_update_drawdown,
+    bench_mark_to_market
+);
 criterion_main!(benches);

@@ -1,10 +1,11 @@
 //! Audit logging for entry decisions.
 
 use chrono::NaiveDate;
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::filters::Market;
-use super::types::{EntryDiagnostics, EntryExclusion, Order, OrderSide};
+use super::types::{EntryDiagnostics, EntryExclusion, ExclusionReason, Order, OrderSide};
 
 /// Selected asset for audit log.
 #[derive(Debug, Clone)]
@@ -113,6 +114,7 @@ impl RebalanceAuditLog {
         writeln!(out, "  Peso total: {:.1}%", self.diagnostics.total_weight * 100.0).unwrap();
         writeln!(out, "  Turnover: {:.1}%", self.diagnostics.turnover * 100.0).unwrap();
         writeln!(out, "  Custos estimados: {}", self.diagnostics.estimated_costs).unwrap();
+        writeln!(out, "  Cash residual: {}", self.diagnostics.cash_residual).unwrap();
 
         out
     }
@@ -131,6 +133,25 @@ impl RebalanceAuditLog {
             self.orders.len(),
             self.diagnostics.turnover * 100.0
         )
+    }
+
+    /// Get exclusion counts by reason (machine-readable).
+    pub fn exclusion_counts_by_reason(&self) -> HashMap<ExclusionReason, usize> {
+        let mut counts: HashMap<ExclusionReason, usize> = HashMap::new();
+        for exclusion in &self.excluded {
+            *counts.entry(exclusion.reason).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Get total cost of all orders.
+    pub fn total_order_cost(&self) -> rust_decimal::Decimal {
+        self.orders.iter().map(|o| o.estimated_cost).sum()
+    }
+
+    /// Get cash residual from diagnostics.
+    pub fn cash_residual(&self) -> rust_decimal::Decimal {
+        self.diagnostics.cash_residual
     }
 }
 
@@ -280,6 +301,7 @@ mod tests {
                 turnover: 0.15,
                 estimated_costs: dec!(24),
                 total_weight: 0.27,
+                cash_residual: dec!(730000),
             },
         }
     }

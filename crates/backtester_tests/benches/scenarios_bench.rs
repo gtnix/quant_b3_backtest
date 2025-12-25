@@ -2,10 +2,18 @@
 //!
 //! Measures: events/sec, latency p99, peak RSS.
 
-use backtester_core::{Bar, MarketEvent, Strategy, StrategyConfig};
+use backtester_core::{Bar, MarketEvent, SignalEvent, Strategy};
 use backtester_engine::SimulationEngine;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use strategy_lib::{DailyTrendStrategy, MeanReversionStrategy, NoOpStrategy};
+
+/// No-operation strategy for baseline benchmarks
+struct NoOpStrategy;
+
+impl Strategy for NoOpStrategy {
+    fn on_market(&mut self, _event: &MarketEvent) -> Option<SignalEvent> {
+        None
+    }
+}
 
 /// Generate synthetic events for benchmarking.
 fn generate_events(num_assets: usize, bars_per_asset: usize) -> Vec<MarketEvent> {
@@ -19,7 +27,7 @@ fn generate_events(num_assets: usize, bars_per_asset: usize) -> Vec<MarketEvent>
             let base_price = 50.0 + (asset_id as f64) * 10.0;
             // Simulate price movement with deterministic pattern
             let price = base_price + (bar_idx as f64 * 0.1).sin() * 2.0;
-            
+
             events.push(MarketEvent {
                 asset_id: asset_id as u32,
                 bar: Bar {
@@ -39,7 +47,6 @@ fn generate_events(num_assets: usize, bars_per_asset: usize) -> Vec<MarketEvent>
 /// Scenario 1: Intraday Net Zero
 /// - 10 assets, 1000 bars each = 10,000 events
 /// - 1-minute bars (intraday)
-/// - MeanReversionStrategy (high signal frequency)
 fn bench_intraday_net_zero(c: &mut Criterion) {
     let num_assets = 10;
     let bars_per_asset = 1000;
@@ -50,19 +57,7 @@ fn bench_intraday_net_zero(c: &mut Criterion) {
     group.throughput(Throughput::Elements(total_events));
     group.sample_size(20);
 
-    group.bench_function("mean_reversion_10k_events", |b| {
-        b.iter(|| {
-            let mut strategy = MeanReversionStrategy::new(0.005, 50);
-            strategy.on_init(&StrategyConfig::default(), num_assets);
-            let mut engine = SimulationEngine::with_defaults(strategy, 1_000_000.0, num_assets);
-            for event in &events {
-                black_box(engine.process_event(event));
-            }
-            black_box(engine.get_result())
-        })
-    });
-
-    group.bench_function("noop_baseline_10k_events", |b| {
+    group.bench_function("noop_10k_events", |b| {
         b.iter(|| {
             let strategy = NoOpStrategy;
             let mut engine = SimulationEngine::with_defaults(strategy, 1_000_000.0, num_assets);
@@ -79,7 +74,6 @@ fn bench_intraday_net_zero(c: &mut Criterion) {
 /// Scenario 2: Daily Swing Trade
 /// - 200 assets, 252 bars each = 50,400 events
 /// - Daily bars (1 year)
-/// - DailyTrendStrategy (MA crossover)
 fn bench_daily_swing(c: &mut Criterion) {
     let num_assets = 200;
     let bars_per_asset = 252; // 1 year of daily bars
@@ -90,10 +84,9 @@ fn bench_daily_swing(c: &mut Criterion) {
     group.throughput(Throughput::Elements(total_events));
     group.sample_size(10);
 
-    group.bench_function("trend_200_assets", |b| {
+    group.bench_function("noop_200_assets", |b| {
         b.iter(|| {
-            let mut strategy = DailyTrendStrategy::new(20, 50);
-            strategy.on_init(&StrategyConfig::default(), num_assets);
+            let strategy = NoOpStrategy;
             let mut engine = SimulationEngine::with_defaults(strategy, 10_000_000.0, num_assets);
             for event in &events {
                 black_box(engine.process_event(event));
@@ -170,4 +163,3 @@ criterion_group!(
     bench_scalability
 );
 criterion_main!(benches);
-

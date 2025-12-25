@@ -1,0 +1,41 @@
+# FuzzyFajuto QA Configuration
+# Run with: cargo run --bin backtest -- qa-fuzzy -c configs/fuzzy_fajuto_qa.toml
+
+[general]
+name = "FuzzyFajuto QA Run"
+notional_per_asset = 40000.0
+lot_size = 100
+
+[data]
+# Path to asset data (OHLCV with ticker column)
+asset_path = "data/portfolio_historical.csv"
+
+# Path to benchmark data (IBOV)
+benchmark_path = "data/portfolio_historical.csv"  # Replace with actual IBOV data
+
+# Benchmark ticker
+benchmark_ticker = "^BVSP"
+
+[strategy]
+# Score threshold for LONG/SHORT classification
+score_threshold = 0.5
+
+# Limit order offsets from P_ref (0.5%, 1.0%, 1.5%)
+limit_offsets = [0.005, 0.010, 0.015]
+
+# Tolerance for notional parity invariant (1%)
+notional_tolerance = 0.01
+
+[execution]
+# Slippage model: "none", "constant", "volume", "volatility"
+slippage_type = "constant"
+slippage_param = 5.0  # 5 bps
+
+# Costs
+fixed_cost = 10.0          # R$ per trade
+proportional_bps = 10.0    # 10 bps
+
+# Liquidity
+max_participation = 0.1    # 10% max participation
+allow_partial = true
+

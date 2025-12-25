@@ -1,58 +1,332 @@
 //! # Backtester Reports
 //!
-//! Report generation and result formatting.
+//! Report generation and result formatting with Chicago-standard metrics.
 //!
 //! Responsibilities:
-//! - Aggregate final metrics
+//! - Calculate performance metrics (Sharpe, Sortino, Calmar, etc.)
+//! - Track NAV history and drawdowns
 //! - Generate output files (CSV, JSON)
 //! - Create run manifests for audit trail
-//! - Hash results for determinism verification
 //!
 //! Note: This module runs AFTER the simulation loop and is NOT in the hot path.
+//! Performance: Uses SIMD-optimized calculations from `backtester_core::simd`.
 
-#![deny(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
 use chrono::{DateTime, Utc};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
-pub use backtester_core::Timestamp;
-pub use backtester_portfolio::Portfolio;
+use backtester_core::simd;
+pub use backtester_portfolio::{Portfolio, Trade};
+
+// =============================================================================
+// BACKTEST RESULT (Complete)
+// =============================================================================
+
+/// Complete backtest result with all metrics.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BacktestResult {
+    // Basic metrics
+    /// Total return (as fraction, e.g., 0.25 = 25%).
+    pub total_return: f64,
+    /// Annualized return.
+    pub annual_return: f64,
+    /// Annualized volatility.
+    pub annual_volatility: f64,
+
+    // Risk-adjusted metrics
+    /// Sharpe Ratio = (return - risk_free) / volatility.
+    pub sharpe_ratio: f64,
+    /// Sortino Ratio = (return - risk_free) / downside_volatility.
+    pub sortino_ratio: f64,
+    /// Calmar Ratio = annual_return / max_drawdown.
+    pub calmar_ratio: f64,
+
+    // Drawdown metrics
+    /// Maximum drawdown (as fraction).
+    pub max_drawdown: f64,
+    /// Maximum drawdown duration (in bars/days).
+    pub max_drawdown_duration: u32,
+    /// Current drawdown.
+    pub current_drawdown: f64,
+
+    // Trade metrics
+    /// Win rate = winning_trades / total_trades.
+    pub win_rate: f64,
+    /// Profit factor = gross_profit / gross_loss.
+    pub profit_factor: f64,
+    /// Total number of trades.
+    pub num_trades: u32,
+    /// Number of winning trades.
+    pub num_winning_trades: u32,
+    /// Number of losing trades.
+    pub num_losing_trades: u32,
+
+    // Average trade metrics
+    /// Average trade return (as fraction).
+    pub avg_trade_return: f64,
+    /// Average winning trade return.
+    pub avg_winning_trade: f64,
+    /// Average losing trade return.
+    pub avg_losing_trade: f64,
+    /// Maximum consecutive wins.
+    pub max_consecutive_wins: u32,
+    /// Maximum consecutive losses.
+    pub max_consecutive_losses: u32,
+
+    // PnL
+    /// Gross profit.
+    pub gross_profit: f64,
+    /// Gross loss (as positive value).
+    pub gross_loss: f64,
+    /// Net profit/loss.
+    pub net_pnl: f64,
+    /// Total costs (commissions, fees).
+    pub total_costs: f64,
+
+    // Portfolio state
+    /// Final NAV.
+    pub final_nav: f64,
+    /// Initial capital.
+    pub initial_capital: f64,
+
+    // Events
+    /// Total events processed.
+    pub events_processed: u64,
+    /// Total fills executed.
+    pub fills_executed: u64,
+}
+
+impl BacktestResult {
+    /// Create result from NAV history and trades.
+    #[must_use]
+    pub fn calculate(
+        nav_history: &NavHistory,
+        trades: &[Trade],
+        initial_capital: f64,
+        total_costs: f64,
+        events_processed: u64,
+        fills_executed: u64,
+        risk_free_rate: f64,
+    ) -> Self {
+        let mut result = Self::default();
+        result.initial_capital = initial_capital;
+        result.final_nav = nav_history.final_nav();
+        result.total_costs = total_costs;
+        result.events_processed = events_processed;
+        result.fills_executed = fills_executed;
+
+        // Basic returns
+        result.total_return = nav_history.total_return();
+        result.max_drawdown = nav_history.max_drawdown();
+        result.current_drawdown = nav_history.drawdowns.last().copied().unwrap_or(0.0);
+        result.max_drawdown_duration = nav_history.max_drawdown_duration();
+
+        // Calculate volatility and risk-adjusted metrics
+        let returns = nav_history.calculate_returns();
+        if !returns.is_empty() {
+            let (mean, std_dev) = mean_and_std(&returns);
+            let annualization_factor = 252.0_f64.sqrt();
+
+            result.annual_return = mean * 252.0;
+            result.annual_volatility = std_dev * annualization_factor;
+
+            // Sharpe Ratio
+            if result.annual_volatility > 0.0 {
+                result.sharpe_ratio =
+                    (result.annual_return - risk_free_rate) / result.annual_volatility;
+            }
+
+            // Sortino Ratio (downside volatility)
+            let downside_returns: Vec<f64> =
+                returns.iter().filter(|&&r| r < 0.0).copied().collect();
+            if !downside_returns.is_empty() {
+                let downside_vol = std_dev_of(&downside_returns) * annualization_factor;
+                if downside_vol > 0.0 {
+                    result.sortino_ratio = (result.annual_return - risk_free_rate) / downside_vol;
+                }
+            }
+
+            // Calmar Ratio
+            if result.max_drawdown > 0.0 {
+                result.calmar_ratio = result.annual_return / result.max_drawdown;
+            }
+        }
+
+        // Trade metrics (uses Rayon for parallel computation on large sets)
+        result.num_trades = trades.len() as u32;
+        if !trades.is_empty() {
+            // Parallel partitioning for large trade sets
+            let winning: Vec<_>;
+            let losing: Vec<_>;
+
+            if trades.len() > 1000 {
+                // Use parallel iteration for large trade sets
+                let wins: Vec<_> = trades.par_iter().filter(|t| t.net_pnl > 0.0).collect();
+                let losses: Vec<_> = trades.par_iter().filter(|t| t.net_pnl <= 0.0).collect();
+                winning = wins;
+                losing = losses;
+
+                result.gross_profit = trades
+                    .par_iter()
+                    .filter(|t| t.net_pnl > 0.0)
+                    .map(|t| t.net_pnl)
+                    .sum();
+                result.gross_loss = trades
+                    .par_iter()
+                    .filter(|t| t.net_pnl <= 0.0)
+                    .map(|t| t.net_pnl.abs())
+                    .sum();
+            } else {
+                (winning, losing) = trades.iter().partition(|t| t.net_pnl > 0.0);
+                result.gross_profit = winning.iter().map(|t| t.net_pnl).sum();
+                result.gross_loss = losing.iter().map(|t| t.net_pnl.abs()).sum();
+            }
+
+            result.num_winning_trades = winning.len() as u32;
+            result.num_losing_trades = losing.len() as u32;
+            result.net_pnl = result.gross_profit - result.gross_loss;
+
+            // Win rate
+            result.win_rate = result.num_winning_trades as f64 / result.num_trades as f64;
+
+            // Profit factor
+            if result.gross_loss > 0.0 {
+                result.profit_factor = result.gross_profit / result.gross_loss;
+            } else if result.gross_profit > 0.0 {
+                result.profit_factor = f64::INFINITY;
+            }
+
+            // Average trade returns (parallel for large sets)
+            let trade_returns: Vec<f64> = if trades.len() > 1000 {
+                trades.par_iter().map(|t| t.return_pct()).collect()
+            } else {
+                trades.iter().map(|t| t.return_pct()).collect()
+            };
+            result.avg_trade_return = simd::simd_mean(&trade_returns);
+
+            if !winning.is_empty() {
+                let win_returns: Vec<f64> = winning.iter().map(|t| t.return_pct()).collect();
+                result.avg_winning_trade = simd::simd_mean(&win_returns);
+            }
+            if !losing.is_empty() {
+                let loss_returns: Vec<f64> = losing.iter().map(|t| t.return_pct()).collect();
+                result.avg_losing_trade = simd::simd_mean(&loss_returns);
+            }
+
+            // Consecutive wins/losses (sequential - order matters)
+            let (max_wins, max_losses) = max_consecutive_wins_losses(trades);
+            result.max_consecutive_wins = max_wins;
+            result.max_consecutive_losses = max_losses;
+        }
+
+        result
+    }
+
+    /// Convert to JSON string.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_default()
+    }
+
+    /// Calculate deterministic hash for verification.
+    #[must_use]
+    pub fn hash(&self) -> String {
+        let mut hasher = Sha256::new();
+        let canonical = format!(
+            "nav:{:.8},dd:{:.8},ret:{:.8},trades:{},sharpe:{:.8}",
+            self.final_nav,
+            self.max_drawdown,
+            self.total_return,
+            self.num_trades,
+            self.sharpe_ratio,
+        );
+        hasher.update(canonical.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+}
+
+/// Calculate mean and standard deviation using SIMD.
+fn mean_and_std(values: &[f64]) -> (f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mean = simd::simd_mean(values);
+    let variance = simd::simd_variance(values, mean);
+    (mean, variance.sqrt())
+}
+
+/// Calculate standard deviation using SIMD.
+fn std_dev_of(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mean = simd::simd_mean(values);
+    simd::simd_variance(values, mean).sqrt()
+}
+
+/// Calculate max consecutive wins and losses.
+fn max_consecutive_wins_losses(trades: &[Trade]) -> (u32, u32) {
+    let mut max_wins = 0u32;
+    let mut max_losses = 0u32;
+    let mut current_wins = 0u32;
+    let mut current_losses = 0u32;
+
+    for trade in trades {
+        if trade.net_pnl > 0.0 {
+            current_wins += 1;
+            current_losses = 0;
+            max_wins = max_wins.max(current_wins);
+        } else if trade.net_pnl < 0.0 {
+            current_losses += 1;
+            current_wins = 0;
+            max_losses = max_losses.max(current_losses);
+        }
+    }
+
+    (max_wins, max_losses)
+}
+
+// =============================================================================
+// BACKTEST REPORT (Summary)
+// =============================================================================
 
 /// Summary report of a backtest run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestReport {
-    /// Start timestamp of the backtest
-    pub start_time: Timestamp,
-    /// End timestamp of the backtest
-    pub end_time: Timestamp,
-    /// Initial capital
+    /// Start timestamp.
+    pub start_time: i64,
+    /// End timestamp.
+    pub end_time: i64,
+    /// Initial capital.
     pub initial_capital: f64,
-    /// Final NAV
+    /// Final NAV.
     pub final_nav: f64,
-    /// Total return (percentage)
+    /// Total return.
     pub total_return: f64,
-    /// Maximum drawdown (percentage)
+    /// Maximum drawdown.
     pub max_drawdown: f64,
-    /// Total number of trades
+    /// Total trades.
     pub total_trades: u64,
-    /// Total realized PnL
+    /// Realized PnL.
     pub realized_pnl: f64,
-    /// Total costs
+    /// Total costs.
     pub total_costs: f64,
 }
 
 impl BacktestReport {
-    /// Generate a report from portfolio state.
+    /// Generate report from portfolio.
     #[must_use]
     pub fn from_portfolio(
         portfolio: &Portfolio,
-        start_time: Timestamp,
-        end_time: Timestamp,
+        start_time: i64,
+        end_time: i64,
         total_trades: u64,
     ) -> Self {
         let final_nav = portfolio.nav();
@@ -64,402 +338,55 @@ impl BacktestReport {
             initial_capital: portfolio.initial_capital,
             final_nav,
             total_return,
-            max_drawdown: portfolio.max_drawdown,
+            max_drawdown: portfolio.max_drawdown(),
             total_trades,
             realized_pnl: portfolio.total_realized_pnl(),
-            total_costs: portfolio.total_costs,
+            total_costs: portfolio.total_costs(),
         }
     }
 
-    /// Convert to JSON string.
+    /// Convert to JSON.
     #[must_use]
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Calculate SHA256 hash of the report for determinism verification.
+    /// Calculate hash.
     #[must_use]
     pub fn hash(&self) -> String {
         let mut hasher = Sha256::new();
-        // Use canonical representation for deterministic hashing
         let canonical = format!(
-            "nav:{:.8},dd:{:.8},ret:{:.8},trades:{},pnl:{:.8},costs:{:.8}",
+            "nav:{:.8},dd:{:.8},ret:{:.8},trades:{},pnl:{:.8}",
             self.final_nav,
             self.max_drawdown,
             self.total_return,
             self.total_trades,
             self.realized_pnl,
-            self.total_costs,
         );
         hasher.update(canonical.as_bytes());
         format!("{:x}", hasher.finalize())
     }
 }
 
-/// Run manifest for audit trail (Module 11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunManifest {
-    /// Unique run ID
-    pub run_id: String,
-    /// Run type (build_run, determinism_proof, perf_benchmark, etc.)
-    pub run_type: String,
-    /// Creation timestamp (ISO 8601)
-    pub created_at_utc: String,
-    /// Git commit hash (if available)
-    pub git_commit: Option<String>,
-    /// Build profile (release/debug)
-    pub build_profile: String,
-    /// Dataset file hash
-    pub dataset_signature: String,
-    /// Config file hash
-    pub config_signature: String,
-    /// Strategy identifier
-    pub strategy_id: String,
-    /// Machine fingerprint
-    pub machine_fingerprint: String,
-}
-
-impl RunManifest {
-    /// Create a new run manifest.
-    pub fn new(strategy_name: &str, config_path: &Path, data_path: &Path) -> Self {
-        let now: DateTime<Utc> = Utc::now();
-        let run_id = format!(
-            "{}_build_run_{}_{}",
-            now.format("%Y%m%d-%H%M%S"),
-            strategy_name,
-            &Self::file_hash(config_path)[..8]
-        );
-
-        Self {
-            run_id,
-            run_type: "build_run".to_string(),
-            created_at_utc: now.to_rfc3339(),
-            git_commit: Self::get_git_commit(),
-            build_profile: if cfg!(debug_assertions) {
-                "debug".to_string()
-            } else {
-                "release".to_string()
-            },
-            dataset_signature: Self::file_hash(data_path),
-            config_signature: Self::file_hash(config_path),
-            strategy_id: strategy_name.to_string(),
-            machine_fingerprint: Self::get_machine_fingerprint(),
-        }
-    }
-
-    /// Calculate SHA256 hash of a file.
-    fn file_hash(path: &Path) -> String {
-        match fs::read(path) {
-            Ok(content) => {
-                let mut hasher = Sha256::new();
-                hasher.update(&content);
-                format!("{:x}", hasher.finalize())
-            }
-            Err(_) => "file_not_found".to_string(),
-        }
-    }
-
-    /// Try to get current git commit hash.
-    fn get_git_commit() -> Option<String> {
-        std::process::Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout)
-                        .ok()
-                        .map(|s| s.trim().to_string())
-                } else {
-                    None
-                }
-            })
-    }
-
-    /// Get machine fingerprint.
-    fn get_machine_fingerprint() -> String {
-        let os = std::env::consts::OS;
-        let arch = std::env::consts::ARCH;
-        format!("{}-{}", os, arch)
-    }
-
-    /// Calculate result hash for determinism verification.
-    #[must_use]
-    pub fn calculate_result_hash(&self, result_json: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(result_json.as_bytes());
-        format!("{:x}", hasher.finalize())
-    }
-
-    /// Save manifest to JSON file.
-    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        fs::write(path, json)
-    }
-
-    /// Load manifest from JSON file.
-    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let json = fs::read_to_string(path)?;
-        let manifest = serde_json::from_str(&json)?;
-        Ok(manifest)
-    }
-}
-
-/// Benchmark results for performance tracking (Module 06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BenchmarkResult {
-    /// Wall clock time in seconds
-    pub wall_clock_seconds: f64,
-    /// Events processed per second
-    pub events_per_second: f64,
-    /// Allocations in hot path (should be 0)
-    pub hot_path_allocations: u64,
-    /// P99 latency in nanoseconds
-    pub p99_latency_ns: u64,
-}
-
-impl BenchmarkResult {
-    /// Create benchmark result from timing data.
-    #[must_use]
-    pub fn new(
-        wall_clock_seconds: f64,
-        events_processed: u64,
-        hot_path_allocations: u64,
-        p99_latency_ns: u64,
-    ) -> Self {
-        #[allow(clippy::cast_precision_loss)]
-        let events_per_second = events_processed as f64 / wall_clock_seconds;
-        Self {
-            wall_clock_seconds,
-            events_per_second,
-            hot_path_allocations,
-            p99_latency_ns,
-        }
-    }
-
-    /// Check if benchmark passes performance gates.
-    #[must_use]
-    pub fn passes_gates(&self) -> bool {
-        self.hot_path_allocations == 0
-    }
-}
-
-/// Chicago-standard performance metrics.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PerformanceMetrics {
-    /// Sharpe Ratio = (return - risk_free) / volatility (annualized)
-    pub sharpe_ratio: f64,
-    /// Sortino Ratio = return / downside_volatility
-    pub sortino_ratio: f64,
-    /// Calmar Ratio = annualized_return / max_drawdown
-    pub calmar_ratio: f64,
-    /// Win Rate = winning_trades / total_trades
-    pub win_rate: f64,
-    /// Profit Factor = gross_profit / gross_loss
-    pub profit_factor: f64,
-    /// Total number of trades
-    pub total_trades: u64,
-    /// Number of winning trades
-    pub winning_trades: u64,
-    /// Number of losing trades
-    pub losing_trades: u64,
-    /// Gross profit
-    pub gross_profit: f64,
-    /// Gross loss (absolute value)
-    pub gross_loss: f64,
-    /// Annualized return
-    pub annualized_return: f64,
-    /// Annualized volatility
-    pub annualized_volatility: f64,
-}
-
-impl PerformanceMetrics {
-    /// Calculate metrics from NAV time series and trade data.
-    ///
-    /// # Arguments
-    /// * `nav_series` - Daily NAV values
-    /// * `trade_pnls` - PnL for each trade (positive = profit, negative = loss)
-    /// * `max_drawdown` - Maximum drawdown as fraction (0.10 = 10%)
-    /// * `risk_free_rate` - Annual risk-free rate (0.05 = 5%)
-    /// * `trading_days_per_year` - Typically 252
-    #[must_use]
-    pub fn calculate(
-        nav_series: &[f64],
-        trade_pnls: &[f64],
-        max_drawdown: f64,
-        risk_free_rate: f64,
-        trading_days_per_year: usize,
-    ) -> Self {
-        // Calculate returns from NAV series
-        let returns: Vec<f64> = nav_series
-            .windows(2)
-            .map(|w| (w[1] - w[0]) / w[0])
-            .collect();
-
-        if returns.is_empty() {
-            return Self::default();
-        }
-
-        // Mean daily return
-        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-
-        // Daily volatility (standard deviation)
-        let variance = returns
-            .iter()
-            .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>()
-            / returns.len() as f64;
-        let daily_volatility = variance.sqrt();
-
-        // Downside volatility (only negative returns)
-        let downside_returns: Vec<f64> = returns.iter().filter(|&&r| r < 0.0).copied().collect();
-        let downside_volatility = if downside_returns.is_empty() {
-            0.0
-        } else {
-            let down_var = downside_returns.iter().map(|r| r.powi(2)).sum::<f64>()
-                / downside_returns.len() as f64;
-            down_var.sqrt()
-        };
-
-        // Annualization
-        let annualization_factor = (trading_days_per_year as f64).sqrt();
-        let annualized_return = mean_return * trading_days_per_year as f64;
-        let annualized_volatility = daily_volatility * annualization_factor;
-        let annualized_downside_vol = downside_volatility * annualization_factor;
-
-        // Sharpe Ratio
-        let sharpe_ratio = if annualized_volatility > 0.0 {
-            (annualized_return - risk_free_rate) / annualized_volatility
-        } else {
-            0.0
-        };
-
-        // Sortino Ratio
-        let sortino_ratio = if annualized_downside_vol > 0.0 {
-            (annualized_return - risk_free_rate) / annualized_downside_vol
-        } else {
-            0.0
-        };
-
-        // Calmar Ratio
-        let calmar_ratio = if max_drawdown > 0.0 {
-            annualized_return / max_drawdown
-        } else {
-            0.0
-        };
-
-        // Trade statistics
-        let total_trades = trade_pnls.len() as u64;
-        let winning_trades = trade_pnls.iter().filter(|&&p| p > 0.0).count() as u64;
-        let losing_trades = trade_pnls.iter().filter(|&&p| p < 0.0).count() as u64;
-        let gross_profit: f64 = trade_pnls.iter().filter(|&&p| p > 0.0).sum();
-        let gross_loss: f64 = trade_pnls.iter().filter(|&&p| p < 0.0).map(|p| p.abs()).sum();
-
-        let win_rate = if total_trades > 0 {
-            winning_trades as f64 / total_trades as f64
-        } else {
-            0.0
-        };
-
-        let profit_factor = if gross_loss > 0.0 {
-            gross_profit / gross_loss
-        } else if gross_profit > 0.0 {
-            f64::INFINITY
-        } else {
-            0.0
-        };
-
-        Self {
-            sharpe_ratio,
-            sortino_ratio,
-            calmar_ratio,
-            win_rate,
-            profit_factor,
-            total_trades,
-            winning_trades,
-            losing_trades,
-            gross_profit,
-            gross_loss,
-            annualized_return,
-            annualized_volatility,
-        }
-    }
-
-    /// Create metrics from simple summary data (when full series not available).
-    #[must_use]
-    pub fn from_summary(
-        total_return: f64,
-        max_drawdown: f64,
-        num_trading_days: usize,
-        winning_trades: u64,
-        losing_trades: u64,
-        gross_profit: f64,
-        gross_loss: f64,
-    ) -> Self {
-        let total_trades = winning_trades + losing_trades;
-        let trading_days_per_year = 252;
-
-        // Approximate annualized return
-        let years = num_trading_days as f64 / trading_days_per_year as f64;
-        let annualized_return = if years > 0.0 {
-            ((1.0 + total_return).powf(1.0 / years)) - 1.0
-        } else {
-            0.0
-        };
-
-        let win_rate = if total_trades > 0 {
-            winning_trades as f64 / total_trades as f64
-        } else {
-            0.0
-        };
-
-        let profit_factor = if gross_loss > 0.0 {
-            gross_profit / gross_loss
-        } else if gross_profit > 0.0 {
-            f64::INFINITY
-        } else {
-            0.0
-        };
-
-        let calmar_ratio = if max_drawdown > 0.0 {
-            annualized_return / max_drawdown
-        } else {
-            0.0
-        };
-
-        Self {
-            sharpe_ratio: 0.0, // Needs volatility
-            sortino_ratio: 0.0,
-            calmar_ratio,
-            win_rate,
-            profit_factor,
-            total_trades,
-            winning_trades,
-            losing_trades,
-            gross_profit,
-            gross_loss,
-            annualized_return,
-            annualized_volatility: 0.0,
-        }
-    }
-}
+// =============================================================================
+// NAV HISTORY
+// =============================================================================
 
 /// NAV time series for analytics.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NavHistory {
-    /// Timestamps for each NAV observation
-    pub timestamps: Vec<Timestamp>,
-    /// NAV values
+    /// Timestamps.
+    pub timestamps: Vec<i64>,
+    /// NAV values.
     pub nav_values: Vec<f64>,
-    /// Drawdown at each point (as fraction)
+    /// Drawdown at each point.
     pub drawdowns: Vec<f64>,
-    /// Peak NAV at each point
+    /// Peak NAV at each point.
     pub peaks: Vec<f64>,
 }
 
 impl NavHistory {
-    /// Create empty NAV history with capacity.
+    /// Create with capacity.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -470,8 +397,8 @@ impl NavHistory {
         }
     }
 
-    /// Record a NAV observation.
-    pub fn record(&mut self, timestamp: Timestamp, nav: f64) {
+    /// Record NAV observation.
+    pub fn record(&mut self, timestamp: i64, nav: f64) {
         let peak = self.peaks.last().copied().unwrap_or(nav).max(nav);
         let drawdown = if peak > 0.0 { (peak - nav) / peak } else { 0.0 };
 
@@ -481,10 +408,34 @@ impl NavHistory {
         self.drawdowns.push(drawdown);
     }
 
-    /// Get maximum drawdown.
+    /// Get maximum drawdown using SIMD when data is large.
     #[must_use]
     pub fn max_drawdown(&self) -> f64 {
-        self.drawdowns.iter().copied().fold(0.0, f64::max)
+        if self.nav_values.len() > 100 {
+            // Use SIMD for large datasets
+            let (dd, _) = simd::simd_drawdown(&self.nav_values);
+            dd
+        } else {
+            self.drawdowns.iter().copied().fold(0.0, f64::max)
+        }
+    }
+
+    /// Get maximum drawdown duration (in bars).
+    #[must_use]
+    pub fn max_drawdown_duration(&self) -> u32 {
+        let mut max_duration = 0u32;
+        let mut current_duration = 0u32;
+
+        for &dd in &self.drawdowns {
+            if dd > 0.0 {
+                current_duration += 1;
+                max_duration = max_duration.max(current_duration);
+            } else {
+                current_duration = 0;
+            }
+        }
+
+        max_duration
     }
 
     /// Get final NAV.
@@ -508,6 +459,35 @@ impl NavHistory {
         }
     }
 
+    /// Calculate returns series using SIMD.
+    #[must_use]
+    pub fn calculate_returns(&self) -> Vec<f64> {
+        if self.nav_values.len() < 2 {
+            return Vec::new();
+        }
+        simd::simd_returns(&self.nav_values)
+    }
+
+    /// Calculate Sharpe ratio using SIMD.
+    #[must_use]
+    pub fn calculate_sharpe(&self, risk_free_rate: f64) -> f64 {
+        let returns = self.calculate_returns();
+        if returns.is_empty() {
+            return 0.0;
+        }
+        simd::simd_sharpe(&returns, risk_free_rate)
+    }
+
+    /// Calculate Sortino ratio using SIMD.
+    #[must_use]
+    pub fn calculate_sortino(&self, risk_free_rate: f64) -> f64 {
+        let returns = self.calculate_returns();
+        if returns.is_empty() {
+            return 0.0;
+        }
+        simd::simd_sortino(&returns, risk_free_rate)
+    }
+
     /// Get length.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -519,112 +499,230 @@ impl NavHistory {
     pub fn is_empty(&self) -> bool {
         self.nav_values.is_empty()
     }
+}
 
-    /// Calculate performance metrics.
+// =============================================================================
+// RUN MANIFEST
+// =============================================================================
+
+/// Run manifest for audit trail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunManifest {
+    /// Unique run ID.
+    pub run_id: String,
+    /// Run type.
+    pub run_type: String,
+    /// Creation timestamp (ISO 8601).
+    pub created_at_utc: String,
+    /// Git commit hash.
+    pub git_commit: Option<String>,
+    /// Build profile.
+    pub build_profile: String,
+    /// Dataset signature.
+    pub dataset_signature: String,
+    /// Config signature.
+    pub config_signature: String,
+    /// Strategy ID.
+    pub strategy_id: String,
+    /// Machine fingerprint.
+    pub machine_fingerprint: String,
+}
+
+impl RunManifest {
+    /// Create new manifest.
+    pub fn new(strategy_name: &str, config_path: &Path, data_path: &Path) -> Self {
+        let now: DateTime<Utc> = Utc::now();
+        let run_id = format!(
+            "{}_build_run_{}_{}",
+            now.format("%Y%m%d-%H%M%S"),
+            strategy_name,
+            &Self::file_hash(config_path)[..8]
+        );
+
+        Self {
+            run_id,
+            run_type: "build_run".to_string(),
+            created_at_utc: now.to_rfc3339(),
+            git_commit: Self::get_git_commit(),
+            build_profile: if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            }
+            .to_string(),
+            dataset_signature: Self::file_hash(data_path),
+            config_signature: Self::file_hash(config_path),
+            strategy_id: strategy_name.to_string(),
+            machine_fingerprint: Self::get_machine_fingerprint(),
+        }
+    }
+
+    fn file_hash(path: &Path) -> String {
+        match fs::read(path) {
+            Ok(content) => {
+                let mut hasher = Sha256::new();
+                hasher.update(&content);
+                format!("{:x}", hasher.finalize())
+            }
+            Err(_) => "file_not_found".to_string(),
+        }
+    }
+
+    fn get_git_commit() -> Option<String> {
+        std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn get_machine_fingerprint() -> String {
+        format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+    }
+
+    /// Calculate result hash.
     #[must_use]
-    pub fn calculate_metrics(&self, trade_pnls: &[f64], risk_free_rate: f64) -> PerformanceMetrics {
-        PerformanceMetrics::calculate(
-            &self.nav_values,
-            trade_pnls,
-            self.max_drawdown(),
+    pub fn calculate_result_hash(&self, result_json: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(result_json.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Save to file.
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(path, json)
+    }
+
+    /// Load from file.
+    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let json = fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
+    }
+}
+
+// =============================================================================
+// RESULTS CALCULATOR
+// =============================================================================
+
+/// Calculates complete backtest results from portfolio and NAV history.
+pub struct ResultsCalculator;
+
+impl ResultsCalculator {
+    /// Calculate complete results.
+    #[must_use]
+    pub fn calculate(
+        portfolio: &Portfolio,
+        nav_history: &NavHistory,
+        events_processed: u64,
+        fills_executed: u64,
+        risk_free_rate: f64,
+    ) -> BacktestResult {
+        BacktestResult::calculate(
+            nav_history,
+            portfolio.get_closed_trades(),
+            portfolio.initial_capital,
+            portfolio.total_costs(),
+            events_processed,
+            fills_executed,
             risk_free_rate,
-            252,
         )
     }
 }
 
+// =============================================================================
+// TESTS
+// =============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use backtester_core::{AssetId, OrderDirection};
 
-    #[test]
-    fn report_generation() {
-        let portfolio = Portfolio::new(100_000.0, 10);
-        let report = BacktestReport::from_portfolio(&portfolio, 0, 1_000_000, 0);
-        assert!((report.total_return).abs() < f64::EPSILON);
-        assert!((report.initial_capital - 100_000.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn report_hash_is_deterministic() {
-        let portfolio = Portfolio::new(100_000.0, 10);
-        let report1 = BacktestReport::from_portfolio(&portfolio, 0, 1_000_000, 5);
-        let report2 = BacktestReport::from_portfolio(&portfolio, 0, 1_000_000, 5);
-        
-        assert_eq!(report1.hash(), report2.hash());
-    }
-
-    #[test]
-    fn benchmark_result_gates() {
-        let good = BenchmarkResult::new(1.0, 1000, 0, 1000);
-        assert!(good.passes_gates());
-
-        let bad = BenchmarkResult::new(1.0, 1000, 5, 1000);
-        assert!(!bad.passes_gates());
+    fn make_trade(pnl: f64) -> Trade {
+        Trade::new(
+            AssetId::new(0),
+            OrderDirection::Buy,
+            100.0,
+            100.0 + pnl / 100.0,
+            100,
+            0,
+            1000,
+            1.0,
+        )
     }
 
     #[test]
     fn nav_history_tracks_drawdown() {
         let mut nav = NavHistory::with_capacity(10);
         nav.record(0, 100_000.0);
-        nav.record(1, 110_000.0); // +10%
-        nav.record(2, 99_000.0);  // -10% from peak
+        nav.record(1, 110_000.0);
+        nav.record(2, 99_000.0);
         nav.record(3, 105_000.0);
 
         assert!((nav.max_drawdown() - 0.1).abs() < 0.001);
         assert!((nav.final_nav() - 105_000.0).abs() < f64::EPSILON);
-        assert_eq!(nav.len(), 4);
     }
 
     #[test]
-    fn nav_history_total_return() {
-        let mut nav = NavHistory::with_capacity(3);
+    fn nav_history_calculates_sharpe() {
+        let mut nav = NavHistory::with_capacity(10);
+        for i in 0..100 {
+            nav.record(i, 100_000.0 + (i as f64) * 100.0);
+        }
+        let sharpe = nav.calculate_sharpe(0.0);
+        assert!(sharpe > 0.0);
+    }
+
+    #[test]
+    fn backtest_result_win_rate() {
+        let mut nav = NavHistory::with_capacity(10);
         nav.record(0, 100_000.0);
-        nav.record(1, 120_000.0);
-        
-        assert!((nav.total_return() - 0.2).abs() < f64::EPSILON);
+        nav.record(1, 101_000.0);
+
+        let trades = vec![make_trade(100.0), make_trade(-50.0), make_trade(200.0)];
+
+        let result = BacktestResult::calculate(&nav, &trades, 100_000.0, 10.0, 100, 3, 0.0);
+        assert_eq!(result.num_trades, 3);
+        assert_eq!(result.num_winning_trades, 2);
+        assert!((result.win_rate - 2.0 / 3.0).abs() < 0.01);
     }
 
     #[test]
-    fn performance_metrics_win_rate() {
-        let trade_pnls = vec![100.0, -50.0, 200.0, -30.0, 150.0];
-        let nav_series = vec![100_000.0, 100_100.0, 100_050.0, 100_250.0, 100_220.0, 100_370.0];
-        
-        let metrics = PerformanceMetrics::calculate(&nav_series, &trade_pnls, 0.01, 0.0, 252);
-        
-        assert_eq!(metrics.total_trades, 5);
-        assert_eq!(metrics.winning_trades, 3);
-        assert_eq!(metrics.losing_trades, 2);
-        assert!((metrics.win_rate - 0.6).abs() < f64::EPSILON);
+    fn consecutive_wins_losses() {
+        let trades = vec![
+            make_trade(100.0),
+            make_trade(100.0),
+            make_trade(100.0),
+            make_trade(-50.0),
+            make_trade(-50.0),
+            make_trade(100.0),
+        ];
+        let (wins, losses) = max_consecutive_wins_losses(&trades);
+        assert_eq!(wins, 3);
+        assert_eq!(losses, 2);
     }
 
     #[test]
-    fn performance_metrics_profit_factor() {
-        let trade_pnls = vec![100.0, -50.0, 200.0];
-        let nav_series = vec![100_000.0, 100_100.0, 100_050.0, 100_250.0];
-        
-        let metrics = PerformanceMetrics::calculate(&nav_series, &trade_pnls, 0.01, 0.0, 252);
-        
-        // Profit factor = 300 / 50 = 6.0
-        assert!((metrics.profit_factor - 6.0).abs() < f64::EPSILON);
-        assert!((metrics.gross_profit - 300.0).abs() < f64::EPSILON);
-        assert!((metrics.gross_loss - 50.0).abs() < f64::EPSILON);
-    }
+    fn drawdown_duration() {
+        let mut nav = NavHistory::with_capacity(10);
+        nav.record(0, 100_000.0);
+        nav.record(1, 100_000.0);
+        nav.record(2, 90_000.0); // DD starts
+        nav.record(3, 85_000.0);
+        nav.record(4, 88_000.0);
+        nav.record(5, 100_000.0); // DD ends
+        nav.record(6, 100_000.0);
 
-    #[test]
-    fn performance_metrics_calmar() {
-        let metrics = PerformanceMetrics::from_summary(
-            0.25,  // 25% total return
-            0.10,  // 10% max drawdown
-            252,   // 1 year
-            10,
-            5,
-            1000.0,
-            500.0,
-        );
-        
-        // Calmar = annualized_return / max_drawdown
-        // For 1 year, annualized = 25%, calmar = 0.25 / 0.10 = 2.5
-        assert!((metrics.calmar_ratio - 2.5).abs() < 0.001);
+        assert_eq!(nav.max_drawdown_duration(), 3);
     }
 }

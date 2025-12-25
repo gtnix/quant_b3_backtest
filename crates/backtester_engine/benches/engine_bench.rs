@@ -33,3 +33,6 @@ fn bench_event_processing(c: &mut Criterion) {
 
 criterion_group!(benches, bench_event_processing);
 criterion_main!(benches);
+
+
+

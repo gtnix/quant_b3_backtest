@@ -1,0 +1,68 @@
+name: Sync B3 Data
+
+on:
+  schedule:
+    # Executa às 18:30 BRT (21:30 UTC) - após fechamento do mercado
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      sync_type:
+        description: 'Tipo de sync'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - indices
+          - daily
+          - intraday
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install httpx psycopg2-binary python-dotenv
+      
+      - name: Sync B3 Indices
+        if: ${{ github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'indices' || github.event_name == 'schedule' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "### Syncing B3 Indices..." >> $GITHUB_STEP_SUMMARY
+          python -m datahub_b3 sync
+      
+      - name: Sync Daily OHLCV
+        if: ${{ github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'daily' || github.event_name == 'schedule' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BRAPI_API_KEY: ${{ secrets.BRAPI_API_KEY }}
+        run: |
+          echo "### Syncing Daily OHLCV..." >> $GITHUB_STEP_SUMMARY
+          python -m datahub_b3 daily-sync --range 1mo
+      
+      - name: Sync Intraday 30m
+        if: ${{ github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'intraday' || github.event_name == 'schedule' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BRAPI_API_KEY: ${{ secrets.BRAPI_API_KEY }}
+        run: |
+          echo "### Syncing Intraday 30m..." >> $GITHUB_STEP_SUMMARY
+          python -m datahub_b3 intraday-sync --interval 30m --range 5d
+      
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ B3 Data Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "Executed at: $(TZ=America/Sao_Paulo date)" >> $GITHUB_STEP_SUMMARY
