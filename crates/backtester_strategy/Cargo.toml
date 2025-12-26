@@ -1,0 +1,24 @@
+[package]
+name = "backtester_strategy"
+version = "0.1.0"
+edition = "2021"
+description = "Strategy Factory - modular DSL for declarative strategy composition"
+
+[dependencies]
+backtester_intelligence = { path = "../backtester_intelligence" }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1.33", features = ["serde"] }
+rust_decimal_macros = "1.33"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+tracing = "0.1"
+uuid = { version = "1.0", features = ["v4"] }
+csv = "1.3"
+sha2 = "0.10"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+tempfile = "3.10"
+

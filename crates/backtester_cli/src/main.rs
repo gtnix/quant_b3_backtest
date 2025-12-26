@@ -1,9 +1,13 @@
 //! # Backtester CLI
 //!
-//! Command-line interface for running backtests.
+//! Command-line interface for running backtests and experiments.
 //! This is the core backtesting infrastructure - strategy implementations go in separate crates.
 
 use backtester_io::{BrapiLoader, CsvLoader, Normalizer};
+use backtester_strategy::experiment::{
+    BlockCatalog, Comparator, ExperimentRunner, RunnerConfig,
+};
+use backtester_strategy::BlockRegistry;
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
@@ -50,6 +54,111 @@ enum Commands {
         /// Path to cache directory
         #[arg(short, long, default_value = "cache")]
         cache: PathBuf,
+    },
+
+    // === Experiment Orchestrator Commands ===
+
+    /// Run a single strategy config
+    Run {
+        /// Path to strategy config file (TOML)
+        #[arg(short, long)]
+        config: PathBuf,
+
+        /// Output directory for artifacts
+        #[arg(short, long, default_value = "output/experiments")]
+        output: PathBuf,
+
+        /// Dry run (validate only, no execution)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Strict mode (fail on NaN, invalid weights)
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Run all strategy configs in a folder
+    RunBatch {
+        /// Path to folder containing strategy configs
+        #[arg(short, long)]
+        folder: PathBuf,
+
+        /// Output directory for artifacts
+        #[arg(short, long, default_value = "output/experiments")]
+        output: PathBuf,
+
+        /// Strict mode (fail on NaN, invalid weights)
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Compare two experiment runs
+    Compare {
+        /// Path to first run directory
+        #[arg(long)]
+        run_a: PathBuf,
+
+        /// Path to second run directory
+        #[arg(long)]
+        run_b: PathBuf,
+        
+        /// Sharpe ratio drop threshold for regression (e.g., 0.20 = 20%)
+        #[arg(long, default_value = "0.20")]
+        sharpe_threshold: f64,
+        
+        /// CAGR drop threshold for regression (e.g., 0.30 = 30%)
+        #[arg(long, default_value = "0.30")]
+        cagr_threshold: f64,
+        
+        /// Max drawdown increase threshold for regression (e.g., 0.25 = 25%)
+        #[arg(long, default_value = "0.25")]
+        dd_threshold: f64,
+        
+        /// Load thresholds from config file
+        #[arg(long)]
+        thresholds_file: Option<PathBuf>,
+    },
+
+    /// Compare a run against a golden strategy
+    CompareToGolden {
+        /// Path to run directory
+        #[arg(long)]
+        run: PathBuf,
+
+        /// Golden strategy ID (e.g., golden_momentum, golden_value_quality)
+        #[arg(long)]
+        golden: String,
+
+        /// Path to golden strategies output directory
+        #[arg(long, default_value = "output/experiments")]
+        golden_dir: PathBuf,
+        
+        /// Sharpe ratio drop threshold for regression (e.g., 0.20 = 20%)
+        #[arg(long, default_value = "0.20")]
+        sharpe_threshold: f64,
+        
+        /// CAGR drop threshold for regression (e.g., 0.30 = 30%)
+        #[arg(long, default_value = "0.30")]
+        cagr_threshold: f64,
+        
+        /// Max drawdown increase threshold for regression (e.g., 0.25 = 25%)
+        #[arg(long, default_value = "0.25")]
+        dd_threshold: f64,
+        
+        /// Load thresholds from config file
+        #[arg(long)]
+        thresholds_file: Option<PathBuf>,
+    },
+
+    /// Generate block catalog documentation
+    GenerateCatalog {
+        /// Output file path
+        #[arg(short, long, default_value = "docs/BLOCK_CATALOG.md")]
+        output: PathBuf,
+
+        /// Also output JSON format
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -213,7 +322,270 @@ fn list_command(cache_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// === Experiment Orchestrator Command Handlers ===
+
+fn run_command(
+    config_path: PathBuf,
+    output_dir: PathBuf,
+    dry_run: bool,
+    strict: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    STRATEGY RUNNER                           ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    let runner_config = RunnerConfig {
+        output_dir: output_dir.to_string_lossy().into(),
+        ..Default::default()
+    };
+
+    let mut runner = ExperimentRunner::with_config(runner_config);
+
+    if dry_run {
+        runner = runner.dry_run();
+        println!("Mode: DRY RUN (validation only)\n");
+    }
+
+    if strict {
+        runner = runner.strict();
+        println!("Mode: STRICT (fail on invalid outputs)\n");
+    }
+
+    println!("Config: {}", config_path.display());
+    println!();
+
+    let result = runner.run_single(&config_path)?;
+
+    if result.success {
+        println!("\n✓ Strategy executed successfully");
+        println!("  Run ID: {}", result.run_id);
+        println!("  Strategy: {}", result.metadata.strategy_id);
+
+        if !dry_run {
+            println!("\n  Metrics:");
+            println!("    CAGR:        {:.2}%", result.metrics.cagr * 100.0);
+            println!("    Volatility:  {:.2}%", result.metrics.volatility * 100.0);
+            println!("    Sharpe:      {:.2}", result.metrics.sharpe_ratio);
+            println!("    Max DD:      {:.2}%", result.metrics.max_drawdown * 100.0);
+            println!("    Hit Rate:    {:.2}%", result.metrics.hit_rate * 100.0);
+
+            if let Some(path) = &result.output_path {
+                println!("\n  Artifacts: {}", path.display());
+            }
+        }
+    } else {
+        println!("\n✗ Strategy execution failed");
+        if let Some(err) = &result.error {
+            println!("  Error: {}", err);
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
+fn run_batch_command(
+    folder: PathBuf,
+    output_dir: PathBuf,
+    strict: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    BATCH RUNNER                              ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    let runner_config = RunnerConfig {
+        output_dir: output_dir.to_string_lossy().into(),
+        ..Default::default()
+    };
+
+    let mut runner = ExperimentRunner::with_config(runner_config);
+
+    if strict {
+        runner = runner.strict();
+    }
+
+    println!("Folder: {}", folder.display());
+    println!();
+
+    let results = runner.run_batch(&folder)?;
+
+    println!("\n=== Batch Results ===\n");
+    println!(
+        "{:<30} {:>10} {:>10} {:>10}",
+        "Strategy", "Sharpe", "CAGR", "Max DD"
+    );
+    println!("{}", "-".repeat(64));
+
+    let mut success_count = 0;
+    let mut fail_count = 0;
+
+    for result in &results {
+        if result.success {
+            success_count += 1;
+            println!(
+                "{:<30} {:>10.2} {:>9.1}% {:>9.1}%",
+                result.metadata.strategy_id,
+                result.metrics.sharpe_ratio,
+                result.metrics.cagr * 100.0,
+                result.metrics.max_drawdown * 100.0,
+            );
+        } else {
+            fail_count += 1;
+            println!(
+                "{:<30} {:>10} {:>10} {:>10}",
+                result.metadata.strategy_id, "FAILED", "-", "-"
+            );
+        }
+    }
+
+    println!("{}", "-".repeat(64));
+    println!("\nTotal: {} succeeded, {} failed", success_count, fail_count);
+    println!();
+
+    Ok(())
+}
+
+fn compare_command(
+    run_a: PathBuf, 
+    run_b: PathBuf,
+    sharpe_threshold: f64,
+    cagr_threshold: f64,
+    dd_threshold: f64,
+    thresholds_file: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use backtester_strategy::experiment::RegressionThresholds;
+    
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    RUN COMPARISON                            ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    // Load thresholds from file or use CLI flags
+    let thresholds = if let Some(ref path) = thresholds_file {
+        println!("Loading thresholds from: {}", path.display());
+        RegressionThresholds::load_from_file(path)?
+    } else {
+        RegressionThresholds::builder()
+            .sharpe_drop(sharpe_threshold)
+            .cagr_drop(cagr_threshold)
+            .max_dd_increase(dd_threshold)
+            .build()
+    };
+    
+    println!("Thresholds: {}\n", thresholds.format());
+
+    let comparator = Comparator::with_thresholds(thresholds);
+    let result = comparator.compare(&run_a, &run_b)?;
+    let report = comparator.generate_report(&result);
+
+    println!("{}", report);
+
+    Ok(())
+}
+
+fn compare_to_golden_command(
+    run: PathBuf,
+    golden_id: String,
+    golden_dir: PathBuf,
+    sharpe_threshold: f64,
+    cagr_threshold: f64,
+    dd_threshold: f64,
+    thresholds_file: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use backtester_strategy::experiment::RegressionThresholds;
+    
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                 GOLDEN STRATEGY COMPARISON                   ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    // Load thresholds from file or use CLI flags
+    let thresholds = if let Some(ref path) = thresholds_file {
+        println!("Loading thresholds from: {}", path.display());
+        RegressionThresholds::load_from_file(path)?
+    } else {
+        RegressionThresholds::builder()
+            .sharpe_drop(sharpe_threshold)
+            .cagr_drop(cagr_threshold)
+            .max_dd_increase(dd_threshold)
+            .build()
+    };
+    
+    println!("Thresholds: {}\n", thresholds.format());
+
+    let comparator = Comparator::with_thresholds(thresholds)
+        .with_golden_dir(golden_dir.to_string_lossy().to_string());
+    let result = comparator.compare_to_golden(&run, &golden_id)?;
+    let report = comparator.generate_report(&result);
+
+    println!("{}", report);
+
+    if result.regression {
+        println!("⚠️  This run shows regression compared to golden strategy!");
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn generate_catalog_command(output: PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                 BLOCK CATALOG GENERATOR                      ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    let registry = BlockRegistry::with_builtins();
+
+    // Generate markdown
+    let markdown = BlockCatalog::generate_markdown(&registry);
+
+    // Ensure output directory exists
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(&output, &markdown)?;
+    println!("✓ Markdown catalog written to: {}", output.display());
+
+    // Optionally generate JSON
+    if json {
+        let json_path = output.with_extension("json");
+        let json_content = BlockCatalog::generate_json(&registry);
+        fs::write(&json_path, &json_content)?;
+        println!("✓ JSON catalog written to: {}", json_path.display());
+    }
+
+    // Print summary
+    let selection_count = registry
+        .blocks_by_type(backtester_strategy::BlockType::Selection)
+        .len();
+    let entry_count = registry
+        .blocks_by_type(backtester_strategy::BlockType::Entry)
+        .len();
+    let exit_count = registry
+        .blocks_by_type(backtester_strategy::BlockType::Exit)
+        .len();
+    let sizing_count = registry
+        .blocks_by_type(backtester_strategy::BlockType::Sizing)
+        .len();
+
+    println!("\nBlocks documented:");
+    println!("  Selection: {}", selection_count);
+    println!("  Entry:     {}", entry_count);
+    println!("  Exit:      {}", exit_count);
+    println!("  Sizing:    {}", sizing_count);
+    println!(
+        "  Total:     {}",
+        selection_count + entry_count + exit_count + sizing_count
+    );
+    println!();
+
+    Ok(())
+}
+
 fn main() {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let cli = Cli::parse();
 
     let result = match cli.command {
@@ -225,6 +597,37 @@ fn main() {
         } => fetch_command(tickers, range, output),
         Commands::Stats { data } => stats_command(data),
         Commands::List { cache } => list_command(cache),
+
+        // Experiment orchestrator commands
+        Commands::Run {
+            config,
+            output,
+            dry_run,
+            strict,
+        } => run_command(config, output, dry_run, strict),
+        Commands::RunBatch {
+            folder,
+            output,
+            strict,
+        } => run_batch_command(folder, output, strict),
+        Commands::Compare { 
+            run_a, 
+            run_b,
+            sharpe_threshold,
+            cagr_threshold,
+            dd_threshold,
+            thresholds_file,
+        } => compare_command(run_a, run_b, sharpe_threshold, cagr_threshold, dd_threshold, thresholds_file),
+        Commands::CompareToGolden {
+            run,
+            golden,
+            golden_dir,
+            sharpe_threshold,
+            cagr_threshold,
+            dd_threshold,
+            thresholds_file,
+        } => compare_to_golden_command(run, golden, golden_dir, sharpe_threshold, cagr_threshold, dd_threshold, thresholds_file),
+        Commands::GenerateCatalog { output, json } => generate_catalog_command(output, json),
     };
 
     if let Err(e) = result {
