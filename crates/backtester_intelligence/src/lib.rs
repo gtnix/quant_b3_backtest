@@ -38,6 +38,7 @@ pub mod orchestrator;
 pub mod performance;
 pub mod risk_free;
 pub mod scorer;
+pub mod walkforward;
 
 pub use config::{
     AssetFilterConfig, CarryConfig, FilterMode, FundamentalsConfig, IntelligenceConfig,
@@ -82,6 +83,14 @@ pub use performance::{
     RiskCalculator, PerformanceEngine, PerformanceReporter,
 };
 
+// Walk-forward exports
+pub use walkforward::{
+    WindowType, WindowSpec, WindowSplit, WalkForwardConfig,
+    ParamSet, ParamRange, GridConfig, WindowMetrics, WindowResult,
+    AggregateMetrics, AggregateReport, TimeSplitter, RollingSplitter,
+    MetricsCalculator, RobustnessScorer, WalkForwardRunner, WalkForwardReporter,
+};
+
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::config::{
@@ -119,5 +128,11 @@ pub mod prelude {
     pub use crate::performance::{
         PerformanceSnapshot, PnLBreakdown, TradeLedger, PerformanceEngine,
         AttributionBreakdown, CIOView, PerformanceReporter,
+    };
+    
+    // Walk-forward
+    pub use crate::walkforward::{
+        WalkForwardConfig, WalkForwardRunner, WalkForwardReporter,
+        AggregateReport, WindowResult, RollingSplitter, TimeSplitter,
     };
 }
