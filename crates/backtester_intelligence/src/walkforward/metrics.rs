@@ -4,7 +4,8 @@ use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 
-use super::types::{AggregateMetrics, WindowMetrics, WindowResult};
+use super::types::{AggregateMetrics, WindowMetrics, WindowResult, NestedWindowResult};
+use super::statistics::{calculate_skewness, calculate_kurtosis, calculate_psr, calculate_dsr, sharpe_variance};
 
 /// Calculates metrics from equity curve and trade data.
 #[derive(Debug, Clone, Default)]
@@ -84,6 +85,10 @@ impl MetricsCalculator {
         // Max drawdown
         let (max_dd, dd_duration) = self.max_drawdown(equity);
 
+        // Calculate skewness and kurtosis
+        let skewness = calculate_skewness(&returns);
+        let kurtosis = calculate_kurtosis(&returns);
+
         WindowMetrics {
             total_return_pct: total_return,
             cagr_pct: cagr,
@@ -94,7 +99,51 @@ impl MetricsCalculator {
             turnover_avg_pct: turnover_pct,
             total_costs: costs,
             hit_rate: None,
+            skewness,
+            kurtosis,
+            n_observations: returns.len(),
+            psr: None,  // Calculated separately with threshold
+            dsr: None,  // Calculated separately with trials info
         }
+    }
+
+    /// Calculate metrics with PSR/DSR included.
+    pub fn from_equity_curve_with_psr(
+        &self,
+        equity: &[Decimal],
+        costs: Decimal,
+        turnover_pct: Decimal,
+        psr_threshold: Decimal,
+        n_trials: Option<usize>,
+        sharpe_var: Option<Decimal>,
+    ) -> WindowMetrics {
+        let mut metrics = self.from_equity_curve(equity, costs, turnover_pct);
+        
+        // Calculate PSR
+        let psr = calculate_psr(
+            metrics.sharpe_ratio,
+            psr_threshold,
+            metrics.n_observations,
+            metrics.skewness,
+            metrics.kurtosis,
+        );
+        metrics.psr = Some(psr);
+
+        // Calculate DSR if trial info is available
+        if let (Some(trials), Some(var)) = (n_trials, sharpe_var) {
+            let dsr = calculate_dsr(
+                metrics.sharpe_ratio,
+                psr_threshold,
+                metrics.n_observations,
+                metrics.skewness,
+                metrics.kurtosis,
+                trials,
+                var,
+            );
+            metrics.dsr = Some(dsr);
+        }
+
+        metrics
     }
 
     /// Calculate standard deviation of a series.
@@ -253,6 +302,132 @@ impl RobustnessScorer {
             worst_window_idx: worst_idx,
             total_windows: results.len(),
             total_months_tested: total_months,
+            // PSR/DSR not available for legacy results
+            mean_psr: Decimal::ZERO,
+            median_psr: Decimal::ZERO,
+            mean_dsr: None,
+            median_dsr: None,
+            oos_sharpe_mean: mean_sharpe,
+            oos_return_mean: mean_return,
+            oos_psr_mean: Decimal::ZERO,
+        }
+    }
+
+    /// Calculate aggregate metrics from nested window results (3-segment).
+    pub fn aggregate_nested(&self, results: &[NestedWindowResult]) -> AggregateMetrics {
+        if results.is_empty() {
+            return AggregateMetrics::default();
+        }
+
+        let n = Decimal::from(results.len());
+
+        // Extract test metrics (OOS)
+        let sharpes: Vec<Decimal> = results.iter().map(|r| r.metrics_test.sharpe_ratio).collect();
+        let returns: Vec<Decimal> = results.iter().map(|r| r.metrics_test.total_return_pct).collect();
+        let drawdowns: Vec<Decimal> = results.iter().map(|r| r.metrics_test.max_drawdown_pct).collect();
+        let volatilities: Vec<Decimal> = results.iter().map(|r| r.metrics_test.volatility_ann).collect();
+
+        // Extract PSR from validation
+        let psrs: Vec<Decimal> = results.iter().map(|r| r.psr_val).collect();
+        let dsrs: Vec<Decimal> = results.iter().filter_map(|r| r.dsr_val).collect();
+
+        // Mean/median/std for Sharpe
+        let mean_sharpe = sharpes.iter().sum::<Decimal>() / n;
+        let median_sharpe = self.median(&sharpes);
+        let std_sharpe = self.std_dev(&sharpes);
+
+        // Mean/median/std for returns
+        let mean_return = returns.iter().sum::<Decimal>() / n;
+        let median_return = self.median(&returns);
+        let std_return = self.std_dev(&returns);
+
+        // Risk stats
+        let mean_drawdown = drawdowns.iter().sum::<Decimal>() / n;
+        let worst_drawdown = drawdowns.iter().max().cloned().unwrap_or(Decimal::ZERO);
+        let mean_volatility = volatilities.iter().sum::<Decimal>() / n;
+
+        // PSR stats
+        let mean_psr = psrs.iter().sum::<Decimal>() / n;
+        let median_psr = self.median(&psrs);
+
+        // DSR stats (if available)
+        let (mean_dsr, median_dsr) = if dsrs.is_empty() {
+            (None, None)
+        } else {
+            let n_dsr = Decimal::from(dsrs.len());
+            (
+                Some(dsrs.iter().sum::<Decimal>() / n_dsr),
+                Some(self.median(&dsrs)),
+            )
+        };
+
+        // Best/worst window by Sharpe
+        let (best_idx, _) = sharpes.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap_or((0, &Decimal::ZERO));
+        let (worst_idx, _) = sharpes.iter().enumerate()
+            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap_or((0, &Decimal::ZERO));
+
+        // Stability score = 1 - (std/mean) for positive mean
+        let stability_score = if mean_sharpe > Decimal::ZERO {
+            (Decimal::ONE - std_sharpe / mean_sharpe).max(Decimal::ZERO)
+        } else {
+            Decimal::ZERO
+        };
+
+        // Robustness score (weighted combination)
+        let sharpe_component = if std_sharpe > Decimal::ZERO {
+            (mean_sharpe / (std_sharpe + dec!(0.01))).min(dec!(2))
+        } else {
+            mean_sharpe.min(dec!(2))
+        };
+
+        let dd_std = self.std_dev(&drawdowns);
+        let dd_component = if mean_drawdown > Decimal::ZERO {
+            (dec!(1) - dd_std / mean_drawdown).max(Decimal::ZERO)
+        } else {
+            dec!(1)
+        };
+
+        let return_component = if mean_return > Decimal::ZERO && std_return > Decimal::ZERO {
+            (mean_return / std_return / dec!(3)).min(dec!(1))
+        } else {
+            Decimal::ZERO
+        };
+
+        let robustness_score = self.sharpe_weight * sharpe_component
+            + self.drawdown_weight * dd_component
+            + self.return_weight * return_component;
+
+        // Total months tested
+        let total_months = results.iter()
+            .map(|r| r.split.test.days() / 30)
+            .sum::<i64>() as u32;
+
+        AggregateMetrics {
+            mean_sharpe,
+            median_sharpe,
+            std_sharpe,
+            mean_return,
+            median_return,
+            std_return,
+            mean_drawdown,
+            worst_drawdown,
+            mean_volatility,
+            stability_score,
+            robustness_score,
+            best_window_idx: best_idx,
+            worst_window_idx: worst_idx,
+            total_windows: results.len(),
+            total_months_tested: total_months,
+            mean_psr,
+            median_psr,
+            mean_dsr,
+            median_dsr,
+            oos_sharpe_mean: mean_sharpe,
+            oos_return_mean: mean_return,
+            oos_psr_mean: mean_psr,
         }
     }
 
@@ -306,6 +481,30 @@ mod tests {
         assert!(metrics.total_return_pct > Decimal::ZERO);
         assert!(metrics.sharpe_ratio > Decimal::ZERO);
         assert_eq!(metrics.max_drawdown_pct, Decimal::ZERO); // No drawdown in upward curve
+        assert!(metrics.n_observations > 0);
+        assert!(metrics.skewness.abs() < dec!(10));  // Reasonable skewness
+    }
+
+    #[test]
+    fn test_metrics_with_psr() {
+        let calc = MetricsCalculator::new(dec!(0.05), 252);
+        let equity: Vec<Decimal> = (0..100)
+            .map(|i| dec!(100) + Decimal::from(i) * dec!(0.1))
+            .collect();
+
+        let metrics = calc.from_equity_curve_with_psr(
+            &equity,
+            dec!(5),
+            dec!(20),
+            dec!(0.5),  // threshold
+            Some(10),   // n_trials
+            Some(dec!(0.25)),  // sharpe variance
+        );
+
+        assert!(metrics.psr.is_some());
+        assert!(metrics.dsr.is_some());
+        assert!(metrics.psr.unwrap() >= Decimal::ZERO);
+        assert!(metrics.psr.unwrap() <= Decimal::ONE);
     }
 
     #[test]
