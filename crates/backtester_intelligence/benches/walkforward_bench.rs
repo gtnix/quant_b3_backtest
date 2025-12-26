@@ -5,10 +5,16 @@
 //! - Single window, 100 grid points: < 500ms
 //! - 20 windows, no grid: < 1s
 //! - 20 windows, 100 grid points: < 10s
+//! - PSR calculation: < 1ms
+//! - DSR calculation: < 5ms
+//! - Nested splitter 20y: < 10ms
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use backtester_intelligence::walkforward::*;
 use backtester_intelligence::walkforward::runner::{WfCandidate, PriceData};
+use backtester_intelligence::walkforward::statistics::{calculate_psr, calculate_dsr, calculate_skewness, calculate_kurtosis, sharpe_variance};
+use backtester_intelligence::walkforward::splitter::NestedSplitter;
+use backtester_intelligence::walkforward::types::NestedWalkForwardConfig;
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -51,8 +57,128 @@ fn make_equity_curve(n: usize) -> Vec<Decimal> {
         .collect()
 }
 
+fn make_returns(n: usize) -> Vec<Decimal> {
+    (0..n)
+        .map(|i| {
+            let base = dec!(0.001);
+            let noise = Decimal::from((i as i64 % 20) - 10) / dec!(1000);
+            base + noise
+        })
+        .collect()
+}
+
 // ============================================================================
-// SPLITTER BENCHMARKS
+// STATISTICS BENCHMARKS (PSR/DSR/SKEW/KURT)
+// ============================================================================
+
+fn bench_statistics(c: &mut Criterion) {
+    let mut group = c.benchmark_group("statistics");
+
+    // Skewness benchmarks
+    for n in [100, 500, 1000] {
+        let returns = make_returns(n);
+        group.bench_with_input(BenchmarkId::new("skewness", n), &returns, |b, r| {
+            b.iter(|| black_box(calculate_skewness(r)))
+        });
+    }
+
+    // Kurtosis benchmarks
+    for n in [100, 500, 1000] {
+        let returns = make_returns(n);
+        group.bench_with_input(BenchmarkId::new("kurtosis", n), &returns, |b, r| {
+            b.iter(|| black_box(calculate_kurtosis(r)))
+        });
+    }
+
+    // PSR benchmarks (varying N observations)
+    for n in [100, 500, 1000] {
+        group.bench_with_input(BenchmarkId::new("psr", n), &n, |b, &n_obs| {
+            b.iter(|| {
+                black_box(calculate_psr(
+                    dec!(1.2),      // sharpe
+                    dec!(0.5),      // threshold
+                    n_obs,          // n_observations
+                    dec!(0.15),     // skewness
+                    dec!(0.8),      // kurtosis
+                ))
+            })
+        });
+    }
+
+    // DSR benchmarks (varying N trials)
+    for n_trials in [10, 50, 100] {
+        group.bench_with_input(BenchmarkId::new("dsr", n_trials), &n_trials, |b, &trials| {
+            b.iter(|| {
+                black_box(calculate_dsr(
+                    dec!(1.2),      // sharpe
+                    dec!(0.5),      // threshold
+                    252,            // n_observations
+                    dec!(0.15),     // skewness
+                    dec!(0.8),      // kurtosis
+                    trials,         // n_trials
+                    dec!(0.25),     // sharpe_variance
+                ))
+            })
+        });
+    }
+
+    // Sharpe variance
+    let sharpes: Vec<Decimal> = (0..100)
+        .map(|i| dec!(0.8) + Decimal::from(i) / dec!(200))
+        .collect();
+    group.bench_function("sharpe_variance_100", |b| {
+        b.iter(|| black_box(sharpe_variance(&sharpes)))
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// NESTED SPLITTER BENCHMARKS
+// ============================================================================
+
+fn bench_nested_splitter(c: &mut Criterion) {
+    let config = NestedWalkForwardConfig {
+        train_months: 4,
+        val_months: 1,
+        test_months: 1,
+        step_months: 3,
+        purge_days: 5,
+        embargo_days: 5,
+        market: Market::BR,
+        ..Default::default()
+    };
+
+    let splitter = NestedSplitter::new(&config);
+
+    let mut group = c.benchmark_group("nested_splitter");
+
+    // 5 years (~20 windows)
+    group.bench_function("5_years", |b| {
+        b.iter(|| {
+            black_box(splitter.generate_nested_splits(date(2015, 1, 1), date(2020, 1, 1)))
+        })
+    });
+
+    // 10 years (~40 windows)
+    group.bench_function("10_years", |b| {
+        b.iter(|| {
+            black_box(splitter.generate_nested_splits(date(2010, 1, 1), date(2020, 1, 1)))
+        })
+    });
+
+    // 20 years (~80 windows)
+    group.bench_function("20_years", |b| {
+        b.iter(|| {
+            black_box(splitter.generate_nested_splits(date(2005, 1, 1), date(2025, 1, 1)))
+        })
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// SPLITTER BENCHMARKS (Legacy 2-segment)
 // ============================================================================
 
 fn bench_splitter(c: &mut Criterion) {
@@ -332,6 +458,8 @@ fn bench_full_pipeline(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_statistics,
+    bench_nested_splitter,
     bench_splitter,
     bench_grid,
     bench_metrics,
@@ -341,4 +469,6 @@ criterion_group!(
 );
 
 criterion_main!(benches);
+
+
 

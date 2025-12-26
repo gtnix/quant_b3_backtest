@@ -181,3 +181,5 @@ fn determinism_exit_compact() {
     assert_eq!(log1.to_compact(), log2.to_compact());
 }
 
+
+
