@@ -35,6 +35,7 @@ pub mod entry;
 pub mod exit;
 pub mod filters;
 pub mod orchestrator;
+pub mod performance;
 pub mod risk_free;
 pub mod scorer;
 
@@ -72,6 +73,15 @@ pub use orchestrator::{
 // Accounting exports
 pub use accounting::{PortfolioState, AccountingError};
 
+// Performance exports
+pub use performance::{
+    PerformanceSnapshot, PnLBreakdown, CostBreakdown, ExposureBreakdown,
+    DrawdownMetrics, TurnoverMetrics, PositionLot, TradeRecord, TradeSide,
+    VolatilityMetrics, VaRMetrics, VaRMethod, TechniqueAttribution,
+    AttributionBreakdown, CIOView, TradeLedger, AttributionEngine,
+    RiskCalculator, PerformanceEngine, PerformanceReporter,
+};
+
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::config::{
@@ -103,5 +113,11 @@ pub mod prelude {
     // Orchestrator
     pub use crate::orchestrator::{
         RebalanceOrchestrator, OrchestratorConfig, RebalanceStepResult, RebalanceStepAudit,
+    };
+    
+    // Performance
+    pub use crate::performance::{
+        PerformanceSnapshot, PnLBreakdown, TradeLedger, PerformanceEngine,
+        AttributionBreakdown, CIOView, PerformanceReporter,
     };
 }
