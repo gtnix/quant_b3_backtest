@@ -1,0 +1,40 @@
+# Golden Strategy A: Momentum Pure
+# Pure momentum selection with equal weight rebalancing
+# Baseline permanent strategy for regression testing
+
+[strategy]
+id = "golden_momentum_v1"
+version = "1.0.0"
+description = "Pure momentum: select top 20% by 6-month returns, equal weight, weekly rebalance"
+author = "Strategy Factory"
+
+# Pipeline: Selection -> Sizing
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+params = { lookback_days = 126, min_return = 0.0, skip_last_days = 21, top_pct = 20 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.10 }
+
+[[pipeline]]
+type = "exit"
+block_id = "time_exit"
+params = { max_days = 90 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 0.20, min_weight = 0.02, max_positions = 10 }
+
+[rebalance]
+frequency = "weekly"
+day = "friday"
+
+[constraints]
+max_weight_per_asset = 0.20
+min_liquidity_brl = 500000
+max_positions = 10
+

@@ -1,0 +1,41 @@
+# Golden Strategy C: Trend-Following with Volatility Targeting (Combo 30)
+# MA Crossover entry with trailing stop and vol targeting
+# Baseline permanent strategy for regression testing
+
+[strategy]
+id = "golden_trend_vol_v1"
+version = "1.0.0"
+description = "Trend-following: MA crossover entry, trailing stop exit, 12% vol target"
+author = "Strategy Factory"
+
+# Pipeline: Entry -> Exit -> Sizing
+[[pipeline]]
+type = "entry"
+block_id = "ma_crossover"
+params = { fast_period = 50, slow_period = 200 }
+
+[[pipeline]]
+type = "exit"
+block_id = "trailing_stop"
+params = { trailing_pct = 0.03, activation_pct = 0.05 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.05 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "vol_targeting"
+params = { target_vol = 0.12, max_weight = 0.25, min_weight = 0.02, max_leverage = 1.0, correlation = 0.5, max_positions = 10 }
+
+[rebalance]
+frequency = "weekly"
+day = "friday"
+
+[constraints]
+max_weight_per_asset = 0.25
+min_liquidity_brl = 500000
+max_positions = 10
+max_portfolio_vol = 0.12
+

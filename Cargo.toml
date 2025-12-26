@@ -10,6 +10,7 @@ members = [
     "crates/backtester_tests",
     "crates/backtester_cli",
     "crates/backtester_intelligence",
+    "crates/backtester_strategy",
     "crates/market_data",
 ]
 
@@ -28,6 +29,7 @@ backtester_portfolio = { path = "crates/backtester_portfolio" }
 backtester_execution = { path = "crates/backtester_execution" }
 backtester_reports = { path = "crates/backtester_reports" }
 backtester_intelligence = { path = "crates/backtester_intelligence" }
+backtester_strategy = { path = "crates/backtester_strategy" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

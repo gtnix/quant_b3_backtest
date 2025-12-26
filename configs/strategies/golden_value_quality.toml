@@ -1,0 +1,53 @@
+# Golden Strategy B: Value + Quality + Low Vol (Combo 29)
+# Multi-factor selection with risk parity weighting
+# Baseline permanent strategy for regression testing
+
+[strategy]
+id = "golden_value_quality_v1"
+version = "1.0.0"
+description = "Value+Quality+LowVol: multi-factor selection with risk parity, monthly rebalance"
+author = "Strategy Factory"
+
+# Pipeline: Selection (3 factors) -> Exit -> Sizing
+[[pipeline]]
+type = "selection"
+block_id = "value"
+params = { max_pe = 12.0, max_pb = 1.5, top_pct = 40 }
+
+[[pipeline]]
+type = "selection"
+block_id = "quality"
+params = { min_roe = 0.15, max_debt_equity = 0.5, top_pct = 50 }
+
+[[pipeline]]
+type = "selection"
+block_id = "low_vol"
+params = { max_annualized_vol = 0.15, lookback_days = 60, top_pct = 50 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.08 }
+
+[[pipeline]]
+type = "exit"
+block_id = "trailing_stop"
+params = { trailing_pct = 0.12, activation_pct = 0.08 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "risk_parity"
+# Note: max_weight set higher for testing with limited mock data
+params = { max_weight = 0.50, min_weight = 0.02, fallback_vol = 0.20, max_positions = 15 }
+
+[rebalance]
+frequency = "monthly"
+day_of_month = 1
+
+[constraints]
+# Note: max_weight set higher for testing with limited mock data
+max_weight_per_asset = 0.50
+min_liquidity_brl = 500000
+max_positions = 15
+max_portfolio_vol = 0.20
+
