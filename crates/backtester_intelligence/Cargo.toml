@@ -11,13 +11,26 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
-rust_decimal = { version = "1.39", features = ["maths"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust_decimal = { version = "1.39", features = ["maths", "db-tokio-postgres"] }
 rust_decimal_macros = "1.39"
 serde_json = "1.0"
 
+# Async and database dependencies for monitoring
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+tokio-postgres-rustls = "0.12"
+rustls = "0.23"
+webpki-roots = "0.26"
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+
 [dev-dependencies]
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bin]]
+name = "monitoring_baseline"
+path = "src/bin/monitoring_baseline.rs"
 
 [[bench]]
 name = "entry_bench"

@@ -203,15 +203,22 @@ version = "0.1.0"
 dependencies = [
  "backtester_core",
  "chrono",
+ "clap",
  "criterion",
+ "dotenvy",
  "rust_decimal",
  "rust_decimal_macros",
+ "rustls 0.23.35",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
  "toml",
  "tracing",
+ "tracing-subscriber",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

@@ -105,6 +105,9 @@ pub use monitoring::{
     CircuitBreaker, CircuitState,
     MonitoringEngine, MonitoringContext,
     MonitoringReporter, ReportFormat,
+    // Baseline runner exports
+    ContextBuilder, BuilderError, BaselineAggregator, BaselineReport, DailyResult,
+    CheckFrequency, CategoryBreakdown, ThresholdRecommendation,
 };
 
 /// Prelude for common imports.

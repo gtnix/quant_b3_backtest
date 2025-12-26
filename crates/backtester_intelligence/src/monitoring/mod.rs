@@ -16,6 +16,8 @@ mod regressions;
 mod circuit_breaker;
 mod engine;
 mod reporter;
+mod context_builder;
+mod baseline;
 
 pub use config::{
     MonitoringConfig, DataHealthConfig, DriftConfig, RegressionConfig,
@@ -61,5 +63,16 @@ pub use engine::{
 
 pub use reporter::{
     MonitoringReporter, ReportFormat,
+};
+
+pub use context_builder::{
+    ContextBuilder, BuilderError, BuilderResult,
+    OhlcvAudit, WatermarkData, InterestRateStats,
+};
+
+pub use baseline::{
+    BaselineAggregator, BaselineReport, DailyResult,
+    CheckFrequency, CategoryBreakdown, CircuitBreakerStats,
+    ThresholdRecommendation,
 };
 
