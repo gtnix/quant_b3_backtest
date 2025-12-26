@@ -20,7 +20,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 /// Market region for differentiated risk-free rates and thresholds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Market {
     /// Brazilian market (B3) - uses SELIC as risk-free rate

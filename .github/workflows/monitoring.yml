@@ -1,0 +1,105 @@
+name: Daily Monitoring
+
+on:
+  schedule:
+    # Run at 10:00 UTC on weekdays (before market open BR/US)
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      run_checks:
+        description: 'Run monitoring checks'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  monitoring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build monitoring module
+        run: cargo build -p backtester_intelligence --release
+
+      - name: Run monitoring tests
+        run: |
+          cargo test -p backtester_intelligence --test monitoring_invariants --release
+          cargo test -p backtester_intelligence --test monitoring_stress --release
+          cargo test -p backtester_intelligence --test monitoring_golden --release
+
+      - name: Run monitoring checks
+        if: ${{ github.event.inputs.run_checks != 'false' }}
+        run: |
+          # Create output directory
+          mkdir -p output
+          
+          # Run the monitoring binary (when implemented)
+          # cargo run -p backtester_intelligence --bin monitoring --release
+          
+          # For now, create placeholder reports
+          echo '{"version": "1.0.0", "status": "placeholder"}' > output/monitoring_report.json
+          echo "## Monitoring Report - $(date -u +%Y-%m-%d)" > output/monitoring_summary.md
+          echo "" >> output/monitoring_summary.md
+          echo "This is a placeholder report. Full monitoring will be enabled when the monitoring binary is implemented." >> output/monitoring_summary.md
+
+      - name: Upload monitoring report
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-report-${{ github.run_id }}
+          path: |
+            output/monitoring_report.json
+            output/monitoring_summary.md
+          retention-days: 30
+
+      - name: Post summary to GitHub
+        run: |
+          if [ -f output/monitoring_summary.md ]; then
+            cat output/monitoring_summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Monitoring Report" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Monitoring tests passed successfully." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for critical issues
+        run: |
+          if [ -f output/monitoring_report.json ]; then
+            # Check if NO-TRADE flag is set
+            if grep -q '"no_trade": true' output/monitoring_report.json; then
+              echo "::warning::NO-TRADE flag is set in monitoring report"
+            fi
+            
+            # Check for HALT action
+            if grep -q '"action": "HaltWithError"' output/monitoring_report.json; then
+              echo "::error::Monitoring detected critical issues requiring HALT"
+              # Uncomment to fail the workflow on critical issues
+              # exit 1
+            fi
+          fi
+

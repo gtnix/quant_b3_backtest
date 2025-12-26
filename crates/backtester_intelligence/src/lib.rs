@@ -34,6 +34,7 @@ pub mod config;
 pub mod entry;
 pub mod exit;
 pub mod filters;
+pub mod monitoring;
 pub mod orchestrator;
 pub mod performance;
 pub mod risk_free;
@@ -91,6 +92,21 @@ pub use walkforward::{
     MetricsCalculator, RobustnessScorer, WalkForwardRunner, WalkForwardReporter,
 };
 
+// Monitoring exports
+pub use monitoring::{
+    Severity, CheckCategory, CheckResult, Evidence, BaselineStats, CurrentStats,
+    CircuitAction, MonitoringSummary, CircuitBreakerState, MonitoringReport,
+    MonitoringConfig, DataHealthConfig, DriftConfig, RegressionConfig,
+    CircuitBreakerConfig, KnownLimitationsConfig, DynamicThreshold,
+    DrawdownThreshold, ThresholdEvaluator,
+    DataHealthCheck, DataHealthEngine, DataContext,
+    DriftCheck, DriftEngine, DriftContext,
+    RegressionCheck, RegressionEngine, RegressionContext,
+    CircuitBreaker, CircuitState,
+    MonitoringEngine, MonitoringContext,
+    MonitoringReporter, ReportFormat,
+};
+
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::config::{
@@ -134,5 +150,11 @@ pub mod prelude {
     pub use crate::walkforward::{
         WalkForwardConfig, WalkForwardRunner, WalkForwardReporter,
         AggregateReport, WindowResult, RollingSplitter, TimeSplitter,
+    };
+    
+    // Monitoring
+    pub use crate::monitoring::{
+        MonitoringEngine, MonitoringContext, MonitoringConfig,
+        MonitoringReport, MonitoringReporter, Severity, CircuitAction,
     };
 }
