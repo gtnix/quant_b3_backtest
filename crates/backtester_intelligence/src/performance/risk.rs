@@ -1,0 +1,315 @@
+//! Risk metrics calculation: Volatility, VaR, Exposure.
+
+use rust_decimal::Decimal;
+use std::collections::BTreeMap;
+
+use crate::filters::Market;
+use super::types::{VolatilityMetrics, VaRMetrics, VaRMethod, DrawdownMetrics, ExposureBreakdown, PositionLot};
+
+/// Risk calculator for volatility, VaR, and exposure metrics.
+#[derive(Debug, Clone)]
+pub struct RiskCalculator {
+    /// Rolling window for volatility (days)
+    pub vol_window: u32,
+    /// Risk-free rate for Sharpe calculation
+    pub risk_free_rate: Decimal,
+}
+
+impl RiskCalculator {
+    pub fn new(vol_window: u32, risk_free_rate: Decimal) -> Self {
+        Self { vol_window, risk_free_rate }
+    }
+
+    /// Calculate volatility from daily returns.
+    pub fn calculate_volatility(&self, returns: &[Decimal]) -> VolatilityMetrics {
+        if returns.is_empty() {
+            return VolatilityMetrics::default();
+        }
+
+        let n = returns.len();
+        let mean: Decimal = returns.iter().sum::<Decimal>() / Decimal::from(n as u32);
+        
+        let variance: Decimal = returns.iter()
+            .map(|r| {
+                let diff = *r - mean;
+                diff * diff
+            })
+            .sum::<Decimal>() / Decimal::from(n.max(1) as u32);
+
+        // Approximate sqrt using Newton-Raphson
+        let daily_vol = decimal_sqrt(variance);
+        
+        VolatilityMetrics::from_daily(daily_vol, self.vol_window)
+    }
+
+    /// Calculate historical VaR from equity curve.
+    ///
+    /// VaR at 95%: 5th percentile of returns
+    /// VaR at 99%: 1st percentile of returns
+    pub fn calculate_var(&self, returns: &[Decimal], portfolio_value: Decimal) -> VaRMetrics {
+        if returns.is_empty() {
+            return VaRMetrics::default();
+        }
+
+        let mut sorted = returns.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let n = sorted.len();
+        
+        // 5th percentile index
+        let idx_95 = ((n as f64 * 0.05) as usize).min(n - 1);
+        // 1st percentile index
+        let idx_99 = ((n as f64 * 0.01) as usize).min(n - 1);
+
+        VaRMetrics {
+            var_95: sorted[idx_95] * portfolio_value,
+            var_99: sorted[idx_99] * portfolio_value,
+            method: VaRMethod::Historical,
+        }
+    }
+
+    /// Calculate drawdown metrics from equity curve.
+    pub fn calculate_drawdown(&self, equity_curve: &[Decimal]) -> DrawdownMetrics {
+        if equity_curve.is_empty() {
+            return DrawdownMetrics::default();
+        }
+
+        let mut hwm = equity_curve[0];
+        let mut max_dd = Decimal::ZERO;
+        let mut current_dd = Decimal::ZERO;
+        let mut dd_start: Option<usize> = None;
+        let mut max_dd_duration: u32 = 0;
+        let mut current_dd_duration: u32 = 0;
+
+        for (i, &equity) in equity_curve.iter().enumerate() {
+            if equity > hwm {
+                hwm = equity;
+                dd_start = None;
+                current_dd_duration = 0;
+            } else {
+                current_dd = (hwm - equity) / hwm;
+                if current_dd > max_dd {
+                    max_dd = current_dd;
+                }
+                
+                if dd_start.is_none() {
+                    dd_start = Some(i);
+                }
+                current_dd_duration = (i - dd_start.unwrap_or(i)) as u32 + 1;
+                max_dd_duration = max_dd_duration.max(current_dd_duration);
+            }
+        }
+
+        // Current drawdown from last equity point
+        let last_equity = *equity_curve.last().unwrap();
+        current_dd = if hwm > Decimal::ZERO {
+            (hwm - last_equity) / hwm
+        } else {
+            Decimal::ZERO
+        };
+
+        DrawdownMetrics {
+            current_dd,
+            max_dd,
+            dd_duration_days: max_dd_duration,
+            hwm,
+        }
+    }
+
+    /// Calculate exposure breakdown from positions.
+    pub fn calculate_exposure(
+        &self,
+        positions: &BTreeMap<String, PositionLot>,
+        prices: &BTreeMap<String, Decimal>,
+    ) -> ExposureBreakdown {
+        let mut long = Decimal::ZERO;
+        let short = Decimal::ZERO; // Long-only for now
+        let mut by_market: BTreeMap<String, Decimal> = BTreeMap::new();
+
+        for (symbol, pos) in positions {
+            let price = prices.get(symbol).copied().unwrap_or(pos.wap_cost_basis);
+            let value = price * Decimal::from(pos.shares);
+            long += value;
+
+            let market_key = match pos.market {
+                Market::BR => "BR".to_string(),
+                Market::US => "US".to_string(),
+            };
+            *by_market.entry(market_key).or_default() += value;
+        }
+
+        ExposureBreakdown {
+            gross: long + short.abs(),
+            net: long - short.abs(),
+            long,
+            short,
+            by_market,
+        }
+    }
+
+    /// Calculate Sharpe ratio from returns.
+    pub fn calculate_sharpe(&self, returns: &[Decimal]) -> Decimal {
+        if returns.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        let n = returns.len();
+        let mean: Decimal = returns.iter().sum::<Decimal>() / Decimal::from(n as u32);
+        let excess_return = mean - self.risk_free_rate / Decimal::from(252);
+
+        let variance: Decimal = returns.iter()
+            .map(|r| {
+                let diff = *r - mean;
+                diff * diff
+            })
+            .sum::<Decimal>() / Decimal::from(n.max(1) as u32);
+
+        let vol = decimal_sqrt(variance);
+        
+        if vol.is_zero() {
+            return Decimal::ZERO;
+        }
+
+        // Annualize: sharpe * sqrt(252)
+        let sqrt_252 = Decimal::from_str_exact("15.87").unwrap_or(Decimal::from(16));
+        excess_return / vol * sqrt_252
+    }
+}
+
+impl Default for RiskCalculator {
+    fn default() -> Self {
+        Self::new(21, Decimal::ZERO)
+    }
+}
+
+/// Approximate square root for Decimal using Newton-Raphson.
+fn decimal_sqrt(x: Decimal) -> Decimal {
+    if x <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+
+    // Initial guess
+    let mut guess = x / Decimal::from(2);
+    if guess.is_zero() {
+        guess = Decimal::from_str_exact("0.5").unwrap();
+    }
+
+    // Newton-Raphson iterations
+    for _ in 0..10 {
+        let new_guess = (guess + x / guess) / Decimal::from(2);
+        if (new_guess - guess).abs() < Decimal::from_str_exact("0.0000001").unwrap() {
+            return new_guess;
+        }
+        guess = new_guess;
+    }
+
+    guess
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn test_volatility_calculation() {
+        let calc = RiskCalculator::default();
+        
+        // Known volatility case
+        let returns = vec![dec!(0.01), dec!(-0.02), dec!(0.015), dec!(-0.005), dec!(0.01)];
+        let vol = calc.calculate_volatility(&returns);
+        
+        assert!(vol.daily_vol > Decimal::ZERO);
+        assert!(vol.annualized_vol > vol.daily_vol);
+    }
+
+    #[test]
+    fn test_var_calculation() {
+        let calc = RiskCalculator::default();
+        
+        // Returns with known percentiles
+        let returns: Vec<Decimal> = (-10..10).map(|i| Decimal::from(i) / Decimal::from(100)).collect();
+        let var = calc.calculate_var(&returns, dec!(100000));
+
+        // VaR95 should be negative (loss)
+        assert!(var.var_95 < Decimal::ZERO);
+        // VaR99 should be more negative than VaR95
+        assert!(var.var_99 <= var.var_95);
+    }
+
+    #[test]
+    fn test_drawdown_calculation() {
+        let calc = RiskCalculator::default();
+        
+        let equity = vec![
+            dec!(100), dec!(105), dec!(110), dec!(100), dec!(95), dec!(108), dec!(115)
+        ];
+        let dd = calc.calculate_drawdown(&equity);
+
+        // Max drawdown from 110 to 95 = (110-95)/110 = ~13.6%
+        assert!(dd.max_dd > Decimal::ZERO);
+        // HWM should be 115
+        assert_eq!(dd.hwm, dec!(115));
+        // Current DD should be 0 (at HWM)
+        assert_eq!(dd.current_dd, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_exposure_by_market() {
+        let calc = RiskCalculator::default();
+        
+        let mut positions = BTreeMap::new();
+        positions.insert("PETR4".to_string(), PositionLot::new(
+            "PETR4".into(), 100, dec!(30), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+        positions.insert("AAPL".to_string(), PositionLot::new(
+            "AAPL".into(), 10, dec!(150), Market::US,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+
+        let prices: BTreeMap<String, Decimal> = [
+            ("PETR4".to_string(), dec!(35)),
+            ("AAPL".to_string(), dec!(160)),
+        ].into();
+
+        let exp = calc.calculate_exposure(&positions, &prices);
+
+        // PETR4: 100 * 35 = 3500
+        // AAPL: 10 * 160 = 1600
+        assert_eq!(exp.long, dec!(5100));
+        assert_eq!(exp.by_market.get("BR"), Some(&dec!(3500)));
+        assert_eq!(exp.by_market.get("US"), Some(&dec!(1600)));
+    }
+
+    #[test]
+    fn test_sharpe_calculation() {
+        let calc = RiskCalculator::new(21, Decimal::ZERO);
+        
+        // Positive returns with some variance
+        let returns = vec![dec!(0.01), dec!(0.02), dec!(0.015), dec!(0.008), dec!(0.012)];
+        let sharpe = calc.calculate_sharpe(&returns);
+
+        // Should be positive for positive returns
+        assert!(sharpe > Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_empty_inputs() {
+        let calc = RiskCalculator::default();
+        
+        assert_eq!(calc.calculate_volatility(&[]).daily_vol, Decimal::ZERO);
+        assert_eq!(calc.calculate_var(&[], dec!(100000)).var_95, Decimal::ZERO);
+        assert_eq!(calc.calculate_drawdown(&[]).max_dd, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_decimal_sqrt() {
+        let sqrt4 = decimal_sqrt(dec!(4));
+        assert!((sqrt4 - dec!(2)).abs() < dec!(0.001));
+
+        let sqrt9 = decimal_sqrt(dec!(9));
+        assert!((sqrt9 - dec!(3)).abs() < dec!(0.001));
+    }
+}
+
