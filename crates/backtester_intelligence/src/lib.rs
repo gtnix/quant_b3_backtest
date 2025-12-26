@@ -29,10 +29,12 @@
 //! - **Trailing Stop**: Exit on drawdown from high-water mark
 //! - **Risk Guards**: Exposure limits, turnover limits, drawdown guard
 
+pub mod accounting;
 pub mod config;
 pub mod entry;
 pub mod exit;
 pub mod filters;
+pub mod orchestrator;
 pub mod risk_free;
 pub mod scorer;
 
@@ -62,6 +64,14 @@ pub use exit::{
     ExitAuditLog, ExitedPosition,
 };
 
+// Orchestrator exports
+pub use orchestrator::{
+    RebalanceOrchestrator, OrchestratorConfig, RebalanceStepResult, RebalanceStepAudit,
+};
+
+// Accounting exports
+pub use accounting::{PortfolioState, AccountingError};
+
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::config::{
@@ -88,5 +98,10 @@ pub mod prelude {
         ExitEngine, ExitEngineConfig, ExitContext, ExitResult, ExitTarget, ExitReason,
         Position, RiskViolation, DrawdownAction, RiskConfig, RiskGuard,
         ExitAuditLog,
+    };
+    
+    // Orchestrator
+    pub use crate::orchestrator::{
+        RebalanceOrchestrator, OrchestratorConfig, RebalanceStepResult, RebalanceStepAudit,
     };
 }
