@@ -1,0 +1,23 @@
+[package]
+name = "combiner_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Core types for the Generative Combiner (SCG) - genomes, genes, fitness"
+
+[dependencies]
+# Workspace dependencies
+backtester_strategy = { path = "../backtester_strategy" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+
+# Local dependencies
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rustc-hash = "2.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+

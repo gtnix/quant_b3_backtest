@@ -1,0 +1,30 @@
+[package]
+name = "combiner_engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Evolution engine for the Generative Combiner (SCG) - genetic operators, Pareto, Hall of Fame"
+
+[dependencies]
+# Workspace dependencies
+combiner_core = { path = "../combiner_core" }
+combiner_runner = { path = "../combiner_runner" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+
+# Local dependencies
+rand = "0.8"
+rand_chacha = "0.3"
+thiserror = "1.0"
+tracing = "0.1"
+num_cpus = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+libm = "0.2"
+
+[dev-dependencies]
+backtester_strategy = { path = "../backtester_strategy" }
+tempfile = "3.0"
+
