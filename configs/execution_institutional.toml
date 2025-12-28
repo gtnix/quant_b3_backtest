@@ -1,0 +1,40 @@
+# Execution Model Configuration - Institutional
+# For Stage B validation with realistic costs/slippage
+
+[execution]
+delay_bars = 1  # Execute on the bar following the signal
+bypass_for_debug = false
+
+[execution.slippage]
+type = "Constant"
+bps = 10.0  # 10bps = 0.1% conservative slippage
+
+[execution.fees]
+tier = "B3Retail"
+# Implicit values from tier:
+# fixed_per_trade = 10.0
+# commission_rate = 0.0015 (0.15%)
+# emolument_rate = 0.00035 (0.035%)
+
+[execution.fill_policy]
+allow_partial = false
+max_participation = 0.05  # 5% of bar volume max
+
+[execution.fill_policy.gap_policy]
+type = "ExecuteAtOpen"
+
+[execution.fill_policy.reject_policy]
+type = "Cancel"
+
+# Stress suite configuration
+[execution.stress_suite]
+enabled = true
+scenarios = ["costs_2x", "delay_plus1", "spread_widen_vol", "capacity_constraint", "combined_adverse"]
+
+# Institutional gates (hard constraints)
+[execution.gates]
+max_turnover_annual = 12.0  # 12x portfolio turnover per year
+max_slippage_pct_of_pnl = 30.0  # Costs can't exceed 30% of gross PnL
+min_capacity_usd = 5000000  # 5M USD minimum capacity
+max_avg_slippage_bps = 25.0  # Average slippage warning threshold
+

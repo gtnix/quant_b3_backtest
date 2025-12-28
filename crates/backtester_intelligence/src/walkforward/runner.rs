@@ -264,13 +264,38 @@ impl WalkForwardRunner {
             current_date += chrono::Duration::days(1);
         }
 
-        // Calculate costs (simplified: 10 bps per trade)
+        // Calculate costs using ExecutionModelConfig if available
         let num_trades = selected.len() * 2; // entry + exit
         let avg_trade_value = dec!(100_000) / Decimal::from(selected.len());
-        let costs = Decimal::from(num_trades) * avg_trade_value * dec!(0.001);
+        
+        // Get slippage and fee parameters from config
+        let (slippage_bps, fee_rate) = if let Some(ref exec_config) = self.config.execution_config {
+            if exec_config.bypass_for_debug {
+                (0.0, 0.0)
+            } else {
+                let slip_bps = exec_config.slippage.base_bps();
+                let fee = exec_config.fees.commission_rate + exec_config.fees.emolument_rate;
+                (slip_bps, fee)
+            }
+        } else {
+            // Default: 10 bps slippage + 0.1% fees
+            (10.0, 0.001)
+        };
+        
+        // Calculate total costs per trade
+        let slippage_cost = avg_trade_value * Decimal::try_from(slippage_bps / 10_000.0).unwrap_or(dec!(0.001));
+        let fee_cost = avg_trade_value * Decimal::try_from(fee_rate).unwrap_or(dec!(0.001));
+        let cost_per_trade = slippage_cost + fee_cost;
+        let costs = Decimal::from(num_trades) * cost_per_trade;
 
-        // Turnover (simplified)
-        let turnover = dec!(50); // Fixed assumption
+        // Turnover calculation
+        let total_traded = Decimal::from(num_trades) * avg_trade_value;
+        let avg_portfolio = equity_curve.iter().sum::<Decimal>() / Decimal::from(equity_curve.len().max(1));
+        let turnover = if avg_portfolio > Decimal::ZERO {
+            total_traded / avg_portfolio * dec!(100)
+        } else {
+            dec!(50)
+        };
 
         self.metrics_calc.from_equity_curve(&equity_curve, costs, turnover)
     }
@@ -428,12 +453,32 @@ impl NestedWalkForwardRunner {
                 val_metrics.kurtosis,
             );
 
-            // Composite score with penalties
+            // Composite score with penalties (including slippage/capacity from cost report)
             let turnover_penalty = self.config.penalties.turnover_weight * val_metrics.turnover_avg_pct / dec!(100);
             let cost_penalty = self.config.penalties.cost_weight * val_metrics.total_costs / dec!(1000);
             let dd_penalty = self.config.penalties.drawdown_weight * val_metrics.max_drawdown_pct / dec!(100);
+            
+            // Slippage sensitivity penalty (based on avg_slippage_bps from cost report)
+            let slippage_penalty = if let Some(ref report) = val_metrics.cost_report {
+                let avg_slip_bps = Decimal::try_from(report.avg_slippage_bps).unwrap_or(Decimal::ZERO);
+                self.config.penalties.slippage_weight * avg_slip_bps / dec!(100)
+            } else {
+                Decimal::ZERO
+            };
+            
+            // Capacity penalty (if capacity is below threshold)
+            let capacity_penalty = if let Some(ref report) = val_metrics.cost_report {
+                let capacity = Decimal::try_from(report.capacity_proxy_usd).unwrap_or(Decimal::ZERO);
+                if capacity < self.config.penalties.min_capacity_usd && capacity > Decimal::ZERO {
+                    self.config.penalties.capacity_weight
+                } else {
+                    Decimal::ZERO
+                }
+            } else {
+                Decimal::ZERO
+            };
 
-            let composite = val_metrics.sharpe_ratio - turnover_penalty - cost_penalty - dd_penalty;
+            let composite = val_metrics.sharpe_ratio - turnover_penalty - cost_penalty - dd_penalty - slippage_penalty - capacity_penalty;
 
             selection_candidates.push(SelectionCandidate {
                 params: params.clone(),
@@ -565,6 +610,9 @@ impl NestedWalkForwardRunner {
         let turnover_penalty = self.config.penalties.turnover_weight * best.turnover / dec!(100);
         let cost_penalty = self.config.penalties.cost_weight * best.costs / dec!(1000);
         let dd_penalty = self.config.penalties.drawdown_weight * best.max_drawdown / dec!(100);
+        // Default to zero for slippage/capacity penalties (not tracked per candidate yet)
+        let slippage_penalty = Decimal::ZERO;
+        let capacity_penalty = Decimal::ZERO;
 
         let reason = SelectionReason {
             criteria,
@@ -574,6 +622,8 @@ impl NestedWalkForwardRunner {
             turnover_penalty,
             cost_penalty,
             drawdown_penalty: dd_penalty,
+            slippage_penalty,
+            capacity_penalty,
             final_score: best.composite_score,
             tiebreaker_used,
         };
@@ -656,15 +706,56 @@ impl NestedWalkForwardRunner {
             current_date += chrono::Duration::days(1);
         }
 
-        // Calculate costs (simplified: 10 bps per trade)
+        // Calculate costs using ExecutionModelConfig if available
         let num_trades = selected.len() * 2; // entry + exit
         let avg_trade_value = dec!(100_000) / Decimal::from(selected.len());
-        let costs = Decimal::from(num_trades) * avg_trade_value * dec!(0.001);
+        
+        // Get slippage and fee parameters from config
+        let (slippage_bps, fee_rate) = if let Some(ref exec_config) = self.config.execution_config {
+            if exec_config.bypass_for_debug {
+                (0.0, 0.0)
+            } else {
+                let slip_bps = exec_config.slippage.base_bps();
+                let fee = exec_config.fees.commission_rate + exec_config.fees.emolument_rate;
+                (slip_bps, fee)
+            }
+        } else {
+            // Default: 10 bps slippage + 0.1% fees
+            (10.0, 0.001)
+        };
+        
+        // Calculate total costs per trade
+        let slippage_cost = avg_trade_value * Decimal::try_from(slippage_bps / 10_000.0).unwrap_or(dec!(0.001));
+        let fee_cost = avg_trade_value * Decimal::try_from(fee_rate).unwrap_or(dec!(0.001));
+        let cost_per_trade = slippage_cost + fee_cost;
+        let costs = Decimal::from(num_trades) * cost_per_trade;
 
-        // Turnover (simplified)
-        let turnover = dec!(50); // Fixed assumption
+        // Turnover calculation (trades / avg portfolio value * 100)
+        let total_traded = Decimal::from(num_trades) * avg_trade_value;
+        let avg_portfolio = equity_curve.iter().sum::<Decimal>() / Decimal::from(equity_curve.len().max(1));
+        let turnover = if avg_portfolio > Decimal::ZERO {
+            total_traded / avg_portfolio * dec!(100)
+        } else {
+            dec!(50) // Fallback
+        };
 
-        self.metrics_calc.from_equity_curve(&equity_curve, costs, turnover)
+        // Build cost report if execution config is provided
+        let mut metrics = self.metrics_calc.from_equity_curve(&equity_curve, costs, turnover);
+        
+        if self.config.execution_config.is_some() {
+            use backtester_execution::cost_report::{CostReport, FeeBreakdown, SlippageBreakdown};
+            let mut cost_report = CostReport::new();
+            cost_report.total_costs = costs.to_string().parse().unwrap_or(0.0);
+            cost_report.total_slippage = (slippage_cost * Decimal::from(num_trades)).to_string().parse().unwrap_or(0.0);
+            cost_report.total_fees = (fee_cost * Decimal::from(num_trades)).to_string().parse().unwrap_or(0.0);
+            cost_report.trades_count = num_trades as u32;
+            cost_report.avg_slippage_bps = slippage_bps;
+            cost_report.turnover_annual = turnover.to_string().parse().unwrap_or(0.0);
+            cost_report.avg_trade_notional = avg_trade_value.to_string().parse().unwrap_or(0.0);
+            metrics.cost_report = Some(cost_report);
+        }
+        
+        metrics
     }
 
     /// Find most commonly selected params across nested windows.

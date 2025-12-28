@@ -104,6 +104,7 @@ impl MetricsCalculator {
             n_observations: returns.len(),
             psr: None,  // Calculated separately with threshold
             dsr: None,  // Calculated separately with trials info
+            cost_report: None,
         }
     }
 

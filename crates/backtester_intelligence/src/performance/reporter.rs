@@ -19,7 +19,7 @@ use super::{
 /// - fx_report_v1.1: Added FX audit trail fields
 /// - fx_report_v1.2: Added sector_exposure, concentration, regime_summary
 /// - fx_report_v1.3: Added compliance (constraints & risk controls)
-pub const PERFORMANCE_REPORT_SCHEMA_VERSION: &str = "fx_report_v1.3";
+pub const PERFORMANCE_REPORT_SCHEMA_VERSION: &str = "fx_report_v1.4";
 
 /// Full performance report in AI-friendly JSON format.
 ///
@@ -75,6 +75,11 @@ pub struct PerformanceReport {
     /// Compliance status and breach log (NEW in v1.3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compliance: Option<ComplianceJson>,
+    
+    // Execution Reality Check (NEW in v1.4)
+    /// Execution cost analysis for PM-ready validation (NEW in v1.4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_reality_check: Option<ExecutionRealityCheckJson>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -577,6 +582,198 @@ impl ComplianceJson {
     }
 }
 
+// =============================================================================
+// EXECUTION REALITY CHECK (NEW in v1.4)
+// =============================================================================
+
+/// Execution reality check for PM-ready validation (NEW in v1.4).
+///
+/// This section provides a comprehensive analysis of execution costs,
+/// stress test results, and whether the strategy is suitable for production.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionRealityCheckJson {
+    /// Summary verdict and confidence.
+    pub summary: ExecutionSummaryJson,
+    /// Gross vs net performance comparison.
+    pub gross_vs_net: GrossVsNetJson,
+    /// Detailed cost breakdown.
+    pub cost_breakdown: CostBreakdownJson,
+    /// Turnover analysis.
+    pub turnover_analysis: TurnoverAnalysisJson,
+    /// Capacity proxy estimation.
+    pub capacity_proxy: CapacityProxyJson,
+    /// Stress test sensitivity results.
+    pub stress_sensitivity: Vec<StressSensitivityJson>,
+    /// Warning and rejection flags.
+    pub flags: Vec<ExecutionFlagJson>,
+    /// Execution parameters used.
+    pub execution_params_used: ExecutionParamsJson,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionSummaryJson {
+    /// APPROVED, WARNING, or REJECTED.
+    pub verdict: String,
+    /// Confidence score (0-1).
+    pub confidence_score: String,
+    /// List of rejection reasons.
+    pub rejection_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrossVsNetJson {
+    pub cagr_gross: String,
+    pub cagr_net: String,
+    pub cagr_drag: String,
+    pub sharpe_gross: String,
+    pub sharpe_net: String,
+    pub sharpe_drag: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CostBreakdownJson {
+    pub total_costs: String,
+    pub total_slippage: String,
+    pub total_fees: String,
+    pub slippage_as_pct_of_gross: String,
+    pub fees_as_pct_of_gross: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnoverAnalysisJson {
+    pub turnover_annual: String,
+    pub trades_per_year: u32,
+    pub avg_holding_days: String,
+    /// VERY_LOW, LOW, MEDIUM, HIGH, VERY_HIGH
+    pub turnover_classification: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacityProxyJson {
+    pub estimated_capacity_usd: String,
+    pub methodology: String,
+    /// RETAIL, INSTITUTIONAL, HF_GRADE
+    pub capacity_classification: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StressSensitivityJson {
+    pub scenario_id: String,
+    pub scenario_name: String,
+    pub sharpe_original: String,
+    pub sharpe_stressed: String,
+    pub degradation_pct: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionFlagJson {
+    /// WARNING or REJECTED
+    pub flag_type: String,
+    pub code: String,
+    pub message: String,
+    pub recommendation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionParamsJson {
+    pub slippage_model: String,
+    pub slippage_bps: String,
+    pub delay_bars: u8,
+    pub fee_tier: String,
+    pub max_participation: String,
+}
+
+impl ExecutionRealityCheckJson {
+    /// Create a default (empty) execution reality check.
+    pub fn default_empty() -> Self {
+        Self {
+            summary: ExecutionSummaryJson {
+                verdict: "NOT_EVALUATED".to_string(),
+                confidence_score: "0.0".to_string(),
+                rejection_reasons: Vec::new(),
+            },
+            gross_vs_net: GrossVsNetJson {
+                cagr_gross: "N/A".to_string(),
+                cagr_net: "N/A".to_string(),
+                cagr_drag: "N/A".to_string(),
+                sharpe_gross: "N/A".to_string(),
+                sharpe_net: "N/A".to_string(),
+                sharpe_drag: "N/A".to_string(),
+            },
+            cost_breakdown: CostBreakdownJson {
+                total_costs: "0.0".to_string(),
+                total_slippage: "0.0".to_string(),
+                total_fees: "0.0".to_string(),
+                slippage_as_pct_of_gross: "0.0".to_string(),
+                fees_as_pct_of_gross: "0.0".to_string(),
+            },
+            turnover_analysis: TurnoverAnalysisJson {
+                turnover_annual: "0.0".to_string(),
+                trades_per_year: 0,
+                avg_holding_days: "0.0".to_string(),
+                turnover_classification: "UNKNOWN".to_string(),
+            },
+            capacity_proxy: CapacityProxyJson {
+                estimated_capacity_usd: "0.0".to_string(),
+                methodology: "Not calculated".to_string(),
+                capacity_classification: "UNKNOWN".to_string(),
+            },
+            stress_sensitivity: Vec::new(),
+            flags: Vec::new(),
+            execution_params_used: ExecutionParamsJson {
+                slippage_model: "None".to_string(),
+                slippage_bps: "0.0".to_string(),
+                delay_bars: 0,
+                fee_tier: "None".to_string(),
+                max_participation: "N/A".to_string(),
+            },
+        }
+    }
+
+    /// Classify turnover based on annual rate.
+    pub fn classify_turnover(turnover_annual: f64) -> &'static str {
+        if turnover_annual < 2.0 {
+            "VERY_LOW"
+        } else if turnover_annual < 6.0 {
+            "LOW"
+        } else if turnover_annual < 12.0 {
+            "MEDIUM"
+        } else if turnover_annual < 24.0 {
+            "HIGH"
+        } else {
+            "VERY_HIGH"
+        }
+    }
+
+    /// Classify capacity based on USD estimate.
+    pub fn classify_capacity(capacity_usd: f64) -> &'static str {
+        if capacity_usd < 5_000_000.0 {
+            "RETAIL"
+        } else if capacity_usd < 50_000_000.0 {
+            "INSTITUTIONAL"
+        } else {
+            "HF_GRADE"
+        }
+    }
+
+    /// Determine verdict based on flags.
+    pub fn determine_verdict(flags: &[ExecutionFlagJson]) -> (&'static str, f64) {
+        let has_rejection = flags.iter().any(|f| f.flag_type == "REJECTED");
+        let warning_count = flags.iter().filter(|f| f.flag_type == "WARNING").count();
+
+        if has_rejection {
+            ("REJECTED", 0.0)
+        } else if warning_count >= 3 {
+            ("WARNING", 0.5)
+        } else if warning_count >= 1 {
+            ("WARNING", 0.7)
+        } else {
+            ("APPROVED", 1.0)
+        }
+    }
+}
+
 /// Performance reporter for generating outputs.
 #[derive(Debug, Clone)]
 pub struct PerformanceReporter {
@@ -900,6 +1097,7 @@ impl PerformanceReporter {
             concentration: concentration_json,
             regime_summary: regime_summary_json,
             compliance: None,
+            execution_reality_check: None,
         }
     }
 

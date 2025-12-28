@@ -8,6 +8,8 @@ description = "Order execution simulation with slippage and costs"
 
 [dependencies]
 backtester_core.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -15,21 +17,3 @@ criterion.workspace = true
 [[bench]]
 name = "execution_bench"
 harness = false
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

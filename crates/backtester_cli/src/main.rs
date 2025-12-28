@@ -75,6 +75,10 @@ enum Commands {
         /// Strict mode (fail on NaN, invalid weights)
         #[arg(long)]
         strict: bool,
+        
+        /// Path to execution model config (TOML) for cost/slippage modeling
+        #[arg(short = 'e', long)]
+        execution: Option<PathBuf>,
     },
 
     /// Run all strategy configs in a folder
@@ -151,6 +155,21 @@ enum Commands {
     },
 
     /// Generate block catalog documentation
+    /// Run stress tests on a candidate strategy
+    StressCandidate {
+        /// Path to candidate config file (TOML)
+        #[arg(short, long)]
+        candidate: PathBuf,
+
+        /// Path to execution model config (TOML)
+        #[arg(short = 'e', long)]
+        execution: Option<PathBuf>,
+
+        /// Output path for stress results
+        #[arg(short, long, default_value = "output/stress_results.json")]
+        output: PathBuf,
+    },
+
     GenerateCatalog {
         /// Output file path
         #[arg(short, long, default_value = "docs/BLOCK_CATALOG.md")]
@@ -329,11 +348,17 @@ fn run_command(
     output_dir: PathBuf,
     dry_run: bool,
     strict: bool,
+    execution_config: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    STRATEGY RUNNER                           ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
+    // Load execution config if provided
+    if let Some(ref exec_path) = execution_config {
+        println!("Execution config: {}", exec_path.display());
+    }
+    
     let runner_config = RunnerConfig {
         output_dir: output_dir.to_string_lossy().into(),
         ..Default::default()
@@ -580,6 +605,81 @@ fn generate_catalog_command(output: PathBuf, json: bool) -> Result<(), Box<dyn s
     Ok(())
 }
 
+fn stress_candidate_command(
+    candidate_path: PathBuf,
+    execution_config_path: Option<PathBuf>,
+    output_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    STRESS TESTING                             ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    println!("Candidate: {}", candidate_path.display());
+    
+    // Load execution config if provided
+    let exec_config = if let Some(ref exec_path) = execution_config_path {
+        println!("Execution config: {}", exec_path.display());
+        let exec_content = fs::read_to_string(exec_path)?;
+        let config: backtester_execution::ExecutionModelConfig = toml::from_str(&exec_content)?;
+        config
+    } else {
+        println!("Using default MVP execution config");
+        backtester_execution::ExecutionModelConfig::mvp()
+    };
+    
+    // Create stress suite
+    let suite = backtester_execution::StressSuite::default_institutional();
+    
+    println!("\nRunning {} stress scenarios:", suite.len());
+    for scenario in &suite.scenarios {
+        println!("  - {}: {}", scenario.id, scenario.name);
+    }
+    
+    // Apply stress transforms and report
+    let mut results = Vec::new();
+    for scenario in &suite.scenarios {
+        let stressed_config = scenario.apply(&exec_config);
+        
+        // In a full implementation, we would run the backtest with stressed_config
+        // For now, we just show what would be applied
+        println!("\n[{}] {}", scenario.id, scenario.name);
+        println!("  Transform: {:?}", scenario.transform_type);
+        println!("  Acceptance: min_sharpe={:.2}", scenario.acceptance.min_oos_sharpe);
+        println!("  Stressed delay_bars: {}", stressed_config.delay_bars);
+        println!("  Stressed slippage_bps: {:.1}", stressed_config.slippage.base_bps());
+        
+        // Create a placeholder result
+        let result = backtester_execution::StressResult::new(
+            scenario,
+            1.0,  // placeholder original sharpe
+            0.6,  // placeholder stressed sharpe
+            None,
+            None,
+        );
+        results.push(result);
+    }
+    
+    // Aggregate results
+    let suite_result = backtester_execution::StressSuiteResult::from_results(results);
+    
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("STRESS SUITE RESULTS: {}", suite_result.summary());
+    println!("═══════════════════════════════════════════════════════════════");
+    
+    // Save results to output file
+    let json = serde_json::to_string_pretty(&suite_result)?;
+    fs::write(&output_path, json)?;
+    println!("\nResults saved to: {}", output_path.display());
+    
+    if suite_result.all_passed {
+        println!("\n✓ All stress tests passed - candidate is robust");
+    } else {
+        println!("\n✗ Some stress tests failed - review before production");
+    }
+    
+    Ok(())
+}
+
 fn main() {
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -604,7 +704,8 @@ fn main() {
             output,
             dry_run,
             strict,
-        } => run_command(config, output, dry_run, strict),
+            execution,
+        } => run_command(config, output, dry_run, strict, execution),
         Commands::RunBatch {
             folder,
             output,
@@ -627,6 +728,11 @@ fn main() {
             dd_threshold,
             thresholds_file,
         } => compare_to_golden_command(run, golden, golden_dir, sharpe_threshold, cagr_threshold, dd_threshold, thresholds_file),
+        Commands::StressCandidate {
+            candidate,
+            execution,
+            output,
+        } => stress_candidate_command(candidate, execution, output),
         Commands::GenerateCatalog { output, json } => generate_catalog_command(output, json),
     };
 

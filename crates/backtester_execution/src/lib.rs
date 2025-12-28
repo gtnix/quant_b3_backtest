@@ -14,8 +14,25 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod config;
+pub mod cost_report;
+pub mod gates;
+pub mod stress;
+
 pub use backtester_core::{
     AssetId, Bar, ExecutionModel, FillEvent, FillId, OrderDirection, OrderEvent, OrderId, OrderType,
+};
+
+pub use config::{
+    ExecutionModelConfig, SlippageModelConfig, FeeModelConfig, FeeTier,
+    FillPolicyConfig, GapPolicy, RejectPolicy, InstitutionalGatesConfig, ConfigError,
+};
+
+pub use gates::{GateChecker, GateResult, GateCheck, GateStatus};
+
+pub use stress::{
+    StressSuite, StressScenario, StressTransformType, AcceptanceCriteria,
+    StressResult, StressSuiteResult,
 };
 
 // =============================================================================
@@ -100,6 +117,35 @@ impl SlippageModel {
     pub fn apply(&self, base_price: f64, order: &OrderEvent, bar: &Bar) -> f64 {
         base_price + self.calculate(order, bar)
     }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: &SlippageModelConfig) -> Self {
+        match config {
+            SlippageModelConfig::None => Self::None,
+            SlippageModelConfig::Constant { bps } => Self::Constant { bps: *bps },
+            SlippageModelConfig::VolumeImpact {
+                base_bps,
+                volume_factor,
+                ..
+            } => Self::VolumeLinear {
+                base_bps: *base_bps,
+                volume_factor: *volume_factor,
+            },
+            SlippageModelConfig::VolatilityAdaptive {
+                base_bps,
+                vol_factor,
+                ..
+            } => Self::Volatility {
+                base_bps: *base_bps,
+                vol_factor: *vol_factor,
+            },
+            SlippageModelConfig::SpreadProxy { base_bps, .. } => {
+                // Fallback to constant for spread proxy
+                Self::Constant { bps: *base_bps }
+            }
+        }
+    }
 }
 
 impl Default for SlippageModel {
@@ -146,6 +192,17 @@ impl CostModel {
     #[must_use]
     pub const fn b3_default() -> Self {
         Self::new(10.0, 0.001, 0.01, 0.000_35)
+    }
+
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: &FeeModelConfig) -> Self {
+        Self {
+            fixed_cost: config.fixed_per_trade,
+            commission_rate: config.commission_rate,
+            per_unit_cost: config.per_unit_cost,
+            emolument_rate: config.emolument_rate,
+        }
     }
 
     /// Calculate total cost for an order.
@@ -226,6 +283,12 @@ impl LiquidityModel {
         }
     }
 
+    /// Create from config.
+    #[must_use]
+    pub fn from_config(config: &FillPolicyConfig) -> Self {
+        Self::new(config.max_participation, config.allow_partial)
+    }
+
     /// Check if order can be filled given volume constraints.
     #[must_use]
     pub fn can_fill(&self, order_qty: i64, bar_volume: f64) -> bool {
@@ -283,6 +346,8 @@ pub struct ExecutionConfig {
     pub costs: CostModel,
     /// Liquidity model.
     pub liquidity: LiquidityModel,
+    /// Delay in bars before execution.
+    pub delay_bars: u8,
 }
 
 impl Default for ExecutionConfig {
@@ -291,6 +356,7 @@ impl Default for ExecutionConfig {
             slippage: SlippageModel::default(),
             costs: CostModel::default(),
             liquidity: LiquidityModel::default(),
+            delay_bars: 1,
         }
     }
 }
@@ -303,6 +369,7 @@ impl ExecutionConfig {
             slippage: SlippageModel::Constant { bps: 5.0 },
             costs: CostModel::b3_default(),
             liquidity: LiquidityModel::new(0.1, true),
+            delay_bars: 1,
         }
     }
 
@@ -313,6 +380,21 @@ impl ExecutionConfig {
             slippage: SlippageModel::None,
             costs: CostModel::new(0.0, 0.0, 0.0, 0.0),
             liquidity: LiquidityModel::new(1.0, true),
+            delay_bars: 0,
+        }
+    }
+
+    /// Create from serializable config.
+    #[must_use]
+    pub fn from_model_config(config: &ExecutionModelConfig) -> Self {
+        if config.bypass_for_debug {
+            return Self::zero_cost();
+        }
+        Self {
+            slippage: SlippageModel::from_config(&config.slippage),
+            costs: CostModel::from_config(&config.fees),
+            liquidity: LiquidityModel::from_config(&config.fill_policy),
+            delay_bars: config.delay_bars,
         }
     }
 }
@@ -344,6 +426,18 @@ impl AdvancedExecutionModel {
     #[must_use]
     pub fn b3_default() -> Self {
         Self::new(ExecutionConfig::b3_default())
+    }
+
+    /// Create from serializable config.
+    #[must_use]
+    pub fn from_model_config(config: &ExecutionModelConfig) -> Self {
+        Self::new(ExecutionConfig::from_model_config(config))
+    }
+
+    /// Get the delay in bars.
+    #[must_use]
+    pub fn delay_bars(&self) -> u8 {
+        self.config.delay_bars
     }
 
     /// Check if a limit order can be filled based on bar range.
@@ -652,5 +746,13 @@ mod tests {
 
         let zero = ExecutionConfig::zero_cost();
         assert!(matches!(zero.slippage, SlippageModel::None));
+    }
+
+    #[test]
+    fn from_model_config() {
+        let model_config = ExecutionModelConfig::mvp();
+        let exec_config = ExecutionConfig::from_model_config(&model_config);
+        assert_eq!(exec_config.delay_bars, 1);
+        assert!(matches!(exec_config.slippage, SlippageModel::Constant { .. }));
     }
 }

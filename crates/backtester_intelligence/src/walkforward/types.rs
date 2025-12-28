@@ -41,6 +41,8 @@ pub struct SelectionReason {
     pub turnover_penalty: Decimal,
     pub cost_penalty: Decimal,
     pub drawdown_penalty: Decimal,
+    pub slippage_penalty: Decimal,
+    pub capacity_penalty: Decimal,
     pub final_score: Decimal,
     pub tiebreaker_used: Option<String>,
 }
@@ -55,6 +57,8 @@ impl Default for SelectionReason {
             turnover_penalty: Decimal::ZERO,
             cost_penalty: Decimal::ZERO,
             drawdown_penalty: Decimal::ZERO,
+            slippage_penalty: Decimal::ZERO,
+            capacity_penalty: Decimal::ZERO,
             final_score: Decimal::ZERO,
             tiebreaker_used: None,
         }
@@ -91,7 +95,24 @@ pub struct PenaltyConfig {
     pub cost_weight: Decimal,
     /// Weight for max drawdown penalty (default 0.2)
     pub drawdown_weight: Decimal,
+    /// Weight for slippage sensitivity penalty (default 0.05)
+    #[serde(default = "default_slippage_weight")]
+    pub slippage_weight: Decimal,
+    /// Weight for low capacity penalty (default 0.1)
+    #[serde(default = "default_capacity_weight")]
+    pub capacity_weight: Decimal,
+    /// Max annual turnover threshold for penalty (default 12.0 = 12x)
+    #[serde(default = "default_max_turnover")]
+    pub max_turnover_annual: Decimal,
+    /// Min capacity in USD below which penalty applies (default 5M)
+    #[serde(default = "default_min_capacity")]
+    pub min_capacity_usd: Decimal,
 }
+
+fn default_slippage_weight() -> Decimal { dec!(0.05) }
+fn default_capacity_weight() -> Decimal { dec!(0.10) }
+fn default_max_turnover() -> Decimal { dec!(12.0) }
+fn default_min_capacity() -> Decimal { dec!(5_000_000) }
 
 impl Default for PenaltyConfig {
     fn default() -> Self {
@@ -99,6 +120,10 @@ impl Default for PenaltyConfig {
             turnover_weight: dec!(0.10),
             cost_weight: dec!(0.05),
             drawdown_weight: dec!(0.20),
+            slippage_weight: dec!(0.05),
+            capacity_weight: dec!(0.10),
+            max_turnover_annual: dec!(12.0),
+            min_capacity_usd: dec!(5_000_000),
         }
     }
 }
@@ -198,6 +223,9 @@ pub struct WalkForwardConfig {
     pub embargo_days: u32,
     pub market: Market,
     pub grid: Option<GridConfig>,
+    /// Execution model configuration for cost/slippage modeling.
+    #[serde(default)]
+    pub execution_config: Option<backtester_execution::ExecutionModelConfig>,
 }
 
 impl Default for WalkForwardConfig {
@@ -210,6 +238,7 @@ impl Default for WalkForwardConfig {
             embargo_days: 5,
             market: Market::BR,
             grid: None,
+            execution_config: None,
         }
     }
 }
@@ -240,6 +269,12 @@ pub struct NestedWalkForwardConfig {
     pub psr_threshold: Decimal,
     /// Penalty configuration for composite selection
     pub penalties: PenaltyConfig,
+    /// Execution model configuration for cost/slippage modeling.
+    #[serde(default)]
+    pub execution_config: Option<backtester_execution::ExecutionModelConfig>,
+    /// Institutional gates configuration.
+    #[serde(default)]
+    pub gates: Option<backtester_execution::InstitutionalGatesConfig>,
 }
 
 impl Default for NestedWalkForwardConfig {
@@ -256,6 +291,8 @@ impl Default for NestedWalkForwardConfig {
             selection_criteria: SelectionCriteria::PSR,
             psr_threshold: dec!(0.5),
             penalties: PenaltyConfig::default(),
+            execution_config: None,
+            gates: None,
         }
     }
 }
@@ -467,6 +504,9 @@ pub struct WindowMetrics {
     pub psr: Option<Decimal>,
     /// Deflated Sharpe Ratio (adjusted for multiple testing)
     pub dsr: Option<Decimal>,
+    /// Detailed cost report (optional, for PM-ready analysis).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_report: Option<backtester_execution::cost_report::CostReport>,
 }
 
 /// Result for a single window (legacy 2-segment).

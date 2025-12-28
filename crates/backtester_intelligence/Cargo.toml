@@ -6,6 +6,7 @@ description = "Asset selection intelligence modules for backtesting"
 
 [dependencies]
 backtester_core = { path = "../backtester_core" }
+backtester_execution = { path = "../backtester_execution" }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
@@ -51,7 +52,3 @@ harness = false
 [[bench]]
 name = "walkforward_bench"
 harness = false
-
-
-
-
