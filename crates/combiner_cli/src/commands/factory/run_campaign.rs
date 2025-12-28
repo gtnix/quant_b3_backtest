@@ -210,6 +210,8 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
                                 Some(cand.gates_passed),
                                 Some(cand.turnover_annual),
                                 cand.capacity_usd,
+                                cand.oos_cagr_net,
+                                cand.max_drawdown_net,
                             )
                             .await?;
                     }
@@ -309,6 +311,8 @@ struct CandidateResult {
     gates_passed: bool,
     turnover_annual: f32,
     capacity_usd: Option<f32>,
+    oos_cagr_net: Option<f32>,
+    max_drawdown_net: Option<f32>,
 }
 
 /// Execute a single SCG run.
@@ -376,6 +380,8 @@ async fn execute_single_run(
             gates_passed: entry.validation.splits_passed >= entry.validation.splits_evaluated / 2,
             turnover_annual: 0.0, // Not available in summary
             capacity_usd: None,   // Not available in summary
+            oos_cagr_net: Some(entry.validation.oos_cagr_median as f32),
+            max_drawdown_net: None, // Not available in ValidationResultSummary
         });
 
         // Save strategy config

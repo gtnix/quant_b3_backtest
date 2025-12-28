@@ -74,6 +74,8 @@ pub struct Candidate {
     pub gates_passed: Option<bool>,
     pub turnover_annual: Option<f32>,
     pub capacity_usd: Option<f32>,
+    pub oos_cagr_net: Option<f32>,
+    pub max_drawdown_net: Option<f32>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -499,14 +501,17 @@ impl Registry {
         gates_passed: Option<bool>,
         turnover_annual: Option<f32>,
         capacity_usd: Option<f32>,
+        oos_cagr_net: Option<f32>,
+        max_drawdown_net: Option<f32>,
     ) -> Result<()> {
         self.client
             .execute(
                 r#"
                 INSERT INTO scg_candidates 
                     (candidate_id, run_id, genome_hash, rank, oos_sharpe_net, oos_sharpe_gross,
-                     pbo, dsr, stress_passed, stress_total, gates_passed, turnover_annual, capacity_usd)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                     pbo, dsr, stress_passed, stress_total, gates_passed, turnover_annual, capacity_usd,
+                     oos_cagr_net, max_drawdown_net)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 ON CONFLICT (run_id, genome_hash) DO UPDATE SET
                     rank = $4,
                     oos_sharpe_net = $5,
@@ -517,7 +522,9 @@ impl Registry {
                     stress_total = $10,
                     gates_passed = $11,
                     turnover_annual = $12,
-                    capacity_usd = $13
+                    capacity_usd = $13,
+                    oos_cagr_net = $14,
+                    max_drawdown_net = $15
                 "#,
                 &[
                     &candidate_id,
@@ -533,6 +540,8 @@ impl Registry {
                     &gates_passed,
                     &turnover_annual,
                     &capacity_usd,
+                    &oos_cagr_net,
+                    &max_drawdown_net,
                 ],
             )
             .await
@@ -569,6 +578,20 @@ impl Registry {
         Ok(rows.iter().map(Self::row_to_candidate).collect())
     }
 
+    /// Get ALL candidates for a run (for export-top sorting in memory).
+    pub async fn get_all_candidates(&self, run_id: &str) -> Result<Vec<Candidate>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT * FROM scg_candidates WHERE run_id = $1",
+                &[&run_id],
+            )
+            .await
+            .context("Failed to get all candidates")?;
+
+        Ok(rows.iter().map(Self::row_to_candidate).collect())
+    }
+
     fn row_to_candidate(row: &Row) -> Candidate {
         Candidate {
             candidate_id: row.get("candidate_id"),
@@ -584,6 +607,8 @@ impl Registry {
             gates_passed: row.get("gates_passed"),
             turnover_annual: row.get("turnover_annual"),
             capacity_usd: row.get("capacity_usd"),
+            oos_cagr_net: row.get("oos_cagr_net"),
+            max_drawdown_net: row.get("max_drawdown_net"),
             created_at: row.get("created_at"),
         }
     }

@@ -165,6 +165,21 @@ enum FactoryAction {
         mode: String,
     },
 
+    /// Export top N candidates with deterministic ranking
+    ExportTop {
+        /// Run ID to export from
+        #[arg(short, long)]
+        run: String,
+
+        /// Number of top candidates to export
+        #[arg(short, long, default_value = "1000")]
+        top: usize,
+
+        /// Export formats (comma-separated: json,csv)
+        #[arg(short, long, default_value = "json,csv")]
+        format: String,
+    },
+
     /// List campaigns
     List {
         /// Filter by tag
@@ -329,6 +344,10 @@ fn main() -> Result<()> {
 
             FactoryAction::AuditData { campaign, mode } => {
                 commands::factory::execute_audit(&campaign, &mode)
+            }
+
+            FactoryAction::ExportTop { run, top, format } => {
+                commands::factory::execute_export_top(&run, top, &format)
             }
         },
     }

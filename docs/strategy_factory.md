@@ -332,3 +332,101 @@ The registry tracks promoted genome hashes to prevent duplicates. Use `--force` 
 combiner factory promote --run <id> --force
 ```
 
+
+## Export Top Candidates
+
+The `factory export-top` command exports the top N candidates from a run with a deterministic ranking.
+
+### Usage
+
+```bash
+# Export top 1000 candidates in JSON and CSV
+combiner factory export-top --run <run_id> --top 1000 --format json,csv
+
+# Export top 100 in JSON only
+combiner factory export-top --run <run_id> --top 100 --format json
+```
+
+### Ranking Rules (Deterministic)
+
+Candidates are ranked using the following criteria, applied in order:
+
+| Priority | Field | Order | Fallback |
+|----------|-------|-------|----------|
+| 1 | oos_sharpe_net | DESC (higher is better) | -∞ |
+| 2 | pbo | ASC (lower is better) | 1.0 |
+| 3 | oos_cagr_net | DESC (higher is better) | 0.0 |
+| 4 | max_drawdown_net | ASC (less negative is better) | 0.0 |
+| 5 | genome_hash | ASC (alphabetical) | - |
+
+**Tie-breaker**: `genome_hash` ensures stable ordering across runs.
+
+### Filters Applied
+
+1. **Data Integrity**: Run must have `data_integrity_verdict = 'PASS'`
+2. **Gates**: Candidate must have `gates_passed = true` (or NULL, which is treated as passed)
+
+### Output
+
+Files are saved to `artifacts/top_candidates/<run_id>/`:
+
+- `top1000.json` - Full export with metadata
+- `top1000.csv` - Tabular format for analysis
+
+### JSON Schema
+
+```json
+{
+  "metadata": {
+    "schema_version": "1.0.0",
+    "run_id": "run_abc123",
+    "campaign_id": "camp_xyz",
+    "data_integrity_verdict": "PASS",
+    "top_n": 1000,
+    "actual_count": 847,
+    "exported_at": "2024-12-28T12:00:00Z",
+    "ranking_rules": [...],
+    "filters_applied": [...]
+  },
+  "candidates": [
+    {
+      "rank": 1,
+      "candidate_id": "cand_001",
+      "genome_hash": "sha256:abc123",
+      "oos_sharpe_net": 1.234,
+      "pbo": 0.08,
+      "oos_cagr_net": 0.15,
+      "max_drawdown_net": -0.12,
+      ...
+    }
+  ]
+}
+```
+
+### CSV Columns
+
+| Column | Description |
+|--------|-------------|
+| rank | Position in ranking (1 = best) |
+| candidate_id | Unique ID |
+| genome_hash | Hash for deduplication |
+| oos_sharpe_net | Out-of-sample Sharpe ratio |
+| pbo | Probability of Backtest Overfitting |
+| oos_cagr_net | Out-of-sample CAGR |
+| max_drawdown_net | Maximum drawdown |
+| dsr | Deflated Sharpe Ratio |
+| stress_passed | Stress scenarios passed |
+| stress_total | Total stress scenarios |
+| gates_passed | Institutional gates passed |
+| turnover_annual | Annual turnover |
+| capacity_usd | Estimated capacity (USD) |
+| created_at | Timestamp |
+
+### Reproducibility Guarantee
+
+Given the same:
+- Database state
+- Run ID
+- Top N parameter
+
+The export will produce **identical output** (same candidates, same order).
