@@ -1,53 +1,62 @@
 {
+  "schema_version": "1.1",
+  "fast_support_criteria": "Block has corresponding fast_* function in fast_context.rs with SoA layout",
   "selection": [
     {
       "block_id": "size",
       "description": "Size selection: filters by market cap (small/mid/large)",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "dividend",
       "description": "Dividend yield selection: high dividend stocks",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "quality",
       "description": "Quality selection: high ROE, low debt companies",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "momentum",
       "description": "Momentum selection: ranks assets by 6-12 month returns",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": true
     },
     {
       "block_id": "low_vol",
       "description": "Low volatility selection: selects stable, low-vol assets",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": true
     },
     {
       "block_id": "value",
       "description": "Value selection: selects low P/E, low P/B stocks",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "carry",
       "description": "Carry selection: dividend yield vs risk-free rate",
       "default_params": {
         "top_pct": 20.0
-      }
+      },
+      "fast_supported": false
     }
   ],
   "exit": [
@@ -56,7 +65,8 @@
       "description": "Take-profit: Exit on gain exceeding target",
       "default_params": {
         "target_pct": 0.3
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "trailing_stop",
@@ -64,21 +74,24 @@
       "default_params": {
         "trailing_pct": 0.15,
         "activation_pct": 0.1
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "time_exit",
       "description": "Time exit: Exit after holding for max days",
       "default_params": {
         "max_days": 20
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "stop_loss",
       "description": "Stop-loss: Exit on loss exceeding threshold",
       "default_params": {
         "threshold_pct": 0.1
-      }
+      },
+      "fast_supported": false
     }
   ],
   "sizing": [
@@ -89,7 +102,8 @@
         "min_weight": 0.02,
         "max_weight": 0.2,
         "max_positions": 20
-      }
+      },
+      "fast_supported": true
     },
     {
       "block_id": "risk_parity",
@@ -99,7 +113,8 @@
         "max_positions": 20,
         "fallback_vol": 0.25,
         "max_weight": 0.2
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "vol_targeting",
@@ -112,7 +127,8 @@
         "correlation": 0.5,
         "fallback_vol": 0.25,
         "max_positions": 20
-      }
+      },
+      "fast_supported": false
     }
   ],
   "entry": [
@@ -123,7 +139,8 @@
         "signal": 9,
         "fast_ema": 12,
         "slow_ema": 26
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "rsi",
@@ -132,7 +149,8 @@
         "oversold": 30.0,
         "period": 14,
         "overbought": 70.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "bollinger",
@@ -140,7 +158,8 @@
       "default_params": {
         "period": 20,
         "std_dev": 2.0
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "ma_crossover",
@@ -148,7 +167,8 @@
       "default_params": {
         "fast_period": 50,
         "slow_period": 200
-      }
+      },
+      "fast_supported": false
     },
     {
       "block_id": "zscore",
@@ -156,7 +176,8 @@
       "default_params": {
         "threshold": 2.0,
         "period": 20
-      }
+      },
+      "fast_supported": false
     }
   ]
 }

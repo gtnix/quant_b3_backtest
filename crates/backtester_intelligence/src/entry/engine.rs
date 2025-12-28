@@ -3,6 +3,7 @@
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::filters::Market;
 use crate::scorer::ScoredAsset;
@@ -15,14 +16,54 @@ use super::audit::{RebalanceAuditLog, SelectedAsset};
 use super::types::{
     EntryContext, EntryResult, EntryTarget, Order, SelectionReason,
 };
+use super::universe_range::UniverseRangeProvider;
+use super::eligibility::EligibilityProvider;
 
 /// Configuration for entry engine.
-#[derive(Debug, Clone, Default)]
 pub struct EntryEngineConfig {
     pub gating: GatingConfig,
     pub selection: SelectionConfig,
     pub weighting: WeightingConfig,
     pub orders: OrderGeneratorConfig,
+    /// Optional eligibility provider for survivorship bias prevention (V1 or V2).
+    /// When set, candidates are validated against historical existence windows.
+    pub eligibility_provider: Option<Arc<dyn EligibilityProvider>>,
+}
+
+impl std::fmt::Debug for EntryEngineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EntryEngineConfig")
+            .field("gating", &self.gating)
+            .field("selection", &self.selection)
+            .field("weighting", &self.weighting)
+            .field("orders", &self.orders)
+            .field("has_eligibility_provider", &self.eligibility_provider.is_some())
+            .finish()
+    }
+}
+
+impl Clone for EntryEngineConfig {
+    fn clone(&self) -> Self {
+        Self {
+            gating: self.gating.clone(),
+            selection: self.selection.clone(),
+            weighting: self.weighting.clone(),
+            orders: self.orders.clone(),
+            eligibility_provider: self.eligibility_provider.clone(),
+        }
+    }
+}
+
+impl Default for EntryEngineConfig {
+    fn default() -> Self {
+        Self {
+            gating: GatingConfig::default(),
+            selection: SelectionConfig::default(),
+            weighting: WeightingConfig::default(),
+            orders: OrderGeneratorConfig::default(),
+            eligibility_provider: None,
+        }
+    }
 }
 
 /// Asset candidate with all required data.
@@ -98,14 +139,45 @@ pub struct EntryEngine {
 }
 
 impl EntryEngine {
+    /// Create a new entry engine.
+    ///
+    /// If `config.eligibility_provider` is set, survivorship bias validation is enabled (V1 or V2).
     pub fn new(config: EntryEngineConfig) -> Self {
+        // Create gating filter with or without eligibility provider
+        let gating = match &config.eligibility_provider {
+            Some(provider) => GatingFilter::with_eligibility_provider(
+                config.gating.clone(),
+                Arc::clone(provider),
+            ),
+            None => GatingFilter::new(config.gating.clone()),
+        };
+
         Self {
-            gating: GatingFilter::new(config.gating.clone()),
+            gating,
             selector: Selector::new(config.selection.clone()),
             weighter: Weighter::new(config.weighting.clone()),
             order_gen: OrderGenerator::new(config.orders.clone()),
             config,
         }
+    }
+
+    /// Create entry engine with V1 universe provider (backward compatible).
+    pub fn with_universe_provider(
+        mut config: EntryEngineConfig,
+        provider: Arc<UniverseRangeProvider>,
+    ) -> Self {
+        config.eligibility_provider = Some(provider as Arc<dyn EligibilityProvider>);
+        Self::new(config)
+    }
+
+    /// Check if eligibility validation is enabled (V1 or V2).
+    pub fn has_eligibility_provider(&self) -> bool {
+        self.gating.has_eligibility_provider()
+    }
+
+    /// Backward compatible alias for has_eligibility_provider().
+    pub fn has_universe_provider(&self) -> bool {
+        self.has_eligibility_provider()
     }
 
     /// Evaluate entry for a specific market.

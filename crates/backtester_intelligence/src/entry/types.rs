@@ -92,6 +92,12 @@ pub enum ExclusionReason {
     MissingPriceData,
     /// Fundamental data from future date (anti-look-ahead)
     FutureFundamentals,
+    /// Asset did not exist in universe at this date (before min_date or after max_date)
+    /// This is a survivorship bias guard - prevents "resurrecting" assets.
+    OutsideUniverseDateRange,
+    /// Asset not found in universe range data (conservative exclusion)
+    /// Applied when universe validation is enabled but symbol has no range data.
+    NoUniverseRangeData,
 }
 
 impl fmt::Display for ExclusionReason {
@@ -107,6 +113,8 @@ impl fmt::Display for ExclusionReason {
             Self::MissingVolatility => write!(f, "sem dados de volatilidade"),
             Self::MissingPriceData => write!(f, "sem dados de preço"),
             Self::FutureFundamentals => write!(f, "dados fundamentais do futuro (look-ahead)"),
+            Self::OutsideUniverseDateRange => write!(f, "fora do período de existência (survivorship)"),
+            Self::NoUniverseRangeData => write!(f, "sem dados de período no universo"),
         }
     }
 }
@@ -276,6 +284,8 @@ mod tests {
     fn test_exclusion_reason_display() {
         assert_eq!(ExclusionReason::MissingFundamentals.to_string(), "sem dados fundamentalistas");
         assert_eq!(ExclusionReason::OutOfTopN.to_string(), "fora do top-N");
+        assert_eq!(ExclusionReason::OutsideUniverseDateRange.to_string(), "fora do período de existência (survivorship)");
+        assert_eq!(ExclusionReason::NoUniverseRangeData.to_string(), "sem dados de período no universo");
     }
 
     #[test]

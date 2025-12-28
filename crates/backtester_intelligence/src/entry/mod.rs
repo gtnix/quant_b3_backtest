@@ -13,6 +13,8 @@
 //! - **Weighting**: Applies risk-parity (1/volatility) to determine weights
 //! - **Orders**: Generates buy/sell orders with costs and lot sizes
 //! - **Audit**: Logs all decisions for traceability
+//! - **Universe Range (V1)**: Time-dependent eligibility from CSV min_date/max_date
+//! - **Eligibility (V2)**: Event-based eligibility with DB listing_date/delisting_date
 
 mod types;
 mod gating;
@@ -21,6 +23,9 @@ mod weighting;
 mod orders;
 mod engine;
 mod audit;
+pub mod universe_range;
+pub mod eligibility;
+pub mod timeline_provider;
 
 pub use types::{
     EntryContext, EntryTarget, EntryExclusion, EntryResult, EntryDiagnostics,
@@ -32,4 +37,13 @@ pub use weighting::{WeightingConfig, WeightingMethod, Weighter, WeightingCandida
 pub use orders::{OrderGeneratorConfig, OrderGenerator};
 pub use engine::{AssetCandidate, EntryEngine, EntryEngineConfig};
 pub use audit::{RebalanceAuditLog, AuditLogger};
+pub use universe_range::{
+    UniverseRangeProvider, DateRange, EligibilityResult, UniverseLoadError, LoadStats,
+};
+// V2 Eligibility exports
+pub use eligibility::{
+    EligibilityProvider, EligibilityDetails, EligibilitySource, EligibilityStats,
+    EligibilityStatsSnapshot, EligibilityAuditSummary,
+};
+pub use timeline_provider::{TimelineEligibilityProvider, Timeline};
 

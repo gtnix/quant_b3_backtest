@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::currency::Currency;
+
 /// Top-level intelligence configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct IntelligenceConfig {
@@ -525,5 +527,272 @@ impl IntelligenceConfig {
     /// Get total weight of enabled filters.
     pub fn total_weight(&self) -> f64 {
         self.enabled_filters().iter().map(|(_, w)| w).sum()
+    }
+}
+
+// =============================================================================
+// FX AND MULTI-CURRENCY CONFIGURATION
+// =============================================================================
+
+/// How the FX rate gap is measured.
+///
+/// This determines how we count days when checking if a rate
+/// is too old to use for LOCF (Last Observation Carried Forward).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FxGapMode {
+    /// Count calendar days (including weekends and holidays).
+    /// This is simpler and the default behavior.
+    /// Example: Friday to Monday = 3 days.
+    #[default]
+    CalendarDays,
+    
+    /// Count business days only (excludes weekends).
+    /// More accurate for markets but requires holiday calendar.
+    /// Note: This mode does NOT account for market-specific holidays.
+    BusinessDays,
+}
+
+impl FxGapMode {
+    /// Human-readable description.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            FxGapMode::CalendarDays => "Calendar days (including weekends)",
+            FxGapMode::BusinessDays => "Business days only",
+        }
+    }
+}
+
+impl std::fmt::Display for FxGapMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FxGapMode::CalendarDays => write!(f, "calendar_days"),
+            FxGapMode::BusinessDays => write!(f, "business_days"),
+        }
+    }
+}
+
+/// Action to take when the FX gap limit is exceeded.
+///
+/// Determines system behavior when LOCF cannot find a rate
+/// within the configured `fx_max_gap_days` limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FxMissingAction {
+    /// Return an error (hard failure).
+    /// The conversion will fail and backtest may halt.
+    /// This is the strictest and most audit-safe option.
+    #[default]
+    Error,
+    
+    /// Mark the snapshot as incomplete but continue.
+    /// Sets a flag on the snapshot indicating FX data was missing.
+    /// Allows backtest to continue with a warning.
+    MarkIncomplete,
+}
+
+impl FxMissingAction {
+    /// Human-readable description.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            FxMissingAction::Error => "Hard error (fail conversion)",
+            FxMissingAction::MarkIncomplete => "Mark snapshot incomplete (warn and continue)",
+        }
+    }
+}
+
+impl std::fmt::Display for FxMissingAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FxMissingAction::Error => write!(f, "error"),
+            FxMissingAction::MarkIncomplete => write!(f, "mark_incomplete"),
+        }
+    }
+}
+
+/// Policy for handling missing FX rates.
+///
+/// When an FX rate is not available for the requested date,
+/// this policy determines how to proceed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FxMissingPolicy {
+    /// Use Last Observation Carried Forward (LOCF).
+    /// Uses the most recent rate available, up to `fx_max_gap_days`.
+    /// If no rate found within gap, the `fx_missing_action` determines behavior.
+    #[default]
+    LastObservationCarriedForward,
+    
+    /// Return an error if no rate available for the exact date.
+    /// Strictest policy - requires complete FX data for every day.
+    ErrorOnMissing,
+    
+    /// Use rate = 1.0 (identity conversion).
+    /// Only valid when converting same currency.
+    /// For different currencies, this will return error.
+    UseOne,
+}
+
+impl FxMissingPolicy {
+    /// Parse from string (case-insensitive).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "locf" | "last_observation_carried_forward" => {
+                Some(FxMissingPolicy::LastObservationCarriedForward)
+            }
+            "error" | "error_on_missing" => Some(FxMissingPolicy::ErrorOnMissing),
+            "one" | "use_one" => Some(FxMissingPolicy::UseOne),
+            _ => None,
+        }
+    }
+    
+    /// Human-readable description.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            FxMissingPolicy::LastObservationCarriedForward => {
+                "LOCF: Use most recent rate within gap limit"
+            }
+            FxMissingPolicy::ErrorOnMissing => {
+                "Strict: Error if rate not available for exact date"
+            }
+            FxMissingPolicy::UseOne => {
+                "Identity: Use rate=1 (same currency only)"
+            }
+        }
+    }
+}
+
+/// Configuration for performance reporting in multi-currency context.
+///
+/// Controls how NAV, PnL, and returns are calculated and reported
+/// when the portfolio contains assets in multiple currencies.
+///
+/// # FX Gap Policy (V1.1)
+///
+/// The gap policy controls how missing FX rates are handled:
+///
+/// - `fx_missing_policy`: Overall policy (LOCF, Error, or UseOne)
+/// - `fx_max_gap_days`: Maximum allowed gap for LOCF
+/// - `fx_gap_mode`: How to count days (calendar or business)
+/// - `fx_missing_action`: What to do when gap limit is exceeded
+///
+/// ## Default Behavior
+///
+/// - LOCF with 5 calendar days gap
+/// - Weekend/holiday: Friday's rate used for Saturday/Sunday (gap = 2)
+/// - Gap exceeded: Hard error with auditable message
+///
+/// ## Example
+///
+/// ```rust
+/// use backtester_intelligence::config::PerformanceReportingConfig;
+///
+/// let config = PerformanceReportingConfig::default();
+/// assert_eq!(config.fx_max_gap_days, 5);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceReportingConfig {
+    /// Base currency for consolidated reporting.
+    /// All values will be converted to this currency.
+    #[serde(default)]
+    pub base_currency: Currency,
+    
+    /// Policy for handling missing FX rates.
+    #[serde(default)]
+    pub fx_missing_policy: FxMissingPolicy,
+    
+    /// Maximum gap for LOCF policy.
+    /// If no FX rate found within this window, `fx_missing_action` is triggered.
+    /// Interpreted according to `fx_gap_mode`.
+    #[serde(default = "default_fx_max_gap")]
+    pub fx_max_gap_days: u32,
+    
+    /// How to count days for the gap limit.
+    /// Calendar days (default) or business days only.
+    #[serde(default)]
+    pub fx_gap_mode: FxGapMode,
+    
+    /// Action to take when the gap limit is exceeded.
+    /// Error (default) or MarkIncomplete.
+    #[serde(default)]
+    pub fx_missing_action: FxMissingAction,
+    
+    /// Whether to include FX attribution in reports.
+    /// When true, returns are decomposed into asset and FX components.
+    #[serde(default = "default_true")]
+    pub include_fx_attribution: bool,
+    
+    /// Whether to include per-currency exposure breakdown.
+    #[serde(default = "default_true")]
+    pub include_currency_exposure: bool,
+    
+    /// Whether to include the FX rates used in snapshots for audit.
+    #[serde(default = "default_true")]
+    pub include_fx_audit_trail: bool,
+}
+
+fn default_fx_max_gap() -> u32 {
+    5 // 5 business days
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for PerformanceReportingConfig {
+    fn default() -> Self {
+        Self {
+            base_currency: Currency::BRL, // Default for BR-focused system
+            fx_missing_policy: FxMissingPolicy::LastObservationCarriedForward,
+            fx_max_gap_days: 5,
+            fx_gap_mode: FxGapMode::CalendarDays,
+            fx_missing_action: FxMissingAction::Error,
+            include_fx_attribution: true,
+            include_currency_exposure: true,
+            include_fx_audit_trail: true,
+        }
+    }
+}
+
+impl PerformanceReportingConfig {
+    /// Create config for BRL base currency.
+    pub fn brl_base() -> Self {
+        Self {
+            base_currency: Currency::BRL,
+            ..Default::default()
+        }
+    }
+    
+    /// Create config for USD base currency.
+    pub fn usd_base() -> Self {
+        Self {
+            base_currency: Currency::USD,
+            ..Default::default()
+        }
+    }
+    
+    /// Create strict config that requires exact date matches (no LOCF).
+    pub fn strict() -> Self {
+        Self {
+            fx_missing_policy: FxMissingPolicy::ErrorOnMissing,
+            fx_missing_action: FxMissingAction::Error,
+            ..Default::default()
+        }
+    }
+    
+    /// Check if FX conversion is needed for a given currency.
+    pub fn needs_conversion(&self, currency: Currency) -> bool {
+        currency != self.base_currency
+    }
+    
+    /// Get a human-readable description of the FX policy.
+    pub fn describe_fx_policy(&self) -> String {
+        format!(
+            "FX Policy: {} | Gap: {} {} | On Exceed: {}",
+            self.fx_missing_policy.describe(),
+            self.fx_max_gap_days,
+            self.fx_gap_mode,
+            self.fx_missing_action
+        )
     }
 }

@@ -31,7 +31,7 @@ backtest generate-catalog --output docs/BLOCK_CATALOG.md --json
 Execute a single strategy configuration.
 
 ```bash
-backtest run --config <path> [--output <dir>] [--dry-run] [--strict]
+backtest run --config <path> [--output <dir>] [--dry-run] [--strict] [--execution <mode>]
 ```
 
 | Flag | Description |
@@ -40,6 +40,35 @@ backtest run --config <path> [--output <dir>] [--dry-run] [--strict]
 | `--output` | Output directory for artifacts (default: `output/experiments`) |
 | `--dry-run` | Validate config and resolve blocks without executing |
 | `--strict` | Fail on NaN values, invalid weights, or other invariant violations |
+| `--execution` | Execution mode: `standard`, `compiled`, `fast`, or `auto` (default: `auto`) |
+
+#### Execution Modes
+
+| Mode | Description | Performance |
+|------|-------------|-------------|
+| `standard` | Standard compositor with dynamic block creation | Baseline |
+| `compiled` | Pre-compiled strategy with typed params | ~5-10% faster |
+| `fast` | SoA layout with zero-allocation hot path | 93-124x faster |
+| `auto` | Automatically select best supported mode | Varies |
+
+**Auto Mode Resolution (Deterministic):**
+1. If ALL pipeline steps are `fast_supported` → use `Fast`
+2. Otherwise → use `Compiled`
+
+**Strict Mode + Execution:**
+- `--execution fast --strict` fails if any block lacks fast support
+- `--execution fast` (without strict) logs warning and falls back to `compiled`
+
+```bash
+# Force fast mode (fails if pipeline not eligible)
+backtest run --config my_strategy.toml --execution fast --strict
+
+# Auto-select best mode
+backtest run --config my_strategy.toml --execution auto
+
+# Use standard mode for debugging
+backtest run --config my_strategy.toml --execution standard
+```
 
 ### `run-batch`
 
@@ -222,8 +251,60 @@ RegressionThresholds {
 }
 ```
 
+## High-Performance Execution
+
+For production workloads requiring maximum throughput, use the compiled strategy API:
+
+### CompiledStrategy
+
+```rust
+use backtester_strategy::{
+    CompiledStrategy, BlockRegistry, SymbolTable,
+    CandidatesSoA, PreallocBuffers, FastContext,
+    fast_momentum_select, fast_equal_weight,
+};
+
+// Compile strategy once
+let registry = BlockRegistry::with_builtins();
+let compiled = CompiledStrategy::compile(&config, &registry, universe)?;
+
+// Execute many times with preallocated context
+for date in trading_days {
+    let result = compiled.execute_fast(&mut ctx);
+    // Process result...
+}
+```
+
+### Ultra-Fast SoA Pipeline
+
+For maximum performance (93-124x faster than standard):
+
+```rust
+// Create SoA candidates (cache-efficient layout)
+let mut candidates = CandidatesSoA::with_capacity(1000);
+for (id, data) in assets.iter().enumerate() {
+    candidates.set(id as u16, data.price, data.vol, data.momentum);
+}
+
+// Preallocate buffers (reuse across rebalances)
+let mut buffers = PreallocBuffers::with_capacity(1000);
+let mut weights = vec![0.0; 1000];
+
+// Zero-allocation execution
+for _ in 0..252 {
+    buffers.clear();
+    let selected = fast_momentum_select(&candidates, 0.20, &mut buffers);
+    let selected_vec: Vec<u16> = selected.to_vec();
+    fast_equal_weight(&selected_vec, 0.10, 50, &mut weights);
+}
+```
+
+See [Performance Baseline](./PERFORMANCE_BASELINE.md) for benchmark data.
+
 ## See Also
 
 - [Block Catalog](./BLOCK_CATALOG.md) - List of all available blocks
+- [Performance Baseline](./PERFORMANCE_BASELINE.md) - Benchmark data and optimization guide
+- [Audit Report](./AUDIT_REPORT.md) - Correctness verification
 - [Strategy Factory README](../crates/backtester_strategy/README.md) - Strategy composition DSL
 

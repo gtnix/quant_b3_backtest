@@ -21,6 +21,63 @@ impl Default for RunMode {
     }
 }
 
+/// Execution mode for strategy pipeline.
+/// Determines which execution path is used (standard compositor, compiled, or fast SoA).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Standard compositor with dynamic block creation (most flexible, slowest)
+    Standard,
+    /// Compiled strategy with typed params (no HashMap lookups in hot path)
+    Compiled,
+    /// Fast SoA execution (requires 100% block support, fastest)
+    Fast,
+    /// Auto-select best mode based on pipeline compatibility (deterministic)
+    Auto,
+}
+
+impl Default for ExecutionMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl ExecutionMode {
+    /// Returns the display name for the execution mode.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExecutionMode::Standard => "standard",
+            ExecutionMode::Compiled => "compiled",
+            ExecutionMode::Fast => "fast",
+            ExecutionMode::Auto => "auto",
+        }
+    }
+
+    /// Parse from string (for CLI).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "standard" => Some(ExecutionMode::Standard),
+            "compiled" => Some(ExecutionMode::Compiled),
+            "fast" => Some(ExecutionMode::Fast),
+            "auto" => Some(ExecutionMode::Auto),
+            _ => None,
+        }
+    }
+}
+
+/// Result of resolving Auto execution mode.
+#[derive(Debug, Clone)]
+pub struct ExecutionModeResolution {
+    /// The resolved execution mode
+    pub resolved_mode: ExecutionMode,
+    /// The requested mode (before resolution)
+    pub requested_mode: ExecutionMode,
+    /// Reason for fallback (if any)
+    pub fallback_reason: Option<String>,
+    /// Steps that prevented fast/compiled mode
+    pub unsupported_steps: Vec<String>,
+}
+
 /// Cost configuration for experiment runs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CostConfig {
@@ -35,6 +92,38 @@ pub struct CostConfig {
 /// Current schema version for artifacts.
 /// Increment when breaking changes are made to artifact format.
 pub const ARTIFACT_SCHEMA_VERSION: &str = "1.0";
+
+/// Dividend policy information for anti-double-count tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DividendPolicyInfo {
+    /// Price type used for signals/indicators (typically Adjusted)
+    pub signals_price: PriceType,
+    /// Price type used for valuation/mark-to-market (should be Raw when dividends enabled)
+    pub valuation_price: PriceType,
+    /// Whether dividends enter as explicit cashflow
+    pub dividends_as_cashflow: bool,
+}
+
+impl Default for DividendPolicyInfo {
+    fn default() -> Self {
+        Self {
+            signals_price: PriceType::Adjusted,
+            valuation_price: PriceType::Raw,
+            dividends_as_cashflow: true,
+        }
+    }
+}
+
+/// Price type for anti-double-count policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PriceType {
+    /// Adjusted prices (dividend adjustments baked in)
+    #[default]
+    Adjusted,
+    /// Raw prices (dividends enter via cashflow)
+    Raw,
+}
 
 /// Run metadata - saved as metadata.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,10 +151,28 @@ pub struct RunMetadata {
     pub costs: CostConfig,
     /// Run mode (Full or DryRun)
     pub mode: RunMode,
+    /// Execution mode used (standard, compiled, fast)
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
     /// Config file path (relative)
     pub config_path: String,
     /// Duration of the run in milliseconds
     pub duration_ms: u64,
+    /// Whether dividends were enabled for this run
+    #[serde(default)]
+    pub dividends_enabled: bool,
+    /// Dividend policy applied (anti-double-count)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dividend_policy: Option<DividendPolicyInfo>,
+    /// Total dividend cashflow received during simulation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_dividend_cashflow: Option<Decimal>,
+    /// Number of dividend events processed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dividend_count: Option<usize>,
+    /// Reason for execution mode fallback (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_fallback_reason: Option<String>,
 }
 
 fn default_schema_version() -> String {
@@ -116,6 +223,10 @@ pub struct EquityPoint {
     pub exposure: f64,
     pub vol_exante: Option<f64>,
     pub vol_expost: Option<f64>,
+    /// Dividend cashflow for this day (if any).
+    pub dividend_cashflow: Option<Decimal>,
+    /// Cumulative dividend cashflow to date.
+    pub dividend_cumulative: Option<Decimal>,
 }
 
 /// Enhanced trace entry with effective parameters.
@@ -141,6 +252,58 @@ impl ExperimentTraceEntry {
             block_type: entry.block_type.clone(),
             message: entry.message.clone(),
             timestamp_ms: entry.timestamp_ms,
+            params_effective: params,
+        }
+    }
+
+    /// Create a policy trace entry.
+    pub fn policy(policy: &DividendPolicyInfo) -> Self {
+        let mut params = HashMap::new();
+        params.insert(
+            "signals_price".to_string(),
+            serde_json::to_value(&policy.signals_price).unwrap_or_default(),
+        );
+        params.insert(
+            "valuation_price".to_string(),
+            serde_json::to_value(&policy.valuation_price).unwrap_or_default(),
+        );
+        params.insert(
+            "dividends_as_cashflow".to_string(),
+            serde_json::Value::Bool(policy.dividends_as_cashflow),
+        );
+
+        Self {
+            step: 0,
+            block_id: "policy".to_string(),
+            block_type: "dividend_policy".to_string(),
+            message: "Anti-double-count policy applied".to_string(),
+            timestamp_ms: 0,
+            params_effective: params,
+        }
+    }
+
+    /// Create a mode fallback trace entry.
+    pub fn mode_fallback(requested: ExecutionMode, resolved: ExecutionMode, reason: &str) -> Self {
+        let mut params = HashMap::new();
+        params.insert(
+            "requested".to_string(),
+            serde_json::Value::String(requested.as_str().to_string()),
+        );
+        params.insert(
+            "resolved".to_string(),
+            serde_json::Value::String(resolved.as_str().to_string()),
+        );
+        params.insert(
+            "reason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
+
+        Self {
+            step: 0,
+            block_id: "execution".to_string(),
+            block_type: "mode_fallback".to_string(),
+            message: format!("Execution mode fallback: {} -> {}", requested.as_str(), resolved.as_str()),
+            timestamp_ms: 0,
             params_effective: params,
         }
     }
@@ -216,8 +379,14 @@ impl ExperimentResult {
                 seed: None,
                 costs: CostConfig::default(),
                 mode: RunMode::Full,
+                execution_mode: ExecutionMode::Standard,
                 config_path: String::new(),
                 duration_ms: 0,
+                dividends_enabled: false,
+                dividend_policy: None,
+                total_dividend_cashflow: None,
+                dividend_count: None,
+                mode_fallback_reason: None,
             },
             metrics: RunMetrics::default(),
             timeseries: Vec::new(),
@@ -349,6 +518,33 @@ mod tests {
 
         let parsed: RunMode = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, RunMode::DryRun);
+    }
+
+    #[test]
+    fn test_execution_mode_serde() {
+        // Test all variants serialize correctly
+        assert_eq!(serde_json::to_string(&ExecutionMode::Standard).unwrap(), "\"standard\"");
+        assert_eq!(serde_json::to_string(&ExecutionMode::Compiled).unwrap(), "\"compiled\"");
+        assert_eq!(serde_json::to_string(&ExecutionMode::Fast).unwrap(), "\"fast\"");
+        assert_eq!(serde_json::to_string(&ExecutionMode::Auto).unwrap(), "\"auto\"");
+
+        // Test deserialization
+        let parsed: ExecutionMode = serde_json::from_str("\"fast\"").unwrap();
+        assert_eq!(parsed, ExecutionMode::Fast);
+    }
+
+    #[test]
+    fn test_execution_mode_from_str() {
+        assert_eq!(ExecutionMode::from_str("standard"), Some(ExecutionMode::Standard));
+        assert_eq!(ExecutionMode::from_str("COMPILED"), Some(ExecutionMode::Compiled));
+        assert_eq!(ExecutionMode::from_str("Fast"), Some(ExecutionMode::Fast));
+        assert_eq!(ExecutionMode::from_str("auto"), Some(ExecutionMode::Auto));
+        assert_eq!(ExecutionMode::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn test_execution_mode_default() {
+        assert_eq!(ExecutionMode::default(), ExecutionMode::Auto);
     }
 
     #[test]

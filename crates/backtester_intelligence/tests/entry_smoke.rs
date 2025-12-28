@@ -74,6 +74,7 @@ fn smoke_test_br_multiple_rebalances() {
         },
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
+        eligibility_provider: None,
     };
     let engine = EntryEngine::new(config);
 
@@ -147,6 +148,7 @@ fn smoke_test_us_without_fundamentals() {
         },
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
+        eligibility_provider: None,
     };
     let engine = EntryEngine::new(config);
 
@@ -191,6 +193,7 @@ fn smoke_test_fundamentals_required_drops_us() {
         selection: SelectionConfig::default(),
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
+        eligibility_provider: None,
     };
     let engine = EntryEngine::new(config);
 

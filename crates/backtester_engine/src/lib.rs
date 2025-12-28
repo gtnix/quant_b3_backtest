@@ -17,6 +17,13 @@
 
 pub mod parallel;
 pub mod rebalancer;
+pub mod unified;
+
+pub use unified::{
+    DayResult, DividendApplication, DividendEvent, DividendIndex, DualPriceBar, 
+    PolicyViolation, PriceType, TraceEvent, UnifiedBacktestResult, UnifiedEngine, 
+    UnifiedEngineConfig,
+};
 
 // Re-export intelligence types for convenience
 pub use backtester_intelligence::{
@@ -273,6 +280,16 @@ pub struct BacktestResult {
 // =============================================================================
 
 /// Simulation engine that orchestrates the backtest.
+/// 
+/// # Deprecation Notice
+/// 
+/// This engine is deprecated in favor of [`UnifiedEngine`] which provides:
+/// - Decimal precision for financial calculations
+/// - Dividend cashflow support with anti-double-count policy
+/// - Integration with `backtester_intelligence` modules
+/// 
+/// See `docs/policies/corporate_actions_pnl.md` for the dividend policy.
+#[deprecated(since = "0.2.0", note = "Use UnifiedEngine instead for dividend support and Decimal precision")]
 pub struct SimulationEngine<S: Strategy, E: ExecutionModel> {
     strategy: S,
     execution_model: E,

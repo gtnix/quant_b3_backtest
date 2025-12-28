@@ -1,16 +1,32 @@
 # Block Catalog
 
+**Version**: 1.1  
+**Date**: 2025-12-26  
+**Schema Version**: 1.1
+
 This document lists all available strategy blocks in the Strategy Factory.
 
 ## Overview
 
-| Category | Count |
-|----------|-------|
-| Selection | 7 |
-| Entry | 5 |
-| Exit | 4 |
-| Sizing | 3 |
-| **Total** | **19** |
+| Category | Count | Fast SoA Available |
+|----------|-------|-------------------|
+| Selection | 7 | ✓ momentum, low_vol |
+| Entry | 5 | - |
+| Exit | 4 | - |
+| Sizing | 3 | ✓ equal_weight |
+| **Total** | **19** | **3** |
+
+> **Performance Note**: Blocks with "Fast SoA" support (`fast_supported: true`) have optimized
+> implementations using Structure-of-Arrays layout, achieving 93-124x speedup.
+> See [Performance Baseline](./PERFORMANCE_BASELINE.md).
+
+### Fast Mode Eligibility
+
+A pipeline is eligible for Fast mode (`--execution fast`) if and only if ALL blocks in the
+pipeline have `fast_supported: true`. If any block lacks fast support:
+- `--execution auto` falls back to `compiled`
+- `--execution fast` with `--strict` fails with error
+- `--execution fast` without `--strict` logs warning and falls back
 
 ---
 
@@ -18,15 +34,15 @@ This document lists all available strategy blocks in the Strategy Factory.
 
 Selection blocks filter and rank assets from the universe.
 
-| block_id | Description | Key Parameters |
-|----------|-------------|----------------|
-| `size` | Size selection: filters by market cap (small/mid/large) | top_pct |
-| `dividend` | Dividend yield selection: high dividend stocks | top_pct |
-| `quality` | Quality selection: high ROE, low debt companies | top_pct |
-| `momentum` | Momentum selection: ranks assets by 6-12 month returns | top_pct |
-| `low_vol` | Low volatility selection: selects stable, low-vol assets | top_pct |
-| `value` | Value selection: selects low P/E, low P/B stocks | top_pct |
-| `carry` | Carry selection: dividend yield vs risk-free rate | top_pct |
+| block_id | Description | Key Parameters | Fast |
+|----------|-------------|----------------|------|
+| `size` | Size selection: filters by market cap (small/mid/large) | top_pct | |
+| `dividend` | Dividend yield selection: high dividend stocks | top_pct | |
+| `quality` | Quality selection: high ROE, low debt companies | top_pct | |
+| `momentum` | Momentum selection: ranks assets by 6-12 month returns | top_pct | ✓ |
+| `low_vol` | Low volatility selection: selects stable, low-vol assets | top_pct | ✓ |
+| `value` | Value selection: selects low P/E, low P/B stocks | top_pct | |
+| `carry` | Carry selection: dividend yield vs risk-free rate | top_pct | |
 
 ### `size`
 
@@ -165,13 +181,13 @@ params = { top_pct = 20 }
 
 Entry blocks generate buy/sell signals based on technical indicators.
 
-| block_id | Description | Key Parameters |
-|----------|-------------|----------------|
-| `macd` | MACD: Long on bullish crossover, exit on bearish crossover | fast_ema, slow_ema, signal |
-| `rsi` | RSI: Long on oversold (<30), exit on overbought (>70) | period, oversold, overbought |
-| `bollinger` | Bollinger Bands: Signal on breakouts above/below bands | period, std_dev |
-| `ma_crossover` | MA Crossover: Long when fast MA crosses above slow MA | fast_period, slow_period |
-| `zscore` | Z-Score: Long on z < -2 (oversold), exit on z > 2 (overbought) | period, threshold |
+| block_id | Description | Key Parameters | Fast |
+|----------|-------------|----------------|------|
+| `macd` | MACD: Long on bullish crossover, exit on bearish crossover | fast_ema, slow_ema, signal | |
+| `rsi` | RSI: Long on oversold (<30), exit on overbought (>70) | period, oversold, overbought | |
+| `bollinger` | Bollinger Bands: Signal on breakouts above/below bands | period, std_dev | |
+| `ma_crossover` | MA Crossover: Long when fast MA crosses above slow MA | fast_period, slow_period | |
+| `zscore` | Z-Score: Long on z < -2 (oversold), exit on z > 2 (overbought) | period, threshold | |
 
 ### `macd`
 
@@ -279,12 +295,12 @@ params = { threshold = 2, period = 20 }
 
 Exit blocks determine when to close positions.
 
-| block_id | Description | Key Parameters |
-|----------|-------------|----------------|
-| `take_profit` | Take-profit: Exit on gain exceeding target | target_pct |
-| `trailing_stop` | Trailing stop: Exit on drawdown from high-water mark | activation_pct, trailing_pct |
-| `time_exit` | Time exit: Exit after holding for max days | max_days |
-| `stop_loss` | Stop-loss: Exit on loss exceeding threshold | threshold_pct |
+| block_id | Description | Key Parameters | Fast |
+|----------|-------------|----------------|------|
+| `take_profit` | Take-profit: Exit on gain exceeding target | target_pct | |
+| `trailing_stop` | Trailing stop: Exit on drawdown from high-water mark | activation_pct, trailing_pct | |
+| `time_exit` | Time exit: Exit after holding for max days | max_days | |
+| `stop_loss` | Stop-loss: Exit on loss exceeding threshold | threshold_pct | |
 
 ### `take_profit`
 
@@ -367,11 +383,11 @@ params = { threshold_pct = 0.1 }
 
 Sizing blocks determine position weights.
 
-| block_id | Description | Key Parameters |
-|----------|-------------|----------------|
-| `equal_weight` | Equal weight: 1/N allocation across selected assets | max_positions, max_weight, min_weight |
-| `risk_parity` | Risk parity: Inverse volatility weighting | fallback_vol, max_weight, min_weight, max_positions |
-| `vol_targeting` | Vol targeting: Scale positions to achieve target portfolio volatility | fallback_vol, max_weight, min_weight, max_positions, target_vol, max_leverage, correlation |
+| block_id | Description | Key Parameters | Fast |
+|----------|-------------|----------------|------|
+| `equal_weight` | Equal weight: 1/N allocation across selected assets | max_positions, max_weight, min_weight | ✓ |
+| `risk_parity` | Risk parity: Inverse volatility weighting | fallback_vol, max_weight, min_weight, max_positions | |
+| `vol_targeting` | Vol targeting: Scale positions to achieve target portfolio volatility | fallback_vol, max_weight, min_weight, max_positions, target_vol, max_leverage, correlation | |
 
 ### `equal_weight`
 

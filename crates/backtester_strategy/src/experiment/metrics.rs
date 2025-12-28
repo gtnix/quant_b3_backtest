@@ -393,6 +393,8 @@ mod tests {
                 exposure: 1.0,
                 vol_exante: None,
                 vol_expost: None,
+                dividend_cashflow: None,
+                dividend_cumulative: None,
             })
             .collect()
     }

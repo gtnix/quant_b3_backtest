@@ -259,6 +259,38 @@ if rebalancer.should_rebalance(timestamp) {
 }
 ```
 
+### FX Module (`backtester_intelligence::fx`)
+
+Multi-currency support with FX attribution:
+
+```rust
+use backtester_intelligence::currency::{Currency, FxPair};
+use backtester_intelligence::fx::{InMemoryFxProvider, convert_money};
+use backtester_intelligence::performance::{PerformanceEngine, PerformanceConfig};
+
+// Load FX rates
+let mut fx_provider = InMemoryFxProvider::new();
+fx_provider.add_rate(FxPair::USD_BRL, date, dec!(5.50));
+
+// Create engine with base currency
+let config = PerformanceConfig::default()
+    .with_base_currency(Currency::BRL);
+let engine = PerformanceEngine::with_fx(config, capital, Arc::new(fx_provider));
+
+// Snapshot includes converted values
+let snap = engine.generate_snapshot(date, cash, &prices);
+println!("Equity (BRL): {:?}", snap.equity_base);
+
+// FX attribution (3-term decomposition)
+let attr = engine.generate_fx_attribution(start, end)?;
+println!("Asset: {}%, FX: {}%, Interaction: {}%",
+    attr.portfolio_asset_return * 100,
+    attr.portfolio_fx_return * 100,
+    attr.portfolio_interaction * 100);
+```
+
+See [FX_MODULE.md](FX_MODULE.md) for full documentation.
+
 ## Benchmarks
 
 ```bash

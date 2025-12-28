@@ -2,7 +2,7 @@
 //!
 //! Measures: events/sec, latency p99, peak RSS.
 
-use backtester_core::{Bar, MarketEvent, SignalEvent, Strategy};
+use backtester_core::{AssetId, Bar, MarketEvent, SignalEvent, Strategy};
 use backtester_engine::SimulationEngine;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
@@ -29,7 +29,7 @@ fn generate_events(num_assets: usize, bars_per_asset: usize) -> Vec<MarketEvent>
             let price = base_price + (bar_idx as f64 * 0.1).sin() * 2.0;
 
             events.push(MarketEvent {
-                asset_id: asset_id as u32,
+                asset_id: AssetId::new(asset_id as u16),
                 bar: Bar {
                     timestamp: ts,
                     open: price - 0.1,

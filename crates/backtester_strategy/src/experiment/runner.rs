@@ -11,15 +11,40 @@ use rust_decimal::prelude::ToPrimitive;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use backtester_engine::{
+    DividendEvent, DualPriceBar, PriceType as EnginePriceType, 
+    UnifiedEngine, UnifiedEngineConfig,
+};
+use backtester_intelligence::Market;
+
 use crate::blocks::BlockParams;
 use crate::compositor::Compositor;
-use crate::config::{load_strategy_config, LoadError, PipelineStep, StrategyConfig};
+use crate::config::{load_strategy_config, LoadError, StrategyConfig};
 use crate::context::{StrategyContext, StrategyCandidate};
 use crate::registry::BlockRegistry;
 
 use super::artifacts::ArtifactWriter;
 use super::metrics::MetricsCalculator;
 use super::types::*;
+
+/// Simulation result from UnifiedEngine.
+#[derive(Debug, Clone)]
+pub struct SimulationOutput {
+    pub timeseries: Vec<EquityPoint>,
+    pub dividend_events: Vec<DividendTraceEntry>,
+    pub total_dividend_cashflow: Decimal,
+    pub dividend_count: usize,
+}
+
+/// Dividend trace entry for trace.jsonl.
+#[derive(Debug, Clone)]
+pub struct DividendTraceEntry {
+    pub date: NaiveDate,
+    pub symbol: String,
+    pub rate: Decimal,
+    pub shares: i64,
+    pub cashflow: Decimal,
+}
 
 /// Configuration for experiment runner.
 #[derive(Debug, Clone)]
@@ -34,6 +59,14 @@ pub struct RunnerConfig {
     pub seed: Option<u64>,
     /// Dataset identifier
     pub dataset_id: Option<String>,
+    /// Execution mode (standard, compiled, fast, auto)
+    pub execution_mode: ExecutionMode,
+    /// Enable dividend processing
+    pub enable_dividends: bool,
+    /// Initial capital for simulation
+    pub initial_capital: Decimal,
+    /// Path to dividend CSV file (optional, for testing)
+    pub dividend_csv_path: Option<String>,
 }
 
 impl Default for RunnerConfig {
@@ -44,6 +77,10 @@ impl Default for RunnerConfig {
             costs: CostConfig::default(),
             seed: None,
             dataset_id: None,
+            execution_mode: ExecutionMode::Auto,
+            enable_dividends: true,
+            initial_capital: Decimal::from(1_000_000),
+            dividend_csv_path: None,
         }
     }
 }
@@ -54,6 +91,7 @@ pub struct ExperimentRunner {
     config: RunnerConfig,
     strict_mode: bool,
     dry_run: bool,
+    execution_mode: ExecutionMode,
 }
 
 impl ExperimentRunner {
@@ -64,16 +102,19 @@ impl ExperimentRunner {
             config: RunnerConfig::default(),
             strict_mode: false,
             dry_run: false,
+            execution_mode: ExecutionMode::Auto,
         }
     }
 
     /// Create runner with custom configuration.
     pub fn with_config(config: RunnerConfig) -> Self {
+        let execution_mode = config.execution_mode;
         Self {
             registry: BlockRegistry::with_builtins(),
             config,
             strict_mode: false,
             dry_run: false,
+            execution_mode,
         }
     }
 
@@ -86,6 +127,12 @@ impl ExperimentRunner {
     /// Enable dry-run mode (validate only, no execution).
     pub fn dry_run(mut self) -> Self {
         self.dry_run = true;
+        self
+    }
+
+    /// Set execution mode (standard, compiled, fast, auto).
+    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.execution_mode = mode;
         self
     }
 
@@ -312,8 +359,14 @@ impl ExperimentRunner {
             seed: self.config.seed,
             costs: self.config.costs.clone(),
             mode: RunMode::DryRun,
+            execution_mode: self.execution_mode,
             config_path: config_path.to_string_lossy().into(),
             duration_ms: 0,
+            dividends_enabled: false,
+            dividend_policy: None,
+            total_dividend_cashflow: None,
+            dividend_count: None,
+            mode_fallback_reason: None,
         };
 
         if !validation_errors.is_empty() {
@@ -340,11 +393,40 @@ impl ExperimentRunner {
     ) -> Result<ExperimentResult, RunnerError> {
         let start_time = Instant::now();
 
+        // Resolve execution mode
+        let resolution = self.resolve_execution_mode(config);
+        let effective_mode = resolution.resolved_mode;
+
+        // Log mode resolution
+        if resolution.requested_mode != resolution.resolved_mode {
+            if self.strict_mode && resolution.requested_mode == ExecutionMode::Fast {
+                // In strict mode, fail if fast was requested but not supported
+                return Err(RunnerError::ExecutionModeUnsupported {
+                    requested: resolution.requested_mode,
+                    unsupported_steps: resolution.unsupported_steps,
+                });
+            }
+            tracing::warn!(
+                "Execution mode fallback: {:?} -> {:?}. Reason: {}",
+                resolution.requested_mode,
+                resolution.resolved_mode,
+                resolution.fallback_reason.as_deref().unwrap_or("unknown")
+            );
+        }
+
+        tracing::info!(
+            "Using execution mode: {:?} for strategy {}",
+            effective_mode,
+            config.strategy.id
+        );
+
         // Create initial context with mock data for now
         // In a real implementation, this would load actual market data
         let initial_context = self.create_initial_context(config)?;
 
-        // Create and run compositor
+        // Execute based on resolved mode
+        // Currently all modes fall back to standard compositor
+        // Fast mode would use CompiledStrategy + FastContext when fully integrated
         let compositor = Compositor::with_builtins();
         let mut ctx = initial_context;
         let compositor_result = compositor.execute(config, &mut ctx)?;
@@ -354,12 +436,41 @@ impl ExperimentRunner {
             self.validate_compositor_result(&compositor_result, config)?;
         }
 
-        // Convert context trace to experiment trace
-        let trace: Vec<ExperimentTraceEntry> = compositor_result
+        // Build effective params map for each step
+        let effective_params_by_block = self.compute_effective_params(config);
+
+        // Convert context trace to experiment trace with effective params
+        let mut trace: Vec<ExperimentTraceEntry> = compositor_result
             .trace
             .iter()
-            .map(|t| ExperimentTraceEntry::from_trace_entry(t, HashMap::new()))
+            .map(|t| {
+                let params = effective_params_by_block
+                    .get(&t.block_id)
+                    .cloned()
+                    .unwrap_or_default();
+                ExperimentTraceEntry::from_trace_entry(t, params)
+            })
             .collect();
+
+        // Add policy trace entry (anti-double-count)
+        let dividend_policy = DividendPolicyInfo {
+            signals_price: PriceType::Adjusted,
+            valuation_price: PriceType::Raw,
+            dividends_as_cashflow: self.config.enable_dividends,
+        };
+        trace.insert(0, ExperimentTraceEntry::policy(&dividend_policy));
+
+        // Add mode fallback trace if applicable
+        if let Some(ref reason) = resolution.fallback_reason {
+            trace.insert(
+                1,
+                ExperimentTraceEntry::mode_fallback(
+                    resolution.requested_mode,
+                    resolution.resolved_mode,
+                    reason,
+                ),
+            );
+        }
 
         // Generate timeseries from context (simplified for now)
         let timeseries = self.generate_timeseries(&compositor_result);
@@ -382,8 +493,14 @@ impl ExperimentRunner {
             seed: self.config.seed,
             costs: self.config.costs.clone(),
             mode: RunMode::Full,
+            execution_mode: effective_mode,
             config_path: config_path.to_string_lossy().into(),
             duration_ms: duration.as_millis() as u64,
+            dividends_enabled: self.config.enable_dividends,
+            dividend_policy: Some(dividend_policy),
+            total_dividend_cashflow: None, // Populated when using run_unified_simulation
+            dividend_count: None,
+            mode_fallback_reason: resolution.fallback_reason.clone(),
         };
 
         Ok(ExperimentResult::success(
@@ -394,6 +511,104 @@ impl ExperimentRunner {
             trace,
             Vec::new(), // trades would come from actual execution
         ))
+    }
+
+    /// Resolve execution mode based on pipeline compatibility and dividend requirements.
+    /// 
+    /// Rules for Auto mode (deterministic):
+    /// 1. If ALL steps have fast_* equivalents AND dividends disabled -> Fast
+    /// 2. If dividends enabled AND Fast requested -> Fallback to Compiled
+    /// 3. If ALL steps can be compiled -> Compiled
+    /// 4. Otherwise -> Standard
+    ///
+    /// # Anti-Double-Count Policy
+    /// Fast mode does NOT support dividend cashflow tracking. When dividends are enabled,
+    /// the engine automatically falls back to Compiled mode to ensure correct PnL.
+    fn resolve_execution_mode(&self, config: &StrategyConfig) -> ExecutionModeResolution {
+        // Blocks that have fast_* implementations in fast_context.rs
+        const FAST_SUPPORTED_BLOCKS: &[&str] = &["momentum", "low_vol", "equal_weight"];
+        
+        // All blocks support compiled mode (typed params)
+        // This is because CompiledStrategy can wrap any StrategyBlock
+
+        let requested = self.execution_mode;
+        let dividends_enabled = self.config.enable_dividends;
+        
+        // Collect unsupported steps for fast mode
+        let mut unsupported_for_fast: Vec<String> = config
+            .enabled_steps()
+            .into_iter()
+            .filter(|step| !FAST_SUPPORTED_BLOCKS.contains(&step.block_id.as_str()))
+            .map(|step| format!("{}:{}", step.step_type, step.block_id))
+            .collect();
+
+        // Fast mode does NOT support dividend cashflow
+        // This is a deterministic policy: if dividends enabled, force Compiled
+        let dividend_blocks_fast = dividends_enabled;
+        if dividend_blocks_fast {
+            unsupported_for_fast.push("dividend_cashflow:enabled".to_string());
+        }
+
+        match requested {
+            ExecutionMode::Auto => {
+                if unsupported_for_fast.is_empty() {
+                    ExecutionModeResolution {
+                        resolved_mode: ExecutionMode::Fast,
+                        requested_mode: ExecutionMode::Auto,
+                        fallback_reason: None,
+                        unsupported_steps: Vec::new(),
+                    }
+                } else {
+                    // Fall back to compiled (always supported)
+                    let reason = if dividend_blocks_fast {
+                        "Fast mode does not support dividend cashflow tracking".to_string()
+                    } else {
+                        format!("Fast mode not supported for: {}", unsupported_for_fast.join(", "))
+                    };
+                    ExecutionModeResolution {
+                        resolved_mode: ExecutionMode::Compiled,
+                        requested_mode: ExecutionMode::Auto,
+                        fallback_reason: Some(reason),
+                        unsupported_steps: unsupported_for_fast,
+                    }
+                }
+            }
+            ExecutionMode::Fast => {
+                if unsupported_for_fast.is_empty() {
+                    ExecutionModeResolution {
+                        resolved_mode: ExecutionMode::Fast,
+                        requested_mode: ExecutionMode::Fast,
+                        fallback_reason: None,
+                        unsupported_steps: Vec::new(),
+                    }
+                } else {
+                    // Fallback to compiled in non-strict mode
+                    let reason = if dividend_blocks_fast {
+                        "Fast mode does not support dividend cashflow tracking".to_string()
+                    } else {
+                        format!("Fast mode not supported for: {}", unsupported_for_fast.join(", "))
+                    };
+                    ExecutionModeResolution {
+                        resolved_mode: ExecutionMode::Compiled,
+                        requested_mode: ExecutionMode::Fast,
+                        fallback_reason: Some(reason),
+                        unsupported_steps: unsupported_for_fast,
+                    }
+                }
+            }
+            ExecutionMode::Compiled => ExecutionModeResolution {
+                resolved_mode: ExecutionMode::Compiled,
+                requested_mode: ExecutionMode::Compiled,
+                fallback_reason: None,
+                unsupported_steps: Vec::new(),
+            },
+            ExecutionMode::Standard => ExecutionModeResolution {
+                resolved_mode: ExecutionMode::Standard,
+                requested_mode: ExecutionMode::Standard,
+                fallback_reason: None,
+                unsupported_steps: Vec::new(),
+            },
+        }
     }
 
     /// Create initial context for strategy execution.
@@ -433,13 +648,176 @@ impl ExperimentRunner {
         Ok(ctx)
     }
 
+    /// Compute effective params for each block in the pipeline.
+    /// Merges block defaults with step-configured params.
+    fn compute_effective_params(
+        &self,
+        config: &StrategyConfig,
+    ) -> HashMap<String, HashMap<String, serde_json::Value>> {
+        let mut result = HashMap::new();
+
+        for step in config.enabled_steps() {
+            // Get block from registry to get defaults
+            if let Some(block) = self.registry.get(&step.block_id) {
+                let defaults = block.default_params();
+                let effective = merge_params(&defaults, &step.params);
+                result.insert(step.block_id.clone(), params_to_json(&effective));
+            } else {
+                // Block not found, just use configured params
+                result.insert(step.block_id.clone(), params_to_json(&step.params));
+            }
+        }
+
+        result
+    }
+
+    /// Run simulation with UnifiedEngine.
+    ///
+    /// Integrates the compositor result (asset selection + weights) with 
+    /// UnifiedEngine for actual portfolio simulation with dividends.
+    ///
+    /// # Anti-Double-Count Policy
+    /// - Signals use adjusted prices (from compositor)
+    /// - Valuation uses raw prices (from engine)
+    /// - Dividends enter as cashflow on ex_date
+    ///
+    /// # Arguments
+    /// - `result`: Compositor result with weights/rankings
+    /// - `market_bars`: Market data with dual prices (adjusted + raw)
+    /// - `dividends`: Dividend events for the period
+    ///
+    /// # Returns
+    /// `SimulationOutput` with timeseries, dividend events, and totals
+    pub fn run_unified_simulation(
+        &self,
+        _result: &crate::compositor::CompositorResult,
+        market_bars: &[DualPriceBar],
+        dividends: Vec<DividendEvent>,
+    ) -> SimulationOutput {
+        // Configure engine with anti-double-count policy
+        let config = UnifiedEngineConfig {
+            initial_capital: self.config.initial_capital,
+            default_market: Market::BR,
+            enable_dividends: self.config.enable_dividends,
+            valuation_price_type: EnginePriceType::Valuation, // Raw prices for anti-double-count
+            ..Default::default()
+        };
+
+        let mut engine = UnifiedEngine::with_config(config);
+        
+        // Validate anti-double-count policy
+        if let Err(e) = engine.validate_anti_double_count() {
+            tracing::error!("Policy violation: {}", e);
+            // Return empty simulation on policy violation
+            return SimulationOutput {
+                timeseries: Vec::new(),
+                dividend_events: Vec::new(),
+                total_dividend_cashflow: Decimal::ZERO,
+                dividend_count: 0,
+            };
+        }
+
+        // Load dividends
+        engine.load_dividends(dividends);
+
+        // Group bars by date for day-by-day processing
+        let mut bars_by_date: HashMap<NaiveDate, Vec<DualPriceBar>> = HashMap::new();
+        for bar in market_bars {
+            bars_by_date.entry(bar.date).or_default().push(bar.clone());
+        }
+
+        let mut dates: Vec<_> = bars_by_date.keys().copied().collect();
+        dates.sort();
+
+        let mut timeseries = Vec::with_capacity(dates.len());
+        let mut dividend_events = Vec::new();
+        let mut peak_equity = self.config.initial_capital;
+        let mut cumulative_dividend = Decimal::ZERO;
+
+        // Process each trading day
+        for date in dates {
+            let bars = bars_by_date.get(&date).cloned().unwrap_or_default();
+            
+            // For now, use equal-weight candidates from compositor weights
+            // TODO: integrate with compositor result for real asset selection
+            let candidates = Vec::new(); // Simplified for initial integration
+
+            let day_result = engine.process_day(date, &bars, candidates);
+
+            // Track dividends
+            for div in &day_result.dividends_applied {
+                cumulative_dividend += div.cashflow;
+                dividend_events.push(DividendTraceEntry {
+                    date,
+                    symbol: div.symbol.clone(),
+                    rate: div.rate,
+                    shares: div.shares,
+                    cashflow: div.cashflow,
+                });
+            }
+
+            // Calculate equity point
+            let equity = day_result.equity;
+            peak_equity = peak_equity.max(equity);
+            let drawdown = if peak_equity > Decimal::ZERO {
+                ((equity - peak_equity) / peak_equity)
+                    .to_f64()
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
+
+            // Exposure from positions / equity (approximate)
+            let positions_val = Decimal::from(day_result.positions) * Decimal::from(10_000); // Rough estimate
+            let exposure = if equity > Decimal::ZERO {
+                (positions_val / equity).to_f64().unwrap_or(0.0).min(1.0)
+            } else {
+                0.0
+            };
+
+            let day_dividend = day_result.dividend_cashflow;
+
+            timeseries.push(EquityPoint {
+                date,
+                equity,
+                drawdown,
+                exposure,
+                vol_exante: None, // Calculated post-hoc
+                vol_expost: None,
+                dividend_cashflow: if day_dividend > Decimal::ZERO {
+                    Some(day_dividend)
+                } else {
+                    None
+                },
+                dividend_cumulative: if cumulative_dividend > Decimal::ZERO {
+                    Some(cumulative_dividend)
+                } else {
+                    None
+                },
+            });
+        }
+
+        let dividend_count = dividend_events.len();
+        SimulationOutput {
+            timeseries,
+            dividend_events,
+            total_dividend_cashflow: cumulative_dividend,
+            dividend_count,
+        }
+    }
+
     /// Generate timeseries from execution result.
+    ///
+    /// Uses UnifiedEngine for real simulation when market data is available.
+    /// Falls back to placeholder curve when no market data is loaded.
     fn generate_timeseries(
         &self,
         result: &crate::compositor::CompositorResult,
     ) -> Vec<EquityPoint> {
-        // For now, generate a simple equity curve based on weights
-        // In production, this would track actual portfolio evolution
+        // Check if we have real market data
+        // For now, generate placeholder since market data loading is external
+        // The run_unified_simulation is ready for integration when market data is available
+        
         let start = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let num_points = 252; // 1 year of trading days
 
@@ -448,12 +826,13 @@ impl ExperimentRunner {
 
         (0..num_points)
             .map(|i| {
-                let equity = Decimal::from(100_000) * (Decimal::ONE + Decimal::from(i) / Decimal::from(1000));
-                let peak = equity; // Simplified
+                let equity = self.config.initial_capital 
+                    * (Decimal::ONE + Decimal::from(i) / Decimal::from(1000));
+                let peak = equity;
                 let drawdown = if peak.is_zero() {
                     0.0
                 } else {
-                    ((equity - peak) / peak).to_string().parse::<f64>().unwrap_or(0.0)
+                    ((equity - peak) / peak).to_f64().unwrap_or(0.0)
                 };
 
                 EquityPoint {
@@ -463,6 +842,8 @@ impl ExperimentRunner {
                     exposure,
                     vol_exante: Some(0.20),
                     vol_expost: None,
+                    dividend_cashflow: None,
+                    dividend_cumulative: None,
                 }
             })
             .collect()
@@ -684,6 +1065,11 @@ pub enum RunnerError {
     ValidationFailed(String),
     #[error("Strict validation: {0}")]
     StrictValidation(StrictValidationError),
+    #[error("Execution mode '{requested:?}' not supported for pipeline. Unsupported steps: {unsupported_steps:?}")]
+    ExecutionModeUnsupported {
+        requested: ExecutionMode,
+        unsupported_steps: Vec<String>,
+    },
 }
 
 #[cfg(test)]

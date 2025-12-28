@@ -42,8 +42,209 @@ jobs:
           # Tests use mocks, no real API calls needed
           FRED_API_KEY: "test_key_for_ci"
 
+  # ============================================================================
+  # Performance Regression Guard
+  # ============================================================================
+  bench:
+    name: Performance Regression Check
+    runs-on: ubuntu-latest
+    # Only run on PRs to main and pushes to main
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for baseline comparison
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+      
+      # Restore baseline from cache
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        id: bench-baseline
+        with:
+          path: target/criterion
+          key: benchmark-baseline-${{ runner.os }}-${{ github.base_ref || 'main' }}
+          restore-keys: |
+            benchmark-baseline-${{ runner.os }}-main
+            benchmark-baseline-${{ runner.os }}-
+      
+      - name: Run benchmarks
+        run: |
+          # Run essential benchmarks
+          cargo bench --bench strategy_bench -- \
+            "fast_soa/1000" \
+            "symbol_table/lookup_5000" \
+            --noplot 2>&1 | tee bench_output.txt
+        env:
+          FRED_API_KEY: "test_key_for_ci"
+      
+      - name: Check for performance regression
+        run: |
+          # Parse criterion output for regressions
+          # Criterion reports "Performance has regressed" for significant slowdowns
+          
+          if grep -q "Performance has regressed" bench_output.txt; then
+            echo "::error::Performance regression detected in benchmarks"
+            echo ""
+            echo "=== Regression Details ==="
+            grep -A5 "Performance has regressed" bench_output.txt
+            echo ""
+            echo "See PERFORMANCE_BASELINE.md for threshold definitions."
+            echo "If this is expected, update the baseline with:"
+            echo "  cargo bench --bench strategy_bench -- --save-baseline main"
+            exit 1
+          fi
+          
+          echo "No performance regression detected"
+      
+      # Save new baseline on main branch pushes
+      - name: Save benchmark baseline
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: benchmark-baseline-${{ runner.os }}-main-${{ github.sha }}
+      
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            bench_output.txt
+            target/criterion/**/report/
+          retention-days: 14
 
-
-
-
-
+  # ============================================================================
+  # Calendar Integrity Guard
+  # ============================================================================
+  calendar-check:
+    name: Calendar Integrity Check
+    runs-on: ubuntu-latest
+    # Only run if calendar-related files changed
+    if: |
+      github.event_name == 'pull_request' && 
+      contains(github.event.pull_request.labels.*.name, 'calendar') ||
+      github.event_name == 'push'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-calendar-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Run Calendar Sync Check
+        id: sync
+        run: |
+          cargo run --bin calendar_sync -- --all --dry-run 2>&1 | tee sync_output.txt
+          
+          # Check for differences
+          if grep -q "MISSING\|EXTRA\|MISMATCH" sync_output.txt; then
+            echo "has_diff=true" >> $GITHUB_OUTPUT
+            echo "::warning::Calendar differences detected between rules engine and database"
+          else
+            echo "has_diff=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        continue-on-error: true
+      
+      - name: Validate Trading Day Counts
+        id: validate
+        run: |
+          cargo run --bin validate_calendar -- --all --years 2020-2025 2>&1 | tee validate_output.txt
+          
+          if grep -q "❌" validate_output.txt; then
+            echo "has_errors=true" >> $GITHUB_OUTPUT
+            echo "::error::Trading day count validation failed"
+          else
+            echo "has_errors=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        continue-on-error: true
+      
+      - name: Check Calendar File Changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # Check if calendar-related files changed
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          
+          CALENDAR_CHANGED=false
+          if echo "$CHANGED_FILES" | grep -qE "calendar|Calendar|CALENDAR"; then
+            CALENDAR_CHANGED=true
+          fi
+          
+          echo "calendar_changed=$CALENDAR_CHANGED" >> $GITHUB_OUTPUT
+          
+          if [ "$CALENDAR_CHANGED" = "true" ]; then
+            echo "::notice::Calendar-related files have been modified"
+          fi
+      
+      - name: Require Review Label for Calendar PRs
+        if: |
+          github.event_name == 'pull_request' && 
+          steps.changes.outputs.calendar_changed == 'true' &&
+          !contains(github.event.pull_request.labels.*.name, 'calendar-reviewed')
+        run: |
+          echo "::warning::Calendar changes detected but 'calendar-reviewed' label not found"
+          echo ""
+          echo "Calendar changes require explicit review. Please:"
+          echo "1. Verify changes against official sources (B3/NYSE)"
+          echo "2. Run validation locally: cargo run --bin validate_calendar -- --all"
+          echo "3. Add the 'calendar-reviewed' label after review"
+          # Don't fail - just warn
+      
+      - name: Add to Job Summary
+        run: |
+          echo "## Calendar Integrity Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f sync_output.txt ]; then
+            echo "### Sync Status" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -20 sync_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f validate_output.txt ]; then
+            echo "### Validation Status" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -30 validate_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload Calendar Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: calendar-reports
+          path: |
+            sync_output.txt
+            validate_output.txt
+          retention-days: 7

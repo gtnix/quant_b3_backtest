@@ -15,7 +15,9 @@ pub mod comparator;
 pub mod catalog;
 
 pub use types::*;
-pub use runner::{ExperimentRunner, RunnerConfig, RunnerError};
+pub use runner::{
+    DividendTraceEntry, ExperimentRunner, RunnerConfig, RunnerError, SimulationOutput,
+};
 pub use metrics::{
     MetricsCalculator,
     TRADING_DAYS_PER_YEAR,

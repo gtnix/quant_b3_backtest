@@ -31,9 +31,12 @@
 
 pub mod accounting;
 pub mod config;
+pub mod currency;
+pub mod dividends;
 pub mod entry;
 pub mod exit;
 pub mod filters;
+pub mod fx;
 pub mod monitoring;
 pub mod orchestrator;
 pub mod performance;
@@ -43,9 +46,11 @@ pub mod walkforward;
 
 pub use config::{
     AssetFilterConfig, CarryConfig, FilterMode, FundamentalsConfig, IntelligenceConfig,
-    RiskFreeConfig,
+    RiskFreeConfig, FxMissingPolicy, PerformanceReportingConfig,
 };
+pub use currency::{Currency, Money, FxPair, FxRate, CurrencyMismatchError};
 pub use filters::{infer_market_from_symbol, AssetData, AssetFilter, FilterResult, Market};
+pub use fx::{FxRateProvider, InMemoryFxProvider, FxError, convert_money};
 pub use risk_free::{DbRiskFreeRateProvider, FallbackRiskFreeProvider, RiskFreeRateProvider};
 pub use scorer::{AssetScorer, ScoredAsset};
 
@@ -55,6 +60,11 @@ pub use entry::{
     EntryExclusion, EntryDiagnostics, GatingFilter, GatingConfig, Selector, SelectionConfig, 
     Weighter, WeightingConfig, WeightingMethod, OrderGenerator, OrderGeneratorConfig, Order, 
     OrderSide, AuditLogger, RebalanceAuditLog, ExclusionReason, ExclusionStage, SelectionReason,
+    // Universe range V1 (survivorship bias prevention)
+    UniverseRangeProvider, DateRange, EligibilityResult, UniverseLoadError, LoadStats,
+    // Eligibility V2 (event-based universe)
+    EligibilityProvider, EligibilityDetails, EligibilitySource, EligibilityStats,
+    EligibilityStatsSnapshot, EligibilityAuditSummary, TimelineEligibilityProvider, Timeline,
 };
 
 // Exit module exports
@@ -75,13 +85,21 @@ pub use orchestrator::{
 // Accounting exports
 pub use accounting::{PortfolioState, AccountingError};
 
+// Dividend exports
+pub use dividends::{
+    DividendEntry, DividendIndex, DividendApplication, PriceType,
+    DividendLoader, DividendLoadError, loader::DividendFixtureGenerator,
+};
+
 // Performance exports
 pub use performance::{
     PerformanceSnapshot, PnLBreakdown, CostBreakdown, ExposureBreakdown,
     DrawdownMetrics, TurnoverMetrics, PositionLot, TradeRecord, TradeSide,
     VolatilityMetrics, VaRMetrics, VaRMethod, TechniqueAttribution,
     AttributionBreakdown, CIOView, TradeLedger, AttributionEngine,
-    RiskCalculator, PerformanceEngine, PerformanceReporter,
+    RiskCalculator, PerformanceEngine, PerformanceConfig, PerformanceReporter, FxRateInfo,
+    FxAttributionEngine, FxAttributionBreakdown, CurrencyAttribution,
+    calculate_fx_attribution,
 };
 
 // Walk-forward exports

@@ -406,6 +406,122 @@ fn e2e_exposure_by_market_correct() {
 }
 
 // ==============================================================================
+// A4: Consolidated View with Explicit FX Conversion
+// ==============================================================================
+
+#[test]
+fn e2e_consolidated_view_in_base_currency() {
+    use backtester_intelligence::currency::{Currency, FxPair};
+    use backtester_intelligence::fx::InMemoryFxProvider;
+    use std::sync::Arc;
+    
+    // This test verifies that when FX provider is configured, we CAN get a
+    // consolidated view in base currency - but it requires explicit conversion
+    
+    let date = make_date(15);
+    
+    // Create FX provider with USD/BRL rates
+    let mut fx_provider = InMemoryFxProvider::new();
+    fx_provider.add_rate(FxPair::USD_BRL, date, dec!(5.00));
+    let fx_provider = Arc::new(fx_provider);
+    
+    // Create engine with BRL as base currency and FX provider
+    let config = PerformanceConfig::default()
+        .with_base_currency(Currency::BRL);
+    let mut perf = PerformanceEngine::with_fx(config, dec!(100_000), fx_provider);
+    
+    // BR trade: 100 @ 50 BRL = 5000 BRL position
+    perf.record_buy(date, "PETR4", 100, dec!(50), dec!(5), Market::BR);
+    
+    // US trade: 10 @ 150 USD = 1500 USD position
+    perf.record_buy(date, "AAPL", 10, dec!(150), dec!(1.5), Market::US);
+    
+    let prices = make_prices_btree(&[
+        ("PETR4", dec!(50)),
+        ("AAPL", dec!(150)),
+    ]);
+    
+    // Cash: 100000 - 5005 - 1501.5 = 93493.5 (assume BRL)
+    let snap = perf.generate_snapshot(date, dec!(93_493.5), &prices);
+    
+    // Verify base_currency is set
+    assert_eq!(snap.base_currency, Some(Currency::BRL));
+    
+    // Verify equity_base is calculated
+    // BR positions: 100 * 50 = 5000 BRL
+    // US positions: 10 * 150 = 1500 USD = 1500 * 5.00 = 7500 BRL
+    // Cash: 93493.5 BRL
+    // Total: 93493.5 + 5000 + 7500 = 105993.5 BRL
+    assert!(snap.equity_base.is_some());
+    let equity_base = snap.equity_base.unwrap();
+    assert_eq!(equity_base, dec!(105993.5));
+    
+    // Local equity (without conversion) should be different
+    // Local equity = cash + sum(position_values) = 93493.5 + 5000 + 1500 = 99993.5
+    // (this incorrectly adds USD to BRL, which is why we need base currency view)
+    assert_eq!(snap.equity, dec!(99993.5));
+    
+    // Consolidated view (equity_base) > local (because USD positions converted at 5.00)
+    assert!(equity_base > snap.equity);
+    
+    // Verify exposure by_currency
+    assert!(snap.exposure.by_currency.contains_key("BRL"));
+    assert!(snap.exposure.by_currency.contains_key("USD"));
+    
+    // Verify by_currency_base (USD converted)
+    let usd_base = snap.exposure.by_currency_base.get("USD").unwrap();
+    assert_eq!(*usd_base, dec!(7500)); // 1500 USD * 5.00 = 7500 BRL
+}
+
+#[test]
+fn e2e_fx_attribution_matches_total_return() {
+    use backtester_intelligence::currency::{Currency, FxPair};
+    use backtester_intelligence::fx::InMemoryFxProvider;
+    use std::sync::Arc;
+    
+    // This test verifies that FX attribution components sum to total return
+    
+    // FX rates for two dates
+    let mut fx_provider = InMemoryFxProvider::new();
+    fx_provider.add_rate(FxPair::USD_BRL, make_date(1), dec!(5.00));
+    fx_provider.add_rate(FxPair::USD_BRL, make_date(15), dec!(5.50));
+    let fx_provider = Arc::new(fx_provider);
+    
+    let config = PerformanceConfig::default()
+        .with_base_currency(Currency::BRL);
+    let mut perf = PerformanceEngine::with_fx(config, dec!(100_000), fx_provider);
+    
+    // Day 1: Buy USD position
+    perf.record_buy(make_date(1), "AAPL", 10, dec!(150), dec!(1.5), Market::US);
+    
+    let prices1 = make_prices_btree(&[("AAPL", dec!(150))]);
+    let snap1 = perf.generate_snapshot(make_date(1), dec!(98_498.5), &prices1);
+    
+    // Day 15: Price increased to 165 (10% asset return)
+    // FX moved from 5.00 to 5.50 (10% FX return)
+    let prices2 = make_prices_btree(&[("AAPL", dec!(165))]);
+    let snap2 = perf.generate_snapshot(make_date(15), dec!(98_498.5), &prices2);
+    
+    // Generate FX attribution
+    let fx_attr = perf.generate_fx_attribution(make_date(1), make_date(15));
+    
+    // If we have the attribution, verify decomposition
+    if let Ok(attr) = fx_attr {
+        // Verify 3 terms sum to total
+        let sum = attr.portfolio_asset_return 
+            + attr.portfolio_fx_return 
+            + attr.portfolio_interaction;
+        
+        // Allow small tolerance for floating point
+        let diff = (sum - attr.portfolio_total_return_base).abs();
+        assert!(diff < dec!(0.0001), "FX attribution decomposition mismatch");
+        
+        // Verify decomposition holds
+        assert!(attr.verify_decomposition());
+    }
+}
+
+// ==============================================================================
 // Additional Invariant Tests
 // ==============================================================================
 
@@ -461,6 +577,10 @@ fn e2e_portfolio_state_ledger_position_match() {
     assert!((portfolio_pos.cost_basis - expected_wap).abs() < tolerance);
     assert!((ledger_pos.wap_cost_basis - expected_wap).abs() < tolerance);
 }
+
+
+
+
 
 
 

@@ -29,14 +29,20 @@
 //! ```
 
 pub mod blocks;
+pub mod compiled;
 pub mod compositor;
 pub mod config;
 pub mod context;
 pub mod experiment;
+pub mod fast_context;
 pub mod registry;
 
 // Re-exports
 pub use blocks::{BlockParams, BlockResult, BlockType, Signal, SignalDirection, StrategyBlock};
+pub use compiled::{
+    CompiledResult, CompiledStrategy, CompileError, IndicatorCache, IndicatorCacheKey,
+    ParamsHash, SymbolTable,
+};
 pub use compositor::Compositor;
 pub use config::{PipelineStep, RebalanceConfig, StrategyConfig, StrategyConstraints};
 pub use context::{StrategyContext, TraceEntry};
@@ -44,12 +50,19 @@ pub use experiment::{
     ArtifactWriter, BlockCatalog, Comparator, ExperimentRunner, MetricsCalculator,
     RunMetadata, RunMetrics, ExperimentResult,
 };
+pub use fast_context::{
+    CandidatesSoA, FastContext, PreallocBuffers, SignalState,
+    fast_momentum_select, fast_low_vol_select, fast_equal_weight,
+};
 pub use registry::BlockRegistry;
 
 /// Prelude for convenient imports.
 pub mod prelude {
     pub use crate::blocks::{
         BlockParams, BlockResult, BlockType, Signal, SignalDirection, StrategyBlock,
+    };
+    pub use crate::compiled::{
+        CompiledResult, CompiledStrategy, IndicatorCache, ParamsHash, SymbolTable,
     };
     pub use crate::compositor::Compositor;
     pub use crate::config::{PipelineStep, RebalanceConfig, StrategyConfig, StrategyConstraints};

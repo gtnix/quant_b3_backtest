@@ -244,6 +244,16 @@ impl Default for HotData {
 
 /// Portfolio state with SoA layout for cache efficiency.
 /// Hot data is separated and cache-line aligned for maximum L1 cache hits.
+///
+/// # Deprecation Notice
+///
+/// For new code, prefer [`backtester_intelligence::PortfolioState`] which provides:
+/// - `rust_decimal::Decimal` precision for financial calculations
+/// - Dividend cashflow support via `add_cash()`
+/// - Integration with Entry/Exit engines
+///
+/// This struct remains useful for high-frequency hot path scenarios where
+/// f64 performance is critical and dividend tracking is not needed.
 #[derive(Debug, Clone)]
 pub struct Portfolio {
     // Hot data - cache-line aligned

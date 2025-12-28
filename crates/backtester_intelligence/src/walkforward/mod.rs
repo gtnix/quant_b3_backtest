@@ -38,6 +38,7 @@ pub mod metrics;
 pub mod runner;
 pub mod reporter;
 pub mod statistics;
+pub mod calendar_aware;
 
 // Legacy 2-segment types
 pub use types::{
@@ -58,6 +59,9 @@ pub use metrics::{MetricsCalculator, RobustnessScorer};
 pub use runner::WalkForwardRunner;
 pub use reporter::WalkForwardReporter;
 pub use statistics::{calculate_psr, calculate_dsr, calculate_skewness, calculate_kurtosis};
+pub use calendar_aware::{
+    TradingDayCalendar, CalendarAwareRollingSplitter, CalendarAwareNestedSplitter, WindowSpecExt,
+};
 
 /// Prelude for convenient imports.
 pub mod prelude {
@@ -69,6 +73,7 @@ pub mod prelude {
         NestedWindowSplit, NestedWindowResult, NestedWalkForwardConfig,
         NestedAggregateReport, SelectionCandidate,
         TimeSplitter, RollingSplitter, NestedSplitter,
+        TradingDayCalendar, CalendarAwareRollingSplitter, CalendarAwareNestedSplitter, WindowSpecExt,
         MetricsCalculator, RobustnessScorer,
         WalkForwardRunner, WalkForwardReporter,
         calculate_psr, calculate_dsr, calculate_skewness, calculate_kurtosis,

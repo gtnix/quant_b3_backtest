@@ -1,0 +1,182 @@
+name: Calendar Update
+
+on:
+  # Annual schedule: December 1st at 12:00 UTC
+  schedule:
+    - cron: '0 12 1 12 *'
+  
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      year:
+        description: 'Year to update (e.g., 2026)'
+        required: true
+        type: string
+      markets:
+        description: 'Markets to update'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - b3
+          - nyse
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  scrape:
+    name: Scrape Official Calendars
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.diff.outputs.has_changes }}
+      summary: ${{ steps.diff.outputs.summary }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install httpx psycopg2-binary
+      
+      - name: Determine year
+        id: year
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          else
+            # Default to next year for scheduled runs
+            echo "year=$(date -d '+1 year' +%Y)" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Scrape B3 Calendar
+        if: ${{ inputs.markets != 'nyse' }}
+        run: |
+          cd scripts/calendar_scraper
+          python b3_scraper.py --year ${{ steps.year.outputs.year }} --output b3_${{ steps.year.outputs.year }}.json
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Scrape NYSE Calendar
+        if: ${{ inputs.markets != 'b3' }}
+        run: |
+          cd scripts/calendar_scraper
+          python nyse_scraper.py --year ${{ steps.year.outputs.year }} --output nyse_${{ steps.year.outputs.year }}.json
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      - name: Generate Diff Report
+        id: diff
+        run: |
+          cd scripts/calendar_scraper
+          python generate_diff.py --year ${{ steps.year.outputs.year }} --output diff_report.md || true
+          
+          # Check if there are changes
+          if [ -f diff_report.md ]; then
+            if grep -q "Total.*0 changes" diff_report.md; then
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            else
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        continue-on-error: true
+      
+      - name: Upload Scraped Calendars
+        uses: actions/upload-artifact@v4
+        with:
+          name: calendar-data-${{ steps.year.outputs.year }}
+          path: |
+            scripts/calendar_scraper/*.json
+            scripts/calendar_scraper/diff_report.md
+          retention-days: 30
+      
+      - name: Add to Job Summary
+        run: |
+          if [ -f scripts/calendar_scraper/diff_report.md ]; then
+            cat scripts/calendar_scraper/diff_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No diff report generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  create-pr:
+    name: Create Update PR
+    needs: scrape
+    if: needs.scrape.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download Calendar Data
+        uses: actions/download-artifact@v4
+        with:
+          name: calendar-data-${{ github.event.inputs.year || 'next' }}
+          path: calendar-update
+      
+      - name: Determine year
+        id: year
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          else
+            echo "year=$(date -d '+1 year' +%Y)" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(calendar): Update calendars for ${{ steps.year.outputs.year }}"
+          title: "📅 Calendar Update ${{ steps.year.outputs.year }}"
+          body: |
+            ## Calendar Update for ${{ steps.year.outputs.year }}
+            
+            This PR contains updated calendar data for B3 and NYSE markets.
+            
+            ### Changes
+            
+            See the attached diff report for details.
+            
+            ### Checklist
+            
+            - [ ] Review holiday dates against official sources
+            - [ ] Verify early close times are correct
+            - [ ] Run `cargo run --bin calendar_sync -- --all --dry-run` locally
+            - [ ] Add `calendar-reviewed` label after review
+            
+            ### Official Sources
+            
+            - B3: https://www.b3.com.br/pt_br/solucoes/plataformas/puma-trading-system/para-participantes-e-traders/calendario-de-negociacao/
+            - NYSE: https://www.nyse.com/markets/hours-calendars
+            
+            ---
+            *Generated automatically by Calendar Update workflow*
+          branch: calendar-update-${{ steps.year.outputs.year }}
+          delete-branch: true
+          labels: |
+            calendar
+            needs-review
+
+  notify:
+    name: Notify on Failure
+    needs: [scrape, create-pr]
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Send Notification
+        run: |
+          echo "::warning::Calendar update workflow failed. Please check the logs."
+
+

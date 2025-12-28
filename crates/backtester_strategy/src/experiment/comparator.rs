@@ -13,7 +13,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::artifacts::ArtifactWriter;
-use super::types::RunMetrics;
+use super::types::{ExperimentTraceEntry, RunMetadata, RunMetrics};
 
 /// Result of comparing two experiment runs.
 #[derive(Debug, Clone)]
@@ -252,16 +252,21 @@ impl Comparator {
         // Compute metric diffs
         let metric_diffs = self.compute_metric_diffs(&metrics_a, &metrics_b);
 
+        // Compute config diffs from metadata and traces
+        let trace_a = ArtifactWriter::read_trace(run_a).ok();
+        let trace_b = ArtifactWriter::read_trace(run_b).ok();
+        let config_diffs = self.compute_config_diffs(&metadata_a, &metadata_b, &trace_a, &trace_b);
+
         // Check for regression
         let (regression, reason) = self.check_regression(&metrics_a, &metrics_b);
 
         Ok(CompareResult {
             run_a: metadata_a.run_id,
             run_b: metadata_b.run_id,
-            strategy_a: metadata_a.strategy_id,
-            strategy_b: metadata_b.strategy_id,
+            strategy_a: metadata_a.strategy_id.clone(),
+            strategy_b: metadata_b.strategy_id.clone(),
             metric_diffs,
-            config_diffs: Vec::new(), // TODO: implement config diff
+            config_diffs,
             regression,
             regression_reason: reason,
         })
@@ -409,6 +414,179 @@ impl Comparator {
         );
 
         diffs
+    }
+
+    /// Compute configuration differences between two runs.
+    ///
+    /// Compares:
+    /// - Strategy ID and version
+    /// - Execution mode
+    /// - Cost configuration
+    /// - Pipeline steps (via trace)
+    fn compute_config_diffs(
+        &self,
+        meta_a: &RunMetadata,
+        meta_b: &RunMetadata,
+        trace_a: &Option<Vec<ExperimentTraceEntry>>,
+        trace_b: &Option<Vec<ExperimentTraceEntry>>,
+    ) -> Vec<ConfigDiff> {
+        let mut diffs = Vec::new();
+
+        // Strategy ID
+        if meta_a.strategy_id != meta_b.strategy_id {
+            diffs.push(ConfigDiff {
+                path: "strategy.id".into(),
+                value_a: Some(meta_a.strategy_id.clone()),
+                value_b: Some(meta_b.strategy_id.clone()),
+            });
+        }
+
+        // Strategy version
+        if meta_a.strategy_version != meta_b.strategy_version {
+            diffs.push(ConfigDiff {
+                path: "strategy.version".into(),
+                value_a: Some(meta_a.strategy_version.clone()),
+                value_b: Some(meta_b.strategy_version.clone()),
+            });
+        }
+
+        // Execution mode
+        if meta_a.execution_mode != meta_b.execution_mode {
+            diffs.push(ConfigDiff {
+                path: "execution_mode".into(),
+                value_a: Some(format!("{:?}", meta_a.execution_mode)),
+                value_b: Some(format!("{:?}", meta_b.execution_mode)),
+            });
+        }
+
+        // Seed
+        if meta_a.seed != meta_b.seed {
+            diffs.push(ConfigDiff {
+                path: "seed".into(),
+                value_a: meta_a.seed.map(|s| s.to_string()),
+                value_b: meta_b.seed.map(|s| s.to_string()),
+            });
+        }
+
+        // Cost config
+        if (meta_a.costs.trading_fee_pct - meta_b.costs.trading_fee_pct).abs() > 1e-10 {
+            diffs.push(ConfigDiff {
+                path: "costs.trading_fee_pct".into(),
+                value_a: Some(meta_a.costs.trading_fee_pct.to_string()),
+                value_b: Some(meta_b.costs.trading_fee_pct.to_string()),
+            });
+        }
+        if (meta_a.costs.slippage_pct - meta_b.costs.slippage_pct).abs() > 1e-10 {
+            diffs.push(ConfigDiff {
+                path: "costs.slippage_pct".into(),
+                value_a: Some(meta_a.costs.slippage_pct.to_string()),
+                value_b: Some(meta_b.costs.slippage_pct.to_string()),
+            });
+        }
+
+        // Pipeline steps from trace
+        if let (Some(ta), Some(tb)) = (trace_a, trace_b) {
+            // Compare step count
+            if ta.len() != tb.len() {
+                diffs.push(ConfigDiff {
+                    path: "pipeline.step_count".into(),
+                    value_a: Some(ta.len().to_string()),
+                    value_b: Some(tb.len().to_string()),
+                });
+            }
+
+            // Compare each step
+            let max_steps = ta.len().max(tb.len());
+            for i in 0..max_steps {
+                let step_a = ta.get(i);
+                let step_b = tb.get(i);
+
+                match (step_a, step_b) {
+                    (Some(sa), Some(sb)) => {
+                        if sa.block_id != sb.block_id {
+                            diffs.push(ConfigDiff {
+                                path: format!("pipeline[{}].block_id", i),
+                                value_a: Some(sa.block_id.clone()),
+                                value_b: Some(sb.block_id.clone()),
+                            });
+                        }
+                        if sa.block_type != sb.block_type {
+                            diffs.push(ConfigDiff {
+                                path: format!("pipeline[{}].block_type", i),
+                                value_a: Some(sa.block_type.clone()),
+                                value_b: Some(sb.block_type.clone()),
+                            });
+                        }
+                        // Compare params_effective
+                        self.diff_params(
+                            &format!("pipeline[{}].params", i),
+                            &sa.params_effective,
+                            &sb.params_effective,
+                            &mut diffs,
+                        );
+                    }
+                    (Some(sa), None) => {
+                        diffs.push(ConfigDiff {
+                            path: format!("pipeline[{}]", i),
+                            value_a: Some(format!("{}:{}", sa.block_type, sa.block_id)),
+                            value_b: None,
+                        });
+                    }
+                    (None, Some(sb)) => {
+                        diffs.push(ConfigDiff {
+                            path: format!("pipeline[{}]", i),
+                            value_a: None,
+                            value_b: Some(format!("{}:{}", sb.block_type, sb.block_id)),
+                        });
+                    }
+                    (None, None) => {}
+                }
+            }
+        }
+
+        diffs
+    }
+
+    /// Compare two param maps and add diffs.
+    fn diff_params(
+        &self,
+        base_path: &str,
+        a: &HashMap<String, serde_json::Value>,
+        b: &HashMap<String, serde_json::Value>,
+        diffs: &mut Vec<ConfigDiff>,
+    ) {
+        // Check all keys from a
+        for (key, val_a) in a {
+            let val_b = b.get(key);
+            match val_b {
+                Some(vb) if vb != val_a => {
+                    diffs.push(ConfigDiff {
+                        path: format!("{}.{}", base_path, key),
+                        value_a: Some(val_a.to_string()),
+                        value_b: Some(vb.to_string()),
+                    });
+                }
+                None => {
+                    diffs.push(ConfigDiff {
+                        path: format!("{}.{}", base_path, key),
+                        value_a: Some(val_a.to_string()),
+                        value_b: None,
+                    });
+                }
+                _ => {} // Equal values
+            }
+        }
+
+        // Check for keys only in b
+        for (key, val_b) in b {
+            if !a.contains_key(key) {
+                diffs.push(ConfigDiff {
+                    path: format!("{}.{}", base_path, key),
+                    value_a: None,
+                    value_b: Some(val_b.to_string()),
+                });
+            }
+        }
     }
 
     /// Check if run B is a regression compared to run A (baseline).

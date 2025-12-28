@@ -20,6 +20,7 @@ mod aggregation_executor;
 mod aggregation_planner;
 mod audit_integrity;
 mod brapi;
+pub mod calendar;
 mod contract_tests;
 mod coverage_model;
 mod db;

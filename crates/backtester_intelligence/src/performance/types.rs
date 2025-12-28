@@ -7,19 +7,219 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::currency::Currency;
 use crate::filters::Market;
 
 /// Complete snapshot of portfolio performance at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSnapshot {
     pub date: NaiveDate,
+    
+    // Local currency values (unchanged for backward compatibility)
     pub equity: Decimal,
     pub cash: Decimal,
+    
+    // Base currency consolidated view (NEW)
+    pub base_currency: Option<Currency>,
+    pub equity_base: Option<Decimal>,
+    pub cash_base: Option<Decimal>,
+    
+    // FX audit trail (NEW)
+    pub fx_rates_used: Option<BTreeMap<String, FxRateInfo>>,
+    
     pub exposure: ExposureBreakdown,
     pub pnl: PnLBreakdown,
     pub costs: CostBreakdown,
     pub drawdown: DrawdownMetrics,
     pub turnover: TurnoverMetrics,
+}
+
+impl PerformanceSnapshot {
+    /// Check if this snapshot has base currency conversion data.
+    pub fn has_fx_data(&self) -> bool {
+        self.base_currency.is_some() && self.equity_base.is_some()
+    }
+    
+    /// Get equity in base currency if available, otherwise local.
+    pub fn equity_consolidated(&self) -> Decimal {
+        self.equity_base.unwrap_or(self.equity)
+    }
+}
+
+// =============================================================================
+// FX RESOLUTION METHOD
+// =============================================================================
+
+/// Method used to resolve an FX rate for audit trail purposes.
+///
+/// This enum tracks how a rate was obtained, which is critical for:
+/// - Audit/compliance: Know exactly how each rate was sourced
+/// - Debugging: Understand why a particular rate was used
+/// - Transparency: Reports show when LOCF or inverse was applied
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum FxResolutionMethod {
+    /// Rate found directly for the requested pair and date.
+    #[default]
+    Direct,
+    /// Rate obtained by inverting the stored pair (e.g., BRL/USD from USD/BRL).
+    Inverse,
+    /// Last Observation Carried Forward - rate from earlier date used.
+    LOCF,
+    /// Both inverse and LOCF were applied.
+    InverseLOCF,
+    /// Same currency (e.g., USD to USD), rate = 1.
+    Identity,
+    /// Rate calculated via cross-rate (e.g., EUR/BRL via EUR/USD × USD/BRL).
+    /// Reserved for V2.
+    Triangulated,
+}
+
+impl FxResolutionMethod {
+    /// Check if this method used LOCF (carried forward from earlier date).
+    pub fn used_locf(&self) -> bool {
+        matches!(self, FxResolutionMethod::LOCF | FxResolutionMethod::InverseLOCF)
+    }
+    
+    /// Check if this method used an inverse calculation.
+    pub fn used_inverse(&self) -> bool {
+        matches!(self, FxResolutionMethod::Inverse | FxResolutionMethod::InverseLOCF)
+    }
+    
+    /// Human-readable description.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            FxResolutionMethod::Direct => "Direct rate lookup",
+            FxResolutionMethod::Inverse => "Inverse rate calculated",
+            FxResolutionMethod::LOCF => "Last observation carried forward",
+            FxResolutionMethod::InverseLOCF => "Inverse + LOCF",
+            FxResolutionMethod::Identity => "Same currency (rate = 1)",
+            FxResolutionMethod::Triangulated => "Cross-rate triangulated",
+        }
+    }
+}
+
+impl std::fmt::Display for FxResolutionMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+// =============================================================================
+// FX RATE INFO (AUDIT TRAIL)
+// =============================================================================
+
+/// FX rate information for audit trail.
+///
+/// Records complete details of how an FX rate was resolved for a conversion,
+/// enabling full audit capability and debugging.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FxRateInfo {
+    // What was requested
+    /// The currency pair that was originally requested (e.g., "USD/BRL").
+    pub pair_requested: String,
+    /// The date for which the rate was requested.
+    pub date_requested: NaiveDate,
+    
+    // What was resolved
+    /// The currency pair that was actually used (may differ if inverse was used).
+    pub pair_resolved: String,
+    /// The date of the actual rate observation (may differ if LOCF was used).
+    pub date_resolved: NaiveDate,
+    /// The exchange rate used.
+    pub rate: Decimal,
+    
+    // How it was resolved
+    /// Method used to resolve the rate.
+    pub method: FxResolutionMethod,
+    
+    // Legacy fields for backward compatibility
+    /// The date of the rate (alias for date_resolved).
+    #[serde(skip_serializing)]
+    pub rate_date: NaiveDate,
+    /// The currency pair (alias for pair_resolved).
+    #[serde(skip_serializing)]
+    pub pair: String,
+    /// Whether an inverse rate was used (derived from method).
+    #[serde(skip_serializing)]
+    pub used_inverse: bool,
+}
+
+impl FxRateInfo {
+    /// Create a new FxRateInfo with full audit details.
+    pub fn new(
+        pair_requested: String,
+        date_requested: NaiveDate,
+        pair_resolved: String,
+        date_resolved: NaiveDate,
+        rate: Decimal,
+        method: FxResolutionMethod,
+    ) -> Self {
+        Self {
+            pair_requested,
+            date_requested,
+            pair_resolved: pair_resolved.clone(),
+            date_resolved,
+            rate,
+            method,
+            // Legacy compatibility
+            rate_date: date_resolved,
+            pair: pair_resolved,
+            used_inverse: method.used_inverse(),
+        }
+    }
+    
+    /// Create a simple FxRateInfo for backward compatibility.
+    pub fn simple(
+        pair: String,
+        rate: Decimal,
+        rate_date: NaiveDate,
+        used_inverse: bool,
+    ) -> Self {
+        let method = if used_inverse {
+            FxResolutionMethod::Inverse
+        } else {
+            FxResolutionMethod::Direct
+        };
+        
+        Self {
+            pair_requested: pair.clone(),
+            date_requested: rate_date,
+            pair_resolved: pair.clone(),
+            date_resolved: rate_date,
+            rate,
+            method,
+            rate_date,
+            pair,
+            used_inverse,
+        }
+    }
+    
+    /// Create an identity rate info (same currency, rate = 1).
+    pub fn identity(currency_code: &str, date: NaiveDate) -> Self {
+        let pair = format!("{}/{}", currency_code, currency_code);
+        Self {
+            pair_requested: pair.clone(),
+            date_requested: date,
+            pair_resolved: pair.clone(),
+            date_resolved: date,
+            rate: Decimal::ONE,
+            method: FxResolutionMethod::Identity,
+            rate_date: date,
+            pair,
+            used_inverse: false,
+        }
+    }
+    
+    /// Check if LOCF was used (rate from an earlier date).
+    pub fn is_locf(&self) -> bool {
+        self.method.used_locf()
+    }
+    
+    /// Get the gap in days between requested and resolved dates.
+    pub fn gap_days(&self) -> i64 {
+        (self.date_requested - self.date_resolved).num_days()
+    }
 }
 
 /// Breakdown of P&L into realized and unrealized components.
@@ -84,6 +284,12 @@ pub struct ExposureBreakdown {
     pub long: Decimal,
     pub short: Decimal,
     pub by_market: BTreeMap<String, Decimal>,
+    
+    // NEW: Currency-based exposure breakdown
+    /// Exposure by currency in local currency values.
+    pub by_currency: BTreeMap<String, Decimal>,
+    /// Exposure by currency converted to base currency.
+    pub by_currency_base: BTreeMap<String, Decimal>,
 }
 
 impl ExposureBreakdown {
@@ -98,7 +304,19 @@ impl ExposureBreakdown {
             long,
             short,
             by_market: BTreeMap::new(),
+            by_currency: BTreeMap::new(),
+            by_currency_base: BTreeMap::new(),
         }
+    }
+    
+    /// Get exposure for a specific currency.
+    pub fn currency_exposure(&self, currency: &str) -> Decimal {
+        self.by_currency.get(currency).copied().unwrap_or(Decimal::ZERO)
+    }
+    
+    /// Get exposure for a currency in base currency.
+    pub fn currency_exposure_base(&self, currency: &str) -> Decimal {
+        self.by_currency_base.get(currency).copied().unwrap_or(Decimal::ZERO)
     }
 }
 
@@ -264,6 +482,18 @@ pub struct CIOView {
     pub turnover_pct: Decimal,
     pub var_95: Decimal,
     pub positions_count: u32,
+    
+    // NEW: Multi-currency fields
+    /// Base currency for reporting.
+    pub base_currency: Option<Currency>,
+    /// Total return in base currency.
+    pub total_return_base_pct: Option<Decimal>,
+    /// Asset return component (local currency performance).
+    pub asset_return_pct: Option<Decimal>,
+    /// FX return component.
+    pub fx_return_pct: Option<Decimal>,
+    /// Interaction component (asset * fx).
+    pub interaction_pct: Option<Decimal>,
 }
 
 #[cfg(test)]
@@ -331,6 +561,10 @@ mod tests {
         assert_eq!(parsed.total, dec!(300));
     }
 }
+
+
+
+
 
 
 

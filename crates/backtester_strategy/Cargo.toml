@@ -5,6 +5,7 @@ edition = "2021"
 description = "Strategy Factory - modular DSL for declarative strategy composition"
 
 [dependencies]
+backtester_engine = { path = "../backtester_engine" }
 backtester_intelligence = { path = "../backtester_intelligence" }
 chrono = { version = "0.4", features = ["serde"] }
 rust_decimal = { version = "1.33", features = ["serde"] }
@@ -19,6 +20,11 @@ csv = "1.3"
 sha2 = "0.10"
 
 [dev-dependencies]
+criterion = "0.5"
 pretty_assertions = "1.4"
 tempfile = "3.10"
+
+[[bench]]
+name = "strategy_bench"
+harness = false
 

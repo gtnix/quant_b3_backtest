@@ -1823,6 +1823,170 @@ impl Database {
             })
             .collect())
     }
+
+    // ========================================================================
+    // V2 Eligibility Methods (listing_date / delisting_date)
+    // ========================================================================
+
+    /// Get all tickers with eligibility dates for V2 universe.
+    pub async fn get_eligibility_timelines(&self) -> Result<Vec<EligibilityRow>, DbError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT ticker, listing_date, delisting_date, eligibility_source, status
+                 FROM provider_universe
+                 WHERE listing_date IS NOT NULL
+                 ORDER BY ticker",
+                &[],
+            )
+            .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| EligibilityRow {
+                ticker: r.get(0),
+                listing_date: r.get(1),
+                delisting_date: r.get(2),
+                eligibility_source: r.get(3),
+                status: r.get(4),
+            })
+            .collect())
+    }
+
+    /// Get eligibility dates for a single ticker.
+    pub async fn get_eligibility(&self, ticker: &str) -> Result<Option<EligibilityRow>, DbError> {
+        let row = self
+            .client
+            .query_opt(
+                "SELECT ticker, listing_date, delisting_date, eligibility_source, status
+                 FROM provider_universe
+                 WHERE ticker = $1",
+                &[&ticker],
+            )
+            .await?;
+
+        Ok(row.map(|r| EligibilityRow {
+            ticker: r.get(0),
+            listing_date: r.get(1),
+            delisting_date: r.get(2),
+            eligibility_source: r.get(3),
+            status: r.get(4),
+        }))
+    }
+
+    /// Set listing date for a ticker.
+    pub async fn set_listing_date(
+        &self,
+        ticker: &str,
+        listing_date: NaiveDate,
+        source: &str,
+    ) -> Result<(), DbError> {
+        self.client
+            .execute(
+                "UPDATE provider_universe 
+                 SET listing_date = $2,
+                     eligibility_source = $3
+                 WHERE ticker = $1",
+                &[&ticker, &listing_date, &source],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Set delisting date for a ticker.
+    pub async fn set_delisting_date(
+        &self,
+        ticker: &str,
+        delisting_date: NaiveDate,
+        source: &str,
+    ) -> Result<(), DbError> {
+        self.client
+            .execute(
+                "UPDATE provider_universe 
+                 SET delisting_date = $2,
+                     eligibility_source = $3
+                 WHERE ticker = $1",
+                &[&ticker, &delisting_date, &source],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Set both listing and delisting dates for a ticker.
+    pub async fn set_eligibility_dates(
+        &self,
+        ticker: &str,
+        listing_date: NaiveDate,
+        delisting_date: Option<NaiveDate>,
+        source: &str,
+    ) -> Result<(), DbError> {
+        self.client
+            .execute(
+                "UPDATE provider_universe 
+                 SET listing_date = $2,
+                     delisting_date = $3,
+                     eligibility_source = $4
+                 WHERE ticker = $1",
+                &[&ticker, &listing_date, &delisting_date, &source],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Bulk upsert eligibility dates from CSV data.
+    pub async fn bulk_upsert_eligibility(
+        &self,
+        rows: &[(String, NaiveDate, Option<NaiveDate>)],
+        source: &str,
+    ) -> Result<usize, DbError> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let mut updated = 0;
+        for (ticker, listing_date, delisting_date) in rows {
+            let result = self
+                .client
+                .execute(
+                    "UPDATE provider_universe 
+                     SET listing_date = COALESCE(listing_date, $2),
+                         delisting_date = COALESCE(delisting_date, $3),
+                         eligibility_source = COALESCE(eligibility_source, $4)
+                     WHERE ticker = $1 AND listing_date IS NULL",
+                    &[ticker, listing_date, delisting_date, &source],
+                )
+                .await?;
+            updated += result as usize;
+        }
+        Ok(updated)
+    }
+
+    /// Get count of tickers with eligibility data.
+    pub async fn get_eligibility_stats(&self) -> Result<EligibilityStats, DbError> {
+        let row = self
+            .client
+            .query_one(
+                "SELECT 
+                    COUNT(*) FILTER (WHERE listing_date IS NOT NULL) as with_listing,
+                    COUNT(*) FILTER (WHERE delisting_date IS NOT NULL) as with_delisting,
+                    COUNT(*) FILTER (WHERE eligibility_source = 'DATA_DERIVED') as data_derived,
+                    COUNT(*) FILTER (WHERE eligibility_source = 'PROVIDER_API') as provider_api,
+                    COUNT(*) FILTER (WHERE eligibility_source = 'MANUAL') as manual,
+                    COUNT(*) as total
+                 FROM provider_universe",
+                &[],
+            )
+            .await?;
+
+        Ok(EligibilityStats {
+            with_listing_date: row.get(0),
+            with_delisting_date: row.get(1),
+            data_derived: row.get(2),
+            provider_api: row.get(3),
+            manual: row.get(4),
+            total: row.get(5),
+        })
+    }
 }
 
 // ============================================================================
@@ -1856,6 +2020,39 @@ pub struct Divergence {
     pub reconciliation_result: Option<String>,
     pub decision: Option<String>,
     pub created_at: chrono::DateTime<Utc>,
+}
+
+/// Eligibility row from provider_universe (V2 universe).
+#[derive(Debug, Clone)]
+pub struct EligibilityRow {
+    pub ticker: String,
+    pub listing_date: Option<NaiveDate>,
+    pub delisting_date: Option<NaiveDate>,
+    pub eligibility_source: Option<String>,
+    pub status: String,
+}
+
+impl EligibilityRow {
+    /// Check if ticker is eligible at a given date.
+    pub fn is_eligible_at(&self, date: NaiveDate) -> bool {
+        match (self.listing_date, self.delisting_date) {
+            (Some(listing), Some(delisting)) => date >= listing && date <= delisting,
+            (Some(listing), None) => date >= listing,
+            (None, Some(delisting)) => date <= delisting,
+            (None, None) => false,
+        }
+    }
+}
+
+/// Statistics about eligibility data coverage.
+#[derive(Debug, Clone, Default)]
+pub struct EligibilityStats {
+    pub with_listing_date: i64,
+    pub with_delisting_date: i64,
+    pub data_derived: i64,
+    pub provider_api: i64,
+    pub manual: i64,
+    pub total: i64,
 }
 
 // ============================================================================

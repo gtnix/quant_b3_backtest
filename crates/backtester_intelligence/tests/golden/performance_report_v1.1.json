@@ -1,0 +1,104 @@
+{
+  "schema_version": "fx_report_v1.1",
+  "date": "2024-12-27",
+  "equity": "105000.00",
+  "return_pct": "5.00",
+  "drawdown_pct": "2.00",
+  "pnl": {
+    "realized": "3000.00",
+    "unrealized": "2000.00",
+    "total": "5000.00"
+  },
+  "costs": {
+    "total": "150.00",
+    "fees": "100.00",
+    "slippage": "50.00"
+  },
+  "attribution": [
+    {
+      "technique": "momentum",
+      "weight_pct": "60.00",
+      "pnl": "3000.00"
+    },
+    {
+      "technique": "value",
+      "weight_pct": "40.00",
+      "pnl": "2000.00"
+    }
+  ],
+  "risk": {
+    "vol_ann": "15.00",
+    "var_95": "-2500.00",
+    "sharpe": "1.25"
+  },
+  "exposure": {
+    "gross": "100000.00",
+    "net": "80000.00",
+    "by_market": [
+      {
+        "market": "BR",
+        "value": "60000.00"
+      },
+      {
+        "market": "US",
+        "value": "40000.00"
+      }
+    ]
+  },
+  "turnover": {
+    "buy": "10000.00",
+    "sell": "8000.00",
+    "pct": "18.00"
+  },
+  "base_currency": "BRL",
+  "equity_base": "115000.00",
+  "fx_attribution": {
+    "base_currency": "BRL",
+    "asset_return_pct": "4.00",
+    "fx_return_pct": "1.00",
+    "interaction_pct": "0.04",
+    "total_return_base_pct": "5.04",
+    "by_currency": [
+      {
+        "currency": "BRL",
+        "asset_return_pct": "5.00",
+        "fx_return_pct": "0.00",
+        "interaction_pct": "0.00",
+        "weight_pct": "60.00"
+      },
+      {
+        "currency": "USD",
+        "asset_return_pct": "3.00",
+        "fx_return_pct": "2.50",
+        "interaction_pct": "0.08",
+        "weight_pct": "40.00"
+      }
+    ]
+  },
+  "exposure_by_currency": [
+    {
+      "currency": "BRL",
+      "value_local": "60000.00",
+      "value_base": "60000.00",
+      "weight_pct": "52.17"
+    },
+    {
+      "currency": "USD",
+      "value_local": "10000.00",
+      "value_base": "55000.00",
+      "weight_pct": "47.83"
+    }
+  ],
+  "fx_rates_used": [
+    {
+      "pair_requested": "USD/BRL",
+      "date_requested": "2024-12-27",
+      "pair_resolved": "USD/BRL",
+      "date_resolved": "2024-12-27",
+      "rate": "5.50",
+      "method": "Direct"
+    }
+  ]
+}
+
+

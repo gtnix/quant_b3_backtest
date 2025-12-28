@@ -4,7 +4,24 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::types::{EquityPoint, ExperimentTraceEntry, RunMetadata, RunMetrics};
+use serde::{Deserialize, Serialize};
+
+use super::types::{EquityPoint, ExecutionMode, ExperimentTraceEntry, RunMetadata, RunMetrics};
+
+/// Header line for trace.jsonl containing run context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceHeader {
+    /// Marker indicating this is a header line
+    pub header: bool,
+    /// Run identifier
+    pub run_id: String,
+    /// Strategy identifier
+    pub strategy_id: String,
+    /// Execution mode used
+    pub execution_mode: ExecutionMode,
+    /// Schema version
+    pub schema_version: String,
+}
 
 /// Writer for experiment artifacts.
 pub struct ArtifactWriter {
@@ -37,7 +54,7 @@ impl ArtifactWriter {
         fs::create_dir_all(&run_dir)?;
 
         self.write_metadata(&run_dir, metadata)?;
-        self.write_trace(&run_dir, trace)?;
+        self.write_trace(&run_dir, trace, metadata)?;
         self.write_metrics(&run_dir, metrics)?;
         self.write_timeseries(&run_dir, timeseries)?;
 
@@ -55,15 +72,29 @@ impl ArtifactWriter {
     }
 
     /// Write trace.jsonl (JSON Lines format)
+    /// First line is a header with run metadata, subsequent lines are trace entries.
     fn write_trace(
         &self,
         run_dir: &Path,
         trace: &[ExperimentTraceEntry],
+        metadata: &RunMetadata,
     ) -> Result<(), ArtifactError> {
         let path = run_dir.join("trace.jsonl");
         let file = File::create(&path)?;
         let mut writer = BufWriter::new(file);
 
+        // Write header line with execution mode and run context
+        let header = TraceHeader {
+            header: true,
+            run_id: metadata.run_id.clone(),
+            strategy_id: metadata.strategy_id.clone(),
+            execution_mode: metadata.execution_mode,
+            schema_version: metadata.schema_version.clone(),
+        };
+        let header_line = serde_json::to_string(&header)?;
+        writeln!(writer, "{}", header_line)?;
+
+        // Write trace entries
         for entry in trace {
             let line = serde_json::to_string(entry)?;
             writeln!(writer, "{}", line)?;
@@ -92,7 +123,7 @@ impl ArtifactWriter {
         let file = File::create(&path)?;
         let mut writer = csv::Writer::from_writer(file);
 
-        // Write header
+        // Write header (includes dividend columns per corporate_actions_pnl.md policy)
         writer.write_record([
             "date",
             "equity",
@@ -100,6 +131,8 @@ impl ArtifactWriter {
             "exposure",
             "vol_exante",
             "vol_expost",
+            "dividend_cashflow",
+            "dividend_cumulative",
         ])?;
 
         // Write data rows
@@ -116,6 +149,14 @@ impl ArtifactWriter {
                 point
                     .vol_expost
                     .map(|v| format!("{:.6}", v))
+                    .unwrap_or_default(),
+                point
+                    .dividend_cashflow
+                    .map(|d| d.to_string())
+                    .unwrap_or_default(),
+                point
+                    .dividend_cumulative
+                    .map(|d| d.to_string())
                     .unwrap_or_default(),
             ])?;
         }
@@ -179,6 +220,12 @@ impl ArtifactWriter {
                 vol_expost: record
                     .get(5)
                     .and_then(|s| if s.is_empty() { None } else { s.parse().ok() }),
+                dividend_cashflow: record
+                    .get(6)
+                    .and_then(|s| if s.is_empty() { None } else { s.parse().ok() }),
+                dividend_cumulative: record
+                    .get(7)
+                    .and_then(|s| if s.is_empty() { None } else { s.parse().ok() }),
             };
             points.push(point);
         }
@@ -187,19 +234,41 @@ impl ArtifactWriter {
     }
 
     /// Read trace from a run directory.
+    /// Read trace entries from trace.jsonl
+    /// Skips the header line (first line with "header": true).
     pub fn read_trace(run_dir: &Path) -> Result<Vec<ExperimentTraceEntry>, ArtifactError> {
         let path = run_dir.join("trace.jsonl");
         let content = fs::read_to_string(&path)?;
         let mut entries = Vec::new();
         
         for line in content.lines() {
-            if !line.trim().is_empty() {
-                let entry: ExperimentTraceEntry = serde_json::from_str(line)?;
-                entries.push(entry);
+            if line.trim().is_empty() {
+                continue;
             }
+            // Skip header line (contains "header": true)
+            if line.contains("\"header\":true") || line.contains("\"header\": true") {
+                continue;
+            }
+            let entry: ExperimentTraceEntry = serde_json::from_str(line)?;
+            entries.push(entry);
         }
         
         Ok(entries)
+    }
+
+    /// Read trace header from trace.jsonl (first line).
+    pub fn read_trace_header(run_dir: &Path) -> Result<Option<TraceHeader>, ArtifactError> {
+        let path = run_dir.join("trace.jsonl");
+        let content = fs::read_to_string(&path)?;
+        
+        if let Some(first_line) = content.lines().next() {
+            if first_line.contains("\"header\":true") || first_line.contains("\"header\": true") {
+                let header: TraceHeader = serde_json::from_str(first_line)?;
+                return Ok(Some(header));
+            }
+        }
+        
+        Ok(None)
     }
 
     /// List all run IDs in the output directory.
@@ -261,8 +330,14 @@ mod tests {
             seed: Some(42),
             costs: CostConfig::default(),
             mode: super::super::types::RunMode::Full,
+            execution_mode: super::super::types::ExecutionMode::Standard,
             config_path: "configs/test.toml".into(),
             duration_ms: 1234,
+            dividends_enabled: false,
+            dividend_policy: None,
+            total_dividend_cashflow: None,
+            dividend_count: None,
+            mode_fallback_reason: None,
         }
     }
 
@@ -296,6 +371,8 @@ mod tests {
                 exposure: 0.95,
                 vol_exante: Some(0.15),
                 vol_expost: Some(0.14),
+                dividend_cashflow: None,
+                dividend_cumulative: None,
             })
             .collect()
     }

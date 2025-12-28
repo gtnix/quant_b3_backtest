@@ -144,6 +144,8 @@ impl RiskCalculator {
             long,
             short,
             by_market,
+            by_currency: BTreeMap::new(),
+            by_currency_base: BTreeMap::new(),
         }
     }
 
@@ -312,6 +314,10 @@ mod tests {
         assert!((sqrt9 - dec!(3)).abs() < dec!(0.001));
     }
 }
+
+
+
+
 
 
 

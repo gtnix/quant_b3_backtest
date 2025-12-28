@@ -227,3 +227,8 @@ class YFinanceProvider(Provider):
 
 
 
+
+
+
+
+
