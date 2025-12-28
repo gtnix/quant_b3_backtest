@@ -7,3 +7,4 @@ from .fred_provider import FREDProvider
 __all__ = ["FxProvider", "FxRecord", "BCBProvider", "FREDProvider"]
 
 
+

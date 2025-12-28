@@ -43,6 +43,72 @@ jobs:
           FRED_API_KEY: "test_key_for_ci"
 
   # ============================================================================
+  # Real Data Integration Tests
+  # ============================================================================
+  real-data-tests:
+    name: Real Data Integration Tests
+    runs-on: ubuntu-latest
+    # Only run if cache directory exists in repo or artifact
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-realdata-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Check for cache data
+        id: check-cache
+        run: |
+          if [ -d "cache/ohlcv" ] && [ "$(ls -A cache/ohlcv/*.csv 2>/dev/null | head -1)" ]; then
+            echo "cache_exists=true" >> $GITHUB_OUTPUT
+            echo "Found $(ls cache/ohlcv/*.csv | wc -l) OHLCV files in cache"
+          else
+            echo "cache_exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::cache/ohlcv not found - skipping real data tests"
+            echo "To enable: add OHLCV CSV files to cache/ohlcv/"
+          fi
+      
+      - name: Run Real Data Integration Tests
+        if: steps.check-cache.outputs.cache_exists == 'true'
+        run: |
+          cargo test -p backtester_tests --test real_data_integration --features real_data -- --nocapture 2>&1 | tee real_data_output.txt
+          
+          # Check for failures
+          if grep -q "FAILED" real_data_output.txt; then
+            echo "::error::Real data integration tests failed"
+            exit 1
+          fi
+          
+          echo "Real data integration tests passed"
+        env:
+          FRED_API_KEY: "test_key_for_ci"
+      
+      - name: Add to Job Summary
+        if: always()
+        run: |
+          echo "## Real Data Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check-cache.outputs.cache_exists }}" = "false" ]; then
+            echo "**Skipped**: No cache/ohlcv data found" >> $GITHUB_STEP_SUMMARY
+          elif [ -f real_data_output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -30 real_data_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================================
   # Performance Regression Guard
   # ============================================================================
   bench:

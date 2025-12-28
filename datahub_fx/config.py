@@ -59,3 +59,4 @@ class FxConfig:
 DEFAULT_CONFIG = FxConfig()
 
 
+

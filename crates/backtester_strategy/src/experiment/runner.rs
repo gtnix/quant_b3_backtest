@@ -1003,6 +1003,145 @@ impl ExperimentRunner {
         let result = hasher.finalize();
         format!("{:x}", result)
     }
+
+    // ========================================================================
+    // STRESS TESTING INTEGRATION
+    // ========================================================================
+
+    /// Run strategy with stress testing across multiple scenarios.
+    ///
+    /// Executes the strategy under baseline conditions plus stress scenarios
+    /// (increased slippage, costs), and validates against thresholds.
+    ///
+    /// Returns `Err` if any threshold is violated (fail-fast gate).
+    pub fn run_with_stress(
+        &self,
+        config_path: &Path,
+        thresholds: &super::stress::StressThresholds,
+    ) -> Result<super::stress::StressTestReport, RunnerError> {
+        use super::stress::{StressScenario, StressTestReport, StressTestResult};
+
+        let _config_content = fs::read_to_string(config_path)?;
+        let strategy_config = load_strategy_config(config_path)?;
+        let strategy_id = strategy_config.strategy.id.clone();
+
+        let mut results = Vec::new();
+
+        for scenario in StressScenario::all() {
+            // Apply stress multipliers to costs
+            let stressed_costs = scenario.apply_to_config(&self.config.costs);
+            
+            // Create runner with stressed costs
+            let stressed_runner_config = RunnerConfig {
+                output_dir: self.config.output_dir.clone(),
+                risk_free_rate: self.config.risk_free_rate,
+                costs: stressed_costs.clone(),
+                seed: self.config.seed,
+                dataset_id: self.config.dataset_id.clone(),
+                execution_mode: self.config.execution_mode,
+                enable_dividends: self.config.enable_dividends,
+                initial_capital: self.config.initial_capital,
+                dividend_csv_path: self.config.dividend_csv_path.clone(),
+            };
+
+            let stressed_runner = ExperimentRunner::with_config(stressed_runner_config);
+
+            // Run and collect metrics
+            match stressed_runner.run_single(config_path) {
+                Ok(experiment_result) => {
+                    let metrics = experiment_result.metrics.clone();
+                    
+                    // Check thresholds
+                    let check_result = thresholds.check(&metrics);
+                    
+                    let stress_result = if let Err(reason) = check_result {
+                        StressTestResult::fail(scenario, metrics, stressed_costs, reason)
+                    } else {
+                        StressTestResult::pass(scenario, metrics, stressed_costs)
+                    };
+                    
+                    results.push(stress_result);
+                }
+                Err(e) => {
+                    // Run failed - create failure result
+                    results.push(StressTestResult::fail(
+                        scenario,
+                        RunMetrics::default(),
+                        stressed_costs,
+                        format!("Run failed: {}", e),
+                    ));
+                }
+            }
+        }
+
+        let report = StressTestReport::from_results(strategy_id, results);
+
+        // Fail-fast: if any scenario failed thresholds, return error
+        if !report.all_passed {
+            return Err(RunnerError::StressTestFailed {
+                passed: report.passed_count,
+                failed: report.failed_count,
+                summary: report.to_summary_string(),
+            });
+        }
+
+        Ok(report)
+    }
+
+    // ========================================================================
+    // STABILITY ANALYSIS INTEGRATION
+    // ========================================================================
+
+    /// Run strategy with stability analysis across time blocks.
+    ///
+    /// Splits the backtest period into N blocks and checks for consistent
+    /// performance. Returns `Err` if stability criteria are violated.
+    pub fn run_with_stability(
+        &self,
+        config_path: &Path,
+        stability_config: &super::stability::StabilityConfig,
+    ) -> Result<super::stability::StabilityReport, RunnerError> {
+        use super::stability::StabilityAnalyzer;
+
+        // Run the experiment first
+        let experiment_result = self.run_single(config_path)?;
+
+        // Analyze stability
+        let analyzer = StabilityAnalyzer::with_config(stability_config.clone());
+        let report = analyzer.analyze(
+            &experiment_result.timeseries,
+            &experiment_result.trades,
+            self.config.risk_free_rate,
+        );
+
+        // Fail-fast: if strategy is unstable, return error
+        if !report.is_stable {
+            return Err(RunnerError::StabilityCheckFailed {
+                reasons: report.instability_reasons.clone(),
+                summary: report.to_summary_string(),
+            });
+        }
+
+        Ok(report)
+    }
+
+    /// Run strategy with both stress testing and stability analysis.
+    ///
+    /// This is the full robustness gate: strategy must pass both checks.
+    pub fn run_with_robustness(
+        &self,
+        config_path: &Path,
+        stress_thresholds: &super::stress::StressThresholds,
+        stability_config: &super::stability::StabilityConfig,
+    ) -> Result<(super::stress::StressTestReport, super::stability::StabilityReport), RunnerError> {
+        // Run stress tests first (fail-fast)
+        let stress_report = self.run_with_stress(config_path, stress_thresholds)?;
+
+        // If stress passed, run stability analysis
+        let stability_report = self.run_with_stability(config_path, stability_config)?;
+
+        Ok((stress_report, stability_report))
+    }
 }
 
 impl Default for ExperimentRunner {
@@ -1069,6 +1208,17 @@ pub enum RunnerError {
     ExecutionModeUnsupported {
         requested: ExecutionMode,
         unsupported_steps: Vec<String>,
+    },
+    #[error("Stress test failed: {passed}/{} scenarios passed. {summary}", passed + failed)]
+    StressTestFailed {
+        passed: usize,
+        failed: usize,
+        summary: String,
+    },
+    #[error("Stability check failed: {reasons:?}")]
+    StabilityCheckFailed {
+        reasons: Vec<String>,
+        summary: String,
     },
 }
 
@@ -1414,6 +1564,217 @@ params = { max_weight = 1.0 }
         // Config hash should be identical (not affected by timestamp)
         assert_eq!(result1.metadata.config_hash, result2.metadata.config_hash,
             "Config hash should match");
+    }
+
+    // ========================================================================
+    // STRESS/STABILITY INTEGRATION TESTS (E2E Gate)
+    // ========================================================================
+
+    #[test]
+    fn test_stress_thresholds_gate_pass() {
+        use super::super::stress::StressThresholds;
+        
+        let temp = tempdir().unwrap();
+        let config_content = r#"
+[strategy]
+id = "stress_test"
+version = "1.0.0"
+description = "Stress test"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 1.0 }
+"#;
+        let config_path = create_test_config(temp.path(), "test.toml", config_content);
+
+        let runner_config = RunnerConfig {
+            output_dir: temp.path().join("output").to_string_lossy().into(),
+            seed: Some(42),
+            costs: CostConfig {
+                trading_fee_pct: 0.001,
+                slippage_pct: 0.0005,
+                min_trade_brl: None,
+            },
+            ..Default::default()
+        };
+        let runner = ExperimentRunner::with_config(runner_config);
+
+        // Lenient thresholds that should pass
+        let thresholds = StressThresholds {
+            min_sharpe: -10.0, // Very lenient
+            max_drawdown: -0.99, // Very lenient
+            max_sharpe_degradation_pct: 100.0,
+            max_dd_increase_pct: 100.0,
+        };
+
+        let result = runner.run_with_stress(&config_path, &thresholds);
+        assert!(result.is_ok(), "Lenient thresholds should pass: {:?}", result.err());
+        
+        let report = result.unwrap();
+        assert!(report.all_passed, "All scenarios should pass with lenient thresholds");
+    }
+
+    #[test]
+    fn test_stress_thresholds_gate_fail() {
+        use super::super::stress::StressThresholds;
+        
+        // Test that StressThresholds::check correctly identifies failures
+        let strict_thresholds = StressThresholds {
+            min_sharpe: 10.0, // Unrealistic - require Sharpe > 10
+            max_drawdown: -0.001, // Unrealistic - max 0.1% drawdown
+            max_sharpe_degradation_pct: 0.0,
+            max_dd_increase_pct: 0.0,
+        };
+
+        // Create metrics that should fail
+        let bad_metrics = RunMetrics {
+            sharpe_ratio: 1.5, // < 10.0, should fail
+            max_drawdown: -0.15, // > -0.001, should fail
+            ..Default::default()
+        };
+
+        let check_result = strict_thresholds.check(&bad_metrics);
+        assert!(check_result.is_err(), "Metrics with Sharpe 1.5 should fail threshold of 10.0");
+        
+        // Verify the error message
+        let error_msg = check_result.unwrap_err();
+        assert!(error_msg.contains("Sharpe") || error_msg.contains("drawdown"),
+            "Error should mention Sharpe or drawdown: {}", error_msg);
+    }
+
+    #[test]
+    fn test_stability_gate_pass() {
+        use super::super::stability::StabilityConfig;
+        
+        let temp = tempdir().unwrap();
+        let config_content = r#"
+[strategy]
+id = "stability_test"
+version = "1.0.0"
+description = "Stability test"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 1.0 }
+"#;
+        let config_path = create_test_config(temp.path(), "test.toml", config_content);
+
+        let runner_config = RunnerConfig {
+            output_dir: temp.path().join("output").to_string_lossy().into(),
+            seed: Some(42),
+            ..Default::default()
+        };
+        let runner = ExperimentRunner::with_config(runner_config);
+
+        // Lenient stability config
+        let stability_config = StabilityConfig {
+            num_blocks: 3,
+            min_sharpe_per_block: -10.0, // Very lenient
+            max_sharpe_cv: 100.0,         // Very lenient
+            max_sharpe_spread: 100.0,     // Very lenient
+            min_positive_sharpe_pct: 0.0, // Very lenient
+        };
+
+        let result = runner.run_with_stability(&config_path, &stability_config);
+        assert!(result.is_ok(), "Lenient stability config should pass: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_stability_gate_fail() {
+        use super::super::stability::{StabilityAnalyzer, StabilityConfig, StabilitySummary};
+        
+        // Test that stability check correctly identifies failures with strict config
+        let strict_config = StabilityConfig {
+            num_blocks: 3,
+            min_sharpe_per_block: 5.0, // Unrealistic
+            max_sharpe_cv: 0.01,       // Unrealistic
+            max_sharpe_spread: 0.01,   // Unrealistic
+            min_positive_sharpe_pct: 1.0, // 100% must be positive
+        };
+
+        let analyzer = StabilityAnalyzer::with_config(strict_config);
+        
+        // Create a summary that should fail all criteria
+        let bad_summary = StabilitySummary {
+            mean_sharpe: 0.5,
+            std_sharpe: 0.8,
+            cv_sharpe: 1.6, // > 0.01
+            min_sharpe: -0.5, // < 5.0
+            max_sharpe: 1.5,
+            sharpe_spread: 2.0, // > 0.01
+            pct_positive_sharpe: 0.5, // < 1.0
+            num_blocks: 3,
+        };
+
+        // Use the internal check method via the analyzer
+        let (is_stable, reasons) = analyzer.check_stability(&bad_summary);
+        
+        assert!(!is_stable, "Bad summary should be marked as unstable");
+        assert!(!reasons.is_empty(), "Should have at least one failure reason");
+        assert!(reasons.len() >= 3, "Should have multiple failure reasons: {:?}", reasons);
+    }
+
+    #[test]
+    fn test_run_with_robustness_full_gate() {
+        use super::super::stress::StressThresholds;
+        use super::super::stability::StabilityConfig;
+        
+        let temp = tempdir().unwrap();
+        let config_content = r#"
+[strategy]
+id = "robustness_test"
+version = "1.0.0"
+description = "Full robustness test"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 1.0 }
+"#;
+        let config_path = create_test_config(temp.path(), "test.toml", config_content);
+
+        let runner_config = RunnerConfig {
+            output_dir: temp.path().join("output").to_string_lossy().into(),
+            seed: Some(42),
+            ..Default::default()
+        };
+        let runner = ExperimentRunner::with_config(runner_config);
+
+        // Lenient configs that should pass
+        let thresholds = StressThresholds {
+            min_sharpe: -10.0,
+            max_drawdown: -0.99,
+            max_sharpe_degradation_pct: 100.0,
+            max_dd_increase_pct: 100.0,
+        };
+        let stability_config = StabilityConfig {
+            num_blocks: 3,
+            min_sharpe_per_block: -10.0,
+            max_sharpe_cv: 100.0,
+            max_sharpe_spread: 100.0,
+            min_positive_sharpe_pct: 0.0,
+        };
+
+        let result = runner.run_with_robustness(&config_path, &thresholds, &stability_config);
+        assert!(result.is_ok(), "Full robustness test should pass with lenient configs: {:?}", result.err());
+        
+        let (stress_report, stability_report) = result.unwrap();
+        assert!(stress_report.all_passed);
+        assert!(stability_report.is_stable);
     }
 }
 

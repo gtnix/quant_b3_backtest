@@ -7,7 +7,7 @@
 //! - **Trading days per year**: 252 (used for annualization)
 //! - **Return type**: Simple returns `(P_t - P_{t-1}) / P_{t-1}` (not log returns)
 //! - **Risk-free rate**: Expected as annualized rate (e.g., 0.05 for 5%)
-//! - **Volatility**: Population standard deviation (not sample)
+//! - **Volatility**: Supports both population (N) and sample (N-1) std dev
 //! - **Drawdown**: Peak-to-trough from high-water mark (HWM)
 //!
 //! # Infinity Handling
@@ -18,8 +18,42 @@
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::types::{EquityPoint, RunMetrics, TradeRecord, TradeSide};
+
+/// Volatility calculation type.
+///
+/// Controls whether to use population (N divisor) or sample (N-1 divisor)
+/// standard deviation for volatility calculations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VolatilityType {
+    /// Population standard deviation (N divisor) - default, matches historical convention
+    #[default]
+    Population,
+    /// Sample standard deviation (N-1 divisor) - better for small samples
+    Sample,
+}
+
+impl VolatilityType {
+    /// Parse from string (for CLI).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "population" | "pop" | "n" => Some(Self::Population),
+            "sample" | "samp" | "n-1" | "n_1" => Some(Self::Sample),
+            _ => None,
+        }
+    }
+
+    /// Get as string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Population => "population",
+            Self::Sample => "sample",
+        }
+    }
+}
 
 // ============================================================================
 // Constants for metric calculations
@@ -147,16 +181,39 @@ impl MetricsCalculator {
 
     /// Annualized volatility (standard deviation of returns * sqrt(252)).
     ///
-    /// Uses population standard deviation (N divisor, not N-1).
+    /// Uses population standard deviation (N divisor) by default.
+    /// For sample standard deviation (N-1), use `volatility_with_type`.
     /// Returns 0.0 for empty or single-element series.
     pub fn volatility(returns: &[f64]) -> f64 {
+        Self::volatility_with_type(returns, VolatilityType::Population)
+    }
+
+    /// Annualized volatility with configurable std dev type.
+    ///
+    /// - `vol_type`: Use `Population` for N divisor, `Sample` for N-1 divisor.
+    /// - Returns 0.0 for empty series.
+    /// - For sample std dev, returns 0.0 if only 1 data point (need n >= 2).
+    pub fn volatility_with_type(returns: &[f64], vol_type: VolatilityType) -> f64 {
         if returns.is_empty() {
             return 0.0;
         }
 
-        let n = returns.len() as f64;
-        let mean = returns.iter().sum::<f64>() / n;
-        let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / n;
+        let n = returns.len();
+        
+        // Sample std dev needs at least 2 points
+        if vol_type == VolatilityType::Sample && n < 2 {
+            return 0.0;
+        }
+
+        let mean = returns.iter().sum::<f64>() / n as f64;
+        let sum_sq = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>();
+        
+        let divisor = match vol_type {
+            VolatilityType::Population => n as f64,
+            VolatilityType::Sample => (n - 1) as f64,
+        };
+        
+        let variance = sum_sq / divisor;
         let daily_vol = variance.sqrt();
 
         // Annualize using precomputed sqrt(252)
@@ -488,6 +545,60 @@ mod tests {
         
         assert!(metrics.cagr != 0.0 || metrics.total_days > 0);
         assert_eq!(metrics.total_days, 5);
+    }
+
+    #[test]
+    fn test_volatility_type_from_str() {
+        assert_eq!(VolatilityType::from_str("population"), Some(VolatilityType::Population));
+        assert_eq!(VolatilityType::from_str("pop"), Some(VolatilityType::Population));
+        assert_eq!(VolatilityType::from_str("sample"), Some(VolatilityType::Sample));
+        assert_eq!(VolatilityType::from_str("n-1"), Some(VolatilityType::Sample));
+        assert_eq!(VolatilityType::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn test_volatility_sample_vs_population() {
+        // For n=5 data points:
+        // Population: divide by N=5
+        // Sample: divide by N-1=4
+        // Sample std dev should be larger by factor sqrt(5/4) = 1.118
+        let returns = vec![0.02, -0.01, 0.03, -0.02, 0.01];
+        
+        let vol_pop = MetricsCalculator::volatility_with_type(&returns, VolatilityType::Population);
+        let vol_sample = MetricsCalculator::volatility_with_type(&returns, VolatilityType::Sample);
+        
+        assert!(vol_pop > 0.0);
+        assert!(vol_sample > 0.0);
+        
+        // Sample should be larger
+        assert!(vol_sample > vol_pop, "Sample vol {} should be > population vol {}", vol_sample, vol_pop);
+        
+        // Check ratio is approximately sqrt(5/4) = 1.118
+        let ratio = vol_sample / vol_pop;
+        let expected_ratio = (5.0_f64 / 4.0).sqrt();
+        assert!((ratio - expected_ratio).abs() < 0.01, "Ratio {} should be ~{}", ratio, expected_ratio);
+    }
+
+    #[test]
+    fn test_volatility_sample_needs_two_points() {
+        // Sample std dev needs n >= 2
+        let single = vec![0.01];
+        let vol_sample = MetricsCalculator::volatility_with_type(&single, VolatilityType::Sample);
+        assert_eq!(vol_sample, 0.0);
+        
+        // Population can work with 1 point (will be 0)
+        let vol_pop = MetricsCalculator::volatility_with_type(&single, VolatilityType::Population);
+        assert_eq!(vol_pop, 0.0);
+    }
+
+    #[test]
+    fn test_volatility_default_is_population() {
+        let returns = vec![0.02, -0.01, 0.03, -0.02, 0.01];
+        
+        let vol_default = MetricsCalculator::volatility(&returns);
+        let vol_pop = MetricsCalculator::volatility_with_type(&returns, VolatilityType::Population);
+        
+        assert_eq!(vol_default, vol_pop);
     }
 }
 

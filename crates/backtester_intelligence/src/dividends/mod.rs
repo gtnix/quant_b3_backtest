@@ -37,3 +37,4 @@ pub mod types;
 pub use loader::{DividendLoader, DividendLoadError};
 pub use types::{DividendEntry, DividendIndex, DividendApplication, PriceType};
 
+

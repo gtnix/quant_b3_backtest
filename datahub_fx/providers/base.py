@@ -86,3 +86,4 @@ class FxProvider(ABC):
         return records[-1] if records else None
 
 
+

@@ -6,6 +6,7 @@
 //! - `ArtifactWriter`: Generate standardized output files
 //! - `Comparator`: Compare runs and detect regressions
 //! - `BlockCatalog`: Generate documentation of available blocks
+//! - `StressTestReport`: Stress testing with increased friction
 
 pub mod types;
 pub mod runner;
@@ -13,6 +14,8 @@ pub mod metrics;
 pub mod artifacts;
 pub mod comparator;
 pub mod catalog;
+pub mod stress;
+pub mod stability;
 
 pub use types::*;
 pub use runner::{
@@ -20,6 +23,7 @@ pub use runner::{
 };
 pub use metrics::{
     MetricsCalculator,
+    VolatilityType,
     TRADING_DAYS_PER_YEAR,
     DEFAULT_RISK_FREE_RATE,
     WEIGHT_SUM_TOLERANCE,
@@ -29,4 +33,10 @@ pub use metrics::{
 pub use artifacts::ArtifactWriter;
 pub use comparator::{Comparator, RegressionThresholds, RegressionThresholdsBuilder, ComparatorError};
 pub use catalog::BlockCatalog;
+pub use stress::{
+    StressScenario, StressTestResult, StressTestReport, StressSummary, StressThresholds, ReportMetadata,
+};
+pub use stability::{
+    StabilityAnalyzer, StabilityConfig, StabilityReport, StabilitySummary, BlockResult, BlockMetrics, StabilityMetadata,
+};
 

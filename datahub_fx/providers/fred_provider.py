@@ -124,3 +124,4 @@ class FREDProvider(FxProvider):
         return sorted(records, key=lambda r: r.date)
 
 
+

@@ -7,11 +7,16 @@ rust-version.workspace = true
 description = "Integration tests for the backtester"
 publish = false
 
+[features]
+default = []
+real_data = []
+
 [dependencies]
 backtester_core.workspace = true
 backtester_engine.workspace = true
 backtester_portfolio.workspace = true
 backtester_execution.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -27,6 +32,10 @@ path = "tests/invariants.rs"
 [[test]]
 name = "anti_look_ahead"
 path = "tests/anti_look_ahead.rs"
+
+[[test]]
+name = "real_data_integration"
+path = "tests/real_data_integration.rs"
 
 [[bench]]
 name = "scenarios_bench"

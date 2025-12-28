@@ -79,7 +79,7 @@ pub struct ExecutionModeResolution {
 }
 
 /// Cost configuration for experiment runs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CostConfig {
     /// Trading fee as percentage (e.g., 0.001 = 0.1%)
     pub trading_fee_pct: f64,

@@ -185,3 +185,4 @@ This validates:
 - `crates/backtester_engine/src/unified.rs` - UnifiedEngine implementation
 - `crates/backtester_intelligence/src/dividends/` - Dividend index and types
 
+
