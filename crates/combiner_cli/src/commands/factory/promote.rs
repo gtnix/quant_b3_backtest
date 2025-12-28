@@ -120,6 +120,12 @@ pub fn execute_promote(
             let run = registry.get_run(run_id).await?
                 .ok_or_else(|| anyhow::anyhow!("Run not found: {}", run_id))?;
 
+            // Check data integrity - skip runs without PASS verdict
+            if run.data_integrity_verdict.as_deref() != Some("PASS") {
+                println!("⚠️  Skipping run {}: data integrity not PASS ({:?})", run_id, run.data_integrity_verdict);
+                continue;
+            }
+
             let candidates = registry.get_top_candidates(run_id, top_n as i32).await?;
 
             for cand in candidates {

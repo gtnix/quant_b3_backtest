@@ -60,3 +60,17 @@ min_stress_passed = 4        # At least 4 of 5 stress scenarios passed
 gates_required = true        # Must pass all institutional gates
 # min_dsr = 0.05             # Optional: Deflated Sharpe Ratio threshold
 
+
+[data_integrity]
+# Audit mode: "fast" (sampling) or "strict" (full scan)
+mode = "fast"
+# Maximum allowed gap in days without explanation
+max_gap_days = 5
+# Threshold for detecting suspicious price jumps (percent)
+jump_threshold_pct = 30.0
+# Price adjustment type: "raw", "adjusted", or "total_return"
+price_adjustment = "adjusted"
+# Universe type: "point_in_time", "static", or "unknown"
+universe_type = "unknown"
+# Enable data integrity check (default: true)
+enabled = true

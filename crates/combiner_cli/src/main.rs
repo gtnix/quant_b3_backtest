@@ -154,6 +154,17 @@ enum FactoryAction {
         campaign: String,
     },
 
+    /// Audit data integrity for a campaign (standalone)
+    AuditData {
+        /// Path to campaign config file
+        #[arg(short, long)]
+        campaign: String,
+
+        /// Audit mode: fast or strict
+        #[arg(short, long, default_value = "fast")]
+        mode: String,
+    },
+
     /// List campaigns
     List {
         /// Filter by tag
@@ -314,6 +325,10 @@ fn main() -> Result<()> {
                     &stage,
                     force,
                 )
+            }
+
+            FactoryAction::AuditData { campaign, mode } => {
+                commands::factory::execute_audit(&campaign, &mode)
             }
         },
     }

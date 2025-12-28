@@ -9,7 +9,14 @@ use sha2::Digest;
 use tokio::runtime::Runtime;
 use tracing::{error, info};
 
+use chrono::NaiveDate;
+use std::path::Path;
+
 use combiner_engine::{EvolutionConfig, EvolutionEngine};
+use backtester_intelligence::monitoring::{
+    DataIntegrityGate, DataIntegrityReport, AuditMode, DataContext, UniverseType,
+};
+use backtester_intelligence::filters::Market;
 use combiner_runner::{CliExecutor, ValidationCache};
 
 use super::config::CampaignConfig;
@@ -105,6 +112,55 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
         registry
             .update_campaign_status(&campaign_id, CampaignStatus::Running)
             .await?;
+
+        // === DATA INTEGRITY GATE ===
+        if config.data_integrity.enabled {
+            println!("\n[Data Integrity] Running pre-flight audit...");
+            
+            let market = parse_market(&config.dataset.market);
+            let delay_bars = config.execution.delay_bars.unwrap_or(1);
+            let mode = AuditMode::from_str(&config.data_integrity.mode);
+            
+            let gate = DataIntegrityGate::new(
+                market,
+                delay_bars,
+                config.data_integrity.max_gap_days,
+                mode,
+            );
+            
+            // Build minimal DataContext for audit
+            let mut ctx = DataContext::new(chrono::Utc::now().date_naive());
+            ctx.delay_bars_policy = delay_bars;
+            ctx.universe_type = parse_universe_type(&config.data_integrity.universe_type);
+            
+            // Run audit
+            let dataset_hash_str = dataset_hash.clone().unwrap_or_default();
+            let report = gate.audit(&ctx, &dataset_hash_str);
+            
+            // Save report
+            let report_dir = format!("artifacts/data_integrity/{}", campaign_id);
+            std::fs::create_dir_all(&report_dir).ok();
+            let report_path = format!("{}/report.json", report_dir);
+            if let Err(e) = report.save(Path::new(&report_path)) {
+                error!("Failed to save data integrity report: {}", e);
+            }
+            
+            // Check verdict
+            println!("[Data Integrity] {}", report.summary());
+            
+            if !report.passed() {
+                println!("\n[Data Integrity] FAILED - Blocking campaign execution");
+                for reason in &report.hard_fails {
+                    println!("  ❌ {}", reason);
+                }
+                registry
+                    .update_campaign_status(&campaign_id, CampaignStatus::Failed)
+                    .await?;
+                return Err(anyhow::anyhow!("Data integrity check failed"));
+            }
+            
+            println!("[Data Integrity] PASSED - Proceeding with campaign\n");
+        }
 
         // Progress bar for seeds
         let pb = ProgressBar::new(seeds_to_run.len() as u64);
@@ -339,4 +395,26 @@ async fn execute_single_run(
         artifact_path: output_dir,
         candidates,
     })
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/// Parse market string to Market enum.
+fn parse_market(market_str: &str) -> Market {
+    match market_str.to_uppercase().as_str() {
+        "BR" | "B3" => Market::BR,
+        "US" | "NYSE" | "NASDAQ" => Market::US,
+        _ => Market::BR, // Default to BR
+    }
+}
+
+/// Parse universe type string to UniverseType enum.
+fn parse_universe_type(universe_str: &str) -> UniverseType {
+    match universe_str.to_lowercase().as_str() {
+        "point_in_time" | "pit" => UniverseType::PointInTime,
+        "static" => UniverseType::Static,
+        _ => UniverseType::Unknown,
+    }
 }

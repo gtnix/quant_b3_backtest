@@ -53,6 +53,9 @@ pub struct Run {
     pub best_oos_sharpe_net: Option<f32>,
     pub best_pbo: Option<f32>,
     pub candidates_count: Option<i32>,
+    pub data_integrity_verdict: Option<String>,
+    pub data_integrity_score: Option<f32>,
+    pub data_integrity_report_path: Option<String>,
 }
 
 /// Candidate record from the database.
@@ -444,10 +447,39 @@ impl Registry {
             best_oos_sharpe_net: row.get("best_oos_sharpe_net"),
             best_pbo: row.get("best_pbo"),
             candidates_count: row.get("candidates_count"),
+            data_integrity_verdict: row.get("data_integrity_verdict"),
+            data_integrity_score: row.get("data_integrity_score"),
+            data_integrity_report_path: row.get("data_integrity_report_path"),
         }
     }
 
     // =========================================================================
+    /// Register data integrity verdict for a run.
+    pub async fn register_data_integrity(
+        &self,
+        run_id: &str,
+        verdict: &str,
+        score: f32,
+        report_path: &str,
+    ) -> Result<()> {
+        self.client
+            .execute(
+                r#"
+                UPDATE scg_runs SET
+                    data_integrity_verdict = $1,
+                    data_integrity_score = $2,
+                    data_integrity_report_path = $3
+                WHERE run_id = $4
+                "#,
+                &[&verdict, &score, &report_path, &run_id],
+            )
+            .await
+            .context("Failed to register data integrity")?;
+        Ok(())
+    }
+
+    // =========================================================================
+
     // CANDIDATE OPERATIONS
     // =========================================================================
 

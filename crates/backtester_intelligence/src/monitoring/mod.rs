@@ -18,6 +18,7 @@ mod engine;
 mod reporter;
 mod context_builder;
 mod baseline;
+mod integrity_gate;
 
 pub use config::{
     MonitoringConfig, DataHealthConfig, DriftConfig, RegressionConfig,
@@ -39,6 +40,9 @@ pub use data_health::{
     DataHealthCheck, DataHealthEngine, DataContext,
     FreshnessCheck, CoverageCheck, WatermarkCheck, NullCheck, OutlierCheck,
     DividendsCheck, InterestRatesCheck, SchemaCheck,
+    // Data Integrity checks
+    PriceJumpEvent, UniverseType,
+    TemporalIntegrityCheck, LookaheadPolicyCheck, CorpActionCheck, SurvivorshipCheck,
 };
 
 pub use drift::{
@@ -76,3 +80,7 @@ pub use baseline::{
     ThresholdRecommendation,
 };
 
+
+pub use integrity_gate::{
+    DataIntegrityGate, DataIntegrityReport, Verdict, AuditMode, AuditStats,
+};

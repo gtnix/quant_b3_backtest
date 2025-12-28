@@ -33,6 +33,9 @@ pub struct CampaignConfig {
     /// Promotion thresholds.
     #[serde(default)]
     pub promotion: PromotionConfig,
+    /// Data integrity configuration.
+    #[serde(default)]
+    pub data_integrity: DataIntegrityConfig,
 }
 
 /// Campaign metadata.
@@ -235,6 +238,71 @@ impl Default for PromotionConfig {
     }
 }
 
+/// Data integrity configuration for anti-lookahead and dataset validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataIntegrityConfig {
+    /// Audit mode: "fast" (sampling) or "strict" (full scan).
+    #[serde(default = "default_audit_mode")]
+    pub mode: String,
+    
+    /// Maximum allowed gap in days without explanation.
+    #[serde(default = "default_max_gap_days")]
+    pub max_gap_days: u32,
+    
+    /// Threshold for detecting suspicious price jumps (percent).
+    #[serde(default = "default_jump_threshold")]
+    pub jump_threshold_pct: f64,
+    
+    /// Price adjustment type: "raw", "adjusted", or "total_return".
+    #[serde(default = "default_price_adjustment")]
+    pub price_adjustment: String,
+    
+    /// Universe type: "point_in_time", "static", or "unknown".
+    #[serde(default = "default_universe_type")]
+    pub universe_type: String,
+    
+    /// Enable data integrity check (default: true).
+    #[serde(default = "default_integrity_enabled")]
+    pub enabled: bool,
+}
+
+fn default_audit_mode() -> String {
+    "fast".to_string()
+}
+
+fn default_max_gap_days() -> u32 {
+    5
+}
+
+fn default_jump_threshold() -> f64 {
+    30.0
+}
+
+fn default_price_adjustment() -> String {
+    "adjusted".to_string()
+}
+
+fn default_universe_type() -> String {
+    "unknown".to_string()
+}
+
+fn default_integrity_enabled() -> bool {
+    true
+}
+
+impl Default for DataIntegrityConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_audit_mode(),
+            max_gap_days: default_max_gap_days(),
+            jump_threshold_pct: default_jump_threshold(),
+            price_adjustment: default_price_adjustment(),
+            universe_type: default_universe_type(),
+            enabled: default_integrity_enabled(),
+        }
+    }
+}
+
 // =============================================================================
 // LOADING AND HASHING
 // =============================================================================
@@ -394,6 +462,13 @@ min_oos_sharpe_net = 0.5
 max_pbo = 0.15
 min_stress_passed = 4
 gates_required = true
+
+[data_integrity]
+mode = "fast"
+max_gap_days = 5
+jump_threshold_pct = 30.0
+price_adjustment = "adjusted"
+enabled = true
 "#
     )
 }
@@ -417,6 +492,7 @@ mod tests {
             seeds: SeedPolicy::default(),
             budget: BudgetConfig::default(),
             promotion: PromotionConfig::default(),
+            data_integrity: DataIntegrityConfig::default(),
         };
 
         let config2 = config1.clone();

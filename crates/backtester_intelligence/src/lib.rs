@@ -119,6 +119,10 @@ pub use monitoring::{
     DrawdownThreshold, ThresholdEvaluator,
     DataHealthCheck, DataHealthEngine, DataContext,
     DriftCheck, DriftEngine, DriftContext,
+    // Data Integrity
+    DataIntegrityGate, DataIntegrityReport, Verdict, AuditMode, AuditStats,
+    PriceJumpEvent, UniverseType, TemporalIntegrityCheck, LookaheadPolicyCheck,
+    CorpActionCheck, SurvivorshipCheck,
     RegressionCheck, RegressionEngine, RegressionContext,
     CircuitBreaker, CircuitState,
     MonitoringEngine, MonitoringContext,

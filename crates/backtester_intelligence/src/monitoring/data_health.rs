@@ -19,6 +19,31 @@ use crate::filters::Market;
 use super::config::{DataHealthConfig, ThresholdEvaluator};
 use super::types::{CheckCategory, CheckResult, Evidence, Severity};
 
+/// Price jump event for detecting corporate actions.
+#[derive(Debug, Clone, Default)]
+pub struct PriceJumpEvent {
+    /// Symbol that had the jump
+    pub symbol: String,
+    /// Date of the jump
+    pub date: NaiveDate,
+    /// Return percentage (e.g., -0.5 for 50% drop)
+    pub return_pct: f64,
+    /// Suspected action type
+    pub suspected_action: String,  // "split", "dividend", "unknown"
+}
+
+/// Universe type classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UniverseType {
+    /// Historical constituents available
+    PointInTime,
+    /// Static list (survivorship bias risk)
+    Static,
+    /// Unknown or not specified
+    #[default]
+    Unknown,
+}
+
 /// Context for data health checks.
 #[derive(Debug, Clone, Default)]
 pub struct DataContext {
@@ -52,6 +77,21 @@ pub struct DataContext {
     pub schema_errors: Vec<String>,
     /// Reference date for checks
     pub as_of: NaiveDate,
+    // === Data Integrity Fields ===
+    /// Duplicate bar count per market (timestamp collisions)
+    pub duplicate_count: HashMap<Market, usize>,
+    /// Out of order timestamp count per market
+    pub out_of_order_count: HashMap<Market, usize>,
+    /// Suspicious price jumps (potential corp actions)
+    pub price_jumps: Vec<PriceJumpEvent>,
+    /// Configured delay bars policy (from execution config)
+    pub delay_bars_policy: u8,
+    /// Universe type: point-in-time, static, or unknown
+    pub universe_type: UniverseType,
+    /// Gap days detected per market
+    pub gap_days_count: HashMap<Market, usize>,
+    /// Maximum gap length per market
+    pub max_gap_days: HashMap<Market, u32>,
 }
 
 impl DataContext {
@@ -1122,3 +1162,234 @@ mod tests {
     }
 }
 
+
+// =============================================================================
+// DATA INTEGRITY CHECKS
+// =============================================================================
+
+/// Temporal integrity check - validates timestamps are monotonic and no duplicates.
+#[derive(Debug, Clone, Default)]
+pub struct TemporalIntegrityCheck {
+    pub market: Market,
+    pub max_gap_days: u32,
+}
+
+impl TemporalIntegrityCheck {
+    pub fn new(market: Market, max_gap_days: u32) -> Self {
+        Self { market, max_gap_days }
+    }
+}
+
+impl DataHealthCheck for TemporalIntegrityCheck {
+    fn name(&self) -> &str {
+        "TemporalIntegrity"
+    }
+
+    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
+        let duplicates = *ctx.duplicate_count.get(&self.market).unwrap_or(&0);
+        let out_of_order = *ctx.out_of_order_count.get(&self.market).unwrap_or(&0);
+        let max_gap = *ctx.max_gap_days.get(&self.market).unwrap_or(&0);
+
+        let has_duplicates = duplicates > 0;
+        let has_out_of_order = out_of_order > 0;
+        let has_excessive_gap = max_gap > self.max_gap_days;
+
+        let evidence = Evidence::new("temporal_integrity.check")
+            .with_current(Decimal::from(duplicates))
+            .with_sample(vec![
+                format!("duplicates: {}", duplicates),
+                format!("out_of_order: {}", out_of_order),
+                format!("max_gap_days: {}", max_gap),
+            ]);
+
+        if has_duplicates || has_out_of_order {
+            let msg = format!(
+                "Temporal integrity failed for {:?}: {} duplicates, {} out-of-order",
+                self.market, duplicates, out_of_order
+            );
+            CheckResult::crit(format!("TemporalIntegrity_{:?}", self.market), CheckCategory::DataIntegrity, &msg)
+                .with_value(Decimal::from(duplicates + out_of_order))
+                .with_evidence(evidence)
+                .with_market(self.market)
+        } else if has_excessive_gap {
+            let msg = format!(
+                "Excessive gap detected for {:?}: {} days (max allowed: {})",
+                self.market, max_gap, self.max_gap_days
+            );
+            CheckResult::warn(format!("TemporalIntegrity_{:?}", self.market), CheckCategory::DataIntegrity, &msg)
+                .with_value(Decimal::from(max_gap))
+                .with_threshold(Decimal::from(self.max_gap_days))
+                .with_evidence(evidence)
+                .with_market(self.market)
+        } else {
+            CheckResult::pass(format!("TemporalIntegrity_{:?}", self.market), CheckCategory::DataIntegrity)
+                .with_evidence(evidence)
+                .with_market(self.market)
+        }
+    }
+}
+
+/// Anti-lookahead policy check - ensures delay_bars is properly configured.
+#[derive(Debug, Clone, Default)]
+pub struct LookaheadPolicyCheck {
+    pub required_delay_bars: u8,
+}
+
+impl LookaheadPolicyCheck {
+    pub fn new(required_delay_bars: u8) -> Self {
+        Self { required_delay_bars }
+    }
+}
+
+impl DataHealthCheck for LookaheadPolicyCheck {
+    fn name(&self) -> &str {
+        "LookaheadPolicy"
+    }
+
+    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
+        let actual_delay = ctx.delay_bars_policy;
+
+        let evidence = Evidence::new("lookahead_policy.check")
+            .with_current(Decimal::from(actual_delay))
+            .with_sample(vec![
+                format!("configured_delay: {}", actual_delay),
+                format!("required_delay: {}", self.required_delay_bars),
+            ]);
+
+        if actual_delay < self.required_delay_bars {
+            let msg = format!(
+                "Lookahead policy violation: delay_bars={} but required >= {}. \
+                 Signals on bar[t] must execute on bar[t+delay]. \
+                 Set delay_bars >= {} in execution config.",
+                actual_delay, self.required_delay_bars, self.required_delay_bars
+            );
+            CheckResult::crit("LookaheadPolicy", CheckCategory::DataIntegrity, &msg)
+                .with_value(Decimal::from(actual_delay))
+                .with_threshold(Decimal::from(self.required_delay_bars))
+                .with_evidence(evidence)
+        } else {
+            let msg = format!(
+                "Lookahead policy OK: delay_bars={} (>= required {})",
+                actual_delay, self.required_delay_bars
+            );
+            CheckResult::pass("LookaheadPolicy", CheckCategory::DataIntegrity)
+                .with_value(Decimal::from(actual_delay))
+                .with_evidence(evidence.with_context(msg))
+        }
+    }
+}
+
+/// Corporate action detection check - detects suspicious price jumps.
+#[derive(Debug, Clone)]
+pub struct CorpActionCheck {
+    pub market: Market,
+    pub jump_threshold_pct: f64,
+}
+
+impl Default for CorpActionCheck {
+    fn default() -> Self {
+        Self {
+            market: Market::BR,
+            jump_threshold_pct: 30.0,
+        }
+    }
+}
+
+impl CorpActionCheck {
+    pub fn new(market: Market, jump_threshold_pct: f64) -> Self {
+        Self { market, jump_threshold_pct }
+    }
+}
+
+impl DataHealthCheck for CorpActionCheck {
+    fn name(&self) -> &str {
+        "CorpActions"
+    }
+
+    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
+        let jumps: Vec<&PriceJumpEvent> = ctx.price_jumps.iter()
+            .filter(|j| j.return_pct.abs() * 100.0 >= self.jump_threshold_pct)
+            .collect();
+
+        let jump_count = jumps.len();
+        let samples: Vec<String> = jumps.iter()
+            .take(5)
+            .map(|j| format!("{}: {:.1}% on {} ({})", j.symbol, j.return_pct * 100.0, j.date, j.suspected_action))
+            .collect();
+
+        let evidence = Evidence::new("corp_actions.detection")
+            .with_current(Decimal::from(jump_count))
+            .with_sample(samples);
+
+        if jump_count > 0 {
+            let msg = format!(
+                "Detected {} suspicious price jumps (threshold: {:.0}%) for {:?}. \
+                 This may indicate corporate actions (splits/dividends) without metadata. \
+                 Verify dataset adjustment status.",
+                jump_count, self.jump_threshold_pct, self.market
+            );
+            // This is a warning, not critical - data may still be valid if adjustments are consistent
+            CheckResult::warn(format!("CorpActions_{:?}", self.market), CheckCategory::DataIntegrity, &msg)
+                .with_value(Decimal::from(jump_count))
+                .with_evidence(evidence)
+                .with_market(self.market)
+        } else {
+            CheckResult::pass(format!("CorpActions_{:?}", self.market), CheckCategory::DataIntegrity)
+                .with_evidence(evidence)
+                .with_market(self.market)
+        }
+    }
+}
+
+/// Survivorship bias check - validates universe type.
+#[derive(Debug, Clone, Default)]
+pub struct SurvivorshipCheck {
+    pub market: Market,
+}
+
+impl SurvivorshipCheck {
+    pub fn new(market: Market) -> Self {
+        Self { market }
+    }
+}
+
+impl DataHealthCheck for SurvivorshipCheck {
+    fn name(&self) -> &str {
+        "Survivorship"
+    }
+
+    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
+        let universe_type = ctx.universe_type;
+
+        let evidence = Evidence::new("survivorship.check")
+            .with_sample(vec![format!("universe_type: {:?}", universe_type)]);
+
+        match universe_type {
+            UniverseType::PointInTime => {
+                CheckResult::pass(format!("Survivorship_{:?}", self.market), CheckCategory::DataIntegrity)
+                    .with_evidence(evidence.with_context("Point-in-time universe - survivorship bias mitigated"))
+                    .with_market(self.market)
+            }
+            UniverseType::Static => {
+                let msg = format!(
+                    "Static universe detected for {:?}. This introduces survivorship bias risk. \
+                     Consider using point-in-time historical constituents.",
+                    self.market
+                );
+                CheckResult::warn(format!("Survivorship_{:?}", self.market), CheckCategory::DataIntegrity, &msg)
+                    .with_evidence(evidence)
+                    .with_market(self.market)
+            }
+            UniverseType::Unknown => {
+                let msg = format!(
+                    "Universe type unknown for {:?}. Unable to assess survivorship bias. \
+                     Specify universe_type in campaign config for proper validation.",
+                    self.market
+                );
+                CheckResult::warn(format!("Survivorship_{:?}", self.market), CheckCategory::DataIntegrity, &msg)
+                    .with_evidence(evidence)
+                    .with_market(self.market)
+            }
+        }
+    }
+}

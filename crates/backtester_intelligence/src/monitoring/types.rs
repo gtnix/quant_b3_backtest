@@ -63,6 +63,8 @@ pub enum CheckCategory {
     Regression,
     /// Circuit breaker state checks
     CircuitBreaker,
+    /// Data integrity checks (temporal, lookahead, corp actions)
+    DataIntegrity,
 }
 
 impl fmt::Display for CheckCategory {
@@ -72,6 +74,7 @@ impl fmt::Display for CheckCategory {
             CheckCategory::Drift => write!(f, "Drift"),
             CheckCategory::Regression => write!(f, "Regression"),
             CheckCategory::CircuitBreaker => write!(f, "CircuitBreaker"),
+            CheckCategory::DataIntegrity => write!(f, "DataIntegrity"),
         }
     }
 }
