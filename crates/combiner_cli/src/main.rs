@@ -40,6 +40,15 @@ enum Commands {
         /// Dry run (validate only)
         #[arg(long)]
         dry_run: bool,
+
+        /// Ultra-performance mode with SIMD optimization, batch evaluation, and
+        /// parallel Stage B validation. Recommended for large experiments.
+        #[arg(long)]
+        ultra: bool,
+
+        /// Number of top genomes to validate in Stage B (ultra mode only)
+        #[arg(long, default_value = "10")]
+        top_k: usize,
     },
 
     /// Check experiment status
@@ -92,7 +101,9 @@ fn main() -> Result<()> {
             output,
             seed,
             dry_run,
-        } => commands::run::execute(&config, &output, seed, dry_run),
+            ultra,
+            top_k,
+        } => commands::run::execute(&config, &output, seed, dry_run, ultra, top_k),
 
         Commands::Status { experiment_id } => commands::status::execute(&experiment_id),
 

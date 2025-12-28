@@ -1,19 +1,23 @@
 //! Run command - Execute evolution experiment.
 
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use combiner_core::{GenomeValidator, ParamRanges};
-use combiner_engine::{
-    EvolutionConfig, EvolutionEngine, ExperimentManifest, ExperimentPersistence,
-    ExperimentStatus, Population, generate_experiment_id,
-};
-use combiner_runner::{BacktestExecutor, CliExecutor};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 use tracing::{info, warn};
+
+use combiner_core::{GenomeValidator, ParamRanges};
+use combiner_engine::{
+    EvolutionConfig, EvolutionEngine, ExperimentManifest, ExperimentPersistence,
+    ExperimentStatus, Population, generate_experiment_id, UltraEvolutionResult,
+    FinalReportGenerator,
+};
+use combiner_runner::{BacktestExecutor, CliExecutor, ValidationCache};
 
 /// SCG configuration file format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,7 +64,14 @@ impl Default for ScgConfig {
 }
 
 /// Execute the run command.
-pub fn execute(config_path: &str, output_dir: &str, seed: Option<u64>, dry_run: bool) -> Result<()> {
+pub fn execute(
+    config_path: &str, 
+    output_dir: &str, 
+    seed: Option<u64>, 
+    dry_run: bool,
+    ultra: bool,
+    top_k: usize,
+) -> Result<()> {
     // Load configuration
     let config = load_config(config_path)?;
     info!("Loaded configuration from {}", config_path);
@@ -86,7 +97,7 @@ pub fn execute(config_path: &str, output_dir: &str, seed: Option<u64>, dry_run: 
     // Track start time
     let start_time = std::time::Instant::now();
 
-    // Create and run evolution engine
+    // Create evolution engine
     let mut engine = EvolutionEngine::new(evo_config.clone(), executor);
 
     // Progress bar
@@ -98,21 +109,42 @@ pub fn execute(config_path: &str, output_dir: &str, seed: Option<u64>, dry_run: 
             .progress_chars("#>-"),
     );
 
-    info!(
-        "Starting evolution: {} generations, {} population",
-        evo_config.max_generations, evo_config.population_size
-    );
+    if ultra {
+        info!(
+            "Starting ULTRA evolution: {} generations, {} population, top-k={}",
+            evo_config.max_generations, evo_config.population_size, top_k
+        );
 
-    // Run evolution
-    engine.evolve()?;
+        // Create validation cache
+        let validation_cache = Arc::new(ValidationCache::new());
 
-    pb.finish_with_message("Evolution complete");
+        // Run ultra mode
+        let result = engine.evolve_ultra(validation_cache, top_k)?;
 
-    // Save results
-    save_results(&engine, output_path, &evo_config, start_time)?;
+        pb.finish_with_message("ULTRA evolution complete");
 
-    // Print summary
-    print_summary(&engine);
+        // Save ultra results
+        save_ultra_results(&engine, &result, output_path, &evo_config, start_time)?;
+
+        // Print ultra summary
+        print_ultra_summary(&result);
+    } else {
+        info!(
+            "Starting evolution: {} generations, {} population",
+            evo_config.max_generations, evo_config.population_size
+        );
+
+        // Run standard evolution
+        engine.evolve()?;
+
+        pb.finish_with_message("Evolution complete");
+
+        // Save results
+        save_results(&engine, output_path, &evo_config, start_time)?;
+
+        // Print summary
+        print_summary(&engine);
+    }
 
     Ok(())
 }
@@ -254,5 +286,124 @@ fn print_summary<E: BacktestExecutor>(engine: &EvolutionEngine<E>) {
         println!("  Best Sharpe: {:.2}", last_stats.best_sharpe);
         println!("  Mean Sharpe: {:.2}", last_stats.mean_sharpe);
     }
+}
+
+/// Save evolution results with ultra mode.
+fn save_ultra_results<E: BacktestExecutor>(
+    engine: &EvolutionEngine<E>,
+    ultra_result: &UltraEvolutionResult,
+    output_path: &Path,
+    config: &EvolutionConfig,
+    start_time: std::time::Instant,
+) -> Result<()> {
+    let experiment_id = generate_experiment_id();
+    let persistence = ExperimentPersistence::new(output_path, &experiment_id);
+
+    // Initialize directory structure
+    persistence.init()?;
+
+    // Create manifest
+    let manifest = ExperimentManifest {
+        experiment_id: experiment_id.clone(),
+        created_at: chrono::Utc::now(),
+        seed: config.seed.unwrap_or(42),
+        status: ExperimentStatus::Completed,
+        generations_completed: ultra_result.total_generations,
+        total_evaluations: engine.stats().iter().map(|s| s.evaluated as u64).sum(),
+        cache_hits: engine.stats().iter().map(|s| s.cache_hits as u64).sum(),
+        duration_seconds: start_time.elapsed().as_secs(),
+        final_pareto_size: engine.stats().last().map(|s| s.pareto_size).unwrap_or(0),
+        config_hash: format!("{:x}", config.seed.unwrap_or(0)),
+    };
+
+    // Write manifest
+    persistence.write_manifest(&manifest)?;
+
+    // Write Hall of Fame
+    persistence.write_hall_of_fame(engine.hall_of_fame())?;
+
+    // Generate and save final report
+    let report_generator = FinalReportGenerator::new(
+        output_path.join(&experiment_id),
+        &experiment_id,
+        config.clone(),
+    );
+
+    let snapshots = ultra_result.performance_metrics.snapshots();
+    let report_path = report_generator.generate_and_save(
+        &ultra_result.validated_hall_of_fame,
+        &ultra_result.performance_metrics,
+        &snapshots,
+    )?;
+
+    info!(
+        "ULTRA: Saved experiment {} with {} validated strategies",
+        experiment_id,
+        ultra_result.validated_hall_of_fame.len()
+    );
+    info!("Final report: {:?}", report_path);
+
+    Ok(())
+}
+
+/// Print summary of ultra evolution results.
+fn print_ultra_summary(result: &UltraEvolutionResult) {
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                    ULTRA EVOLUTION SUMMARY                   ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    
+    let perf = result.performance_metrics.summary();
+    
+    println!("║ Generations: {:>5}   │   Time: {:>7.1}s                    ║", 
+             result.total_generations, result.total_time_secs);
+    println!("║ Genomes Evaluated: {:>8}                                  ║", 
+             perf.total_genomes_evaluated);
+    println!("║ Throughput: {:>7.1} genomes/sec                           ║", 
+             perf.throughput_genomes_per_sec);
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║                      CACHE PERFORMANCE                       ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║ Stage A Cache Hit Rate: {:>6.1}%                             ║", 
+             perf.stage_a_cache_hit_rate);
+    println!("║ Split Cache Hit Rate:   {:>6.1}%                             ║", 
+             perf.split_cache_hit_rate);
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║                    VALIDATED HALL OF FAME                    ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║ Validated Strategies: {:>4}                                  ║", 
+             result.validated_hall_of_fame.len());
+    
+    let hof_summary = result.validated_hall_of_fame.summary();
+    if result.validated_hall_of_fame.len() > 0 {
+        println!("║ Avg OOS Sharpe: {:>7.2}                                     ║", 
+                 hof_summary.avg_oos_sharpe);
+        println!("║ Avg PBO:        {:>7.2}                                     ║", 
+                 hof_summary.avg_pbo);
+        println!("║ Best OOS Sharpe: {:>6.2}                                     ║", 
+                 hof_summary.best_oos_sharpe);
+    }
+    
+    if let Some(best) = result.validated_hall_of_fame.best() {
+        println!("╠══════════════════════════════════════════════════════════════╣");
+        println!("║                      TOP CANDIDATE                           ║");
+        println!("╠══════════════════════════════════════════════════════════════╣");
+        println!("║ ID: {}...                                      ║", 
+                 &best.genome_id.to_string()[..8]);
+        println!("║ OOS Sharpe: {:>6.2}  │  PBO: {:>5.2}  │  Score: {:>6.2}      ║", 
+                 best.validation.oos_sharpe_median, 
+                 best.validation.pbo,
+                 best.score);
+        println!("║ Splits: {}/{}  │  Degradation: {:>5.1}%                     ║", 
+                 best.validation.splits_passed, 
+                 best.validation.splits_evaluated,
+                 best.validation.degradation_pct);
+    }
+    
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║                      TIME BREAKDOWN                          ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║ Stage A: {:>5.1}%  │  Stage B: {:>5.1}%  │  Pareto: {:>5.1}%   ║", 
+             perf.stage_a_time_pct, perf.stage_b_time_pct, perf.pareto_time_pct);
+    println!("╚══════════════════════════════════════════════════════════════╝");
 }
 

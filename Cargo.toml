@@ -65,20 +65,23 @@ memmap2 = "0.9"
 criterion = { version = "0.5", default-features = false }
 
 # -----------------------------------------------------------------------------
-# Profiles: Performance-first, determinism-safe
+# Profiles: Ultra-Performance, determinism-safe
 # -----------------------------------------------------------------------------
 
 [profile.release]
-lto = "thin"
-codegen-units = 1
-panic = "abort"
-strip = "symbols"
-opt-level = 3
+lto = "fat"           # Full LTO for maximum optimization
+codegen-units = 1     # Single codegen unit for better optimization
+panic = "abort"       # No unwinding overhead
+strip = "symbols"     # Smaller binary
+opt-level = 3         # Maximum optimization
+
+[profile.release.build-override]
+opt-level = 3         # Optimize build scripts too
 
 [profile.bench]
 inherits = "release"
 debug = true          # Enable profiling symbols for flamegraphs
-strip = "none"
+strip = "none"        # Keep symbols for profiling
 
 [profile.dev]
 opt-level = 0
@@ -87,4 +90,13 @@ debug = true
 [profile.test]
 inherits = "dev"
 opt-level = 1         # Slightly faster tests
+
+# Ultra-performance profile for production runs
+[profile.ultra]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
 

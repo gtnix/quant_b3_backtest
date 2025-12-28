@@ -5,24 +5,40 @@
 //! - BacktestExecutor trait
 //! - LibraryExecutor (via ExperimentRunner)
 //! - CliExecutor (fallback via CLI)
-//! - Genome result caching
+//! - Ultra-fast genome result caching (lock-free)
+//! - Split-level validation caching
 //! - Parallel execution
 //!
 //! # Example
 //!
 //! ```ignore
-//! use combiner_runner::{BacktestExecutor, LibraryExecutor};
+//! use combiner_runner::{BacktestExecutor, LibraryExecutor, ValidationCache};
 //!
 //! let executor = LibraryExecutor::new();
-//! let config = genome.to_strategy_config()?;
-//! let result = executor.execute(&config)?;
+//! let cache = ValidationCache::new();
+//!
+//! // Check cache first
+//! if let Some(fitness) = cache.get_fitness(genome.hash()) {
+//!     // Use cached result
+//! } else {
+//!     let config = genome.to_strategy_config()?;
+//!     let result = executor.execute(&config)?;
+//!     cache.insert_fitness(genome.hash(), fitness, generation);
+//! }
 //! ```
 
 pub mod executor;
 pub mod cache;
 pub mod metrics;
+pub mod data_loader;
 
 pub use executor::{BacktestExecutor, LibraryExecutor, CliExecutor, BacktestOutput, ExecutionError};
-pub use cache::GenomeCache;
+pub use cache::{
+    GenomeCache, SplitCache, ValidationCache,
+    SplitMetrics, ValidationCacheEntry,
+    CacheStats, CacheStatsSnapshot, CombinedCacheStats,
+    make_split_key, genome_hash_from_key, split_index_from_key,
+};
 pub use metrics::MetricsParser;
+pub use data_loader::{MmapOhlcv, SharedMmapOhlcv, MockOhlcv, load_shared};
 

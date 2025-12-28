@@ -652,6 +652,7 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+ "wide",
 ]
 
 [[package]]
@@ -659,20 +660,27 @@ name = "combiner_engine"
 version = "0.1.0"
 dependencies = [
  "backtester_strategy",
+ "bumpalo",
  "chrono",
  "combiner_core",
  "combiner_runner",
+ "criterion",
+ "dashmap",
  "libm",
  "num_cpus",
+ "parking_lot",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "thread_local",
  "toml",
  "tracing",
  "uuid",
+ "wide",
 ]
 
 [[package]]
@@ -683,6 +691,7 @@ dependencies = [
  "chrono",
  "combiner_core",
  "dashmap",
+ "memmap2",
  "rayon",
  "serde",
  "serde_json",
