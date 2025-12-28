@@ -10,6 +10,7 @@ description = "Evolution engine for the Generative Combiner (SCG) - genetic oper
 # Workspace dependencies
 combiner_core = { path = "../combiner_core" }
 combiner_runner = { path = "../combiner_runner" }
+backtester_execution = { path = "../backtester_execution" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

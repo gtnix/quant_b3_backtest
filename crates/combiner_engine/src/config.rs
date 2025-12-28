@@ -1,5 +1,6 @@
 //! Evolution configuration.
 
+use backtester_execution::{ExecutionModelConfig, InstitutionalGatesConfig};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the evolution process.
@@ -47,6 +48,24 @@ pub struct EvolutionConfig {
     /// Hall of Fame size.
     #[serde(default = "default_hall_of_fame_size")]
     pub hall_of_fame_size: usize,
+
+    /// Execution model configuration for Stage B validation.
+    /// This controls slippage, fees, delay, and other execution costs.
+    #[serde(default)]
+    pub execution: ExecutionModelConfig,
+
+    /// Institutional gates configuration.
+    /// Hard constraints that candidates must pass before entering the Pareto frontier.
+    #[serde(default)]
+    pub gates: InstitutionalGatesConfig,
+
+    /// Enable stress testing suite for top candidates.
+    #[serde(default)]
+    pub stress_testing_enabled: bool,
+
+    /// Minimum stress scenarios that must pass (out of 5).
+    #[serde(default = "default_min_stress_pass")]
+    pub min_stress_scenarios_passed: usize,
 }
 
 fn default_population_size() -> usize {
@@ -76,6 +95,9 @@ fn default_workers() -> usize {
 fn default_hall_of_fame_size() -> usize {
     25
 }
+fn default_min_stress_pass() -> usize {
+    4
+}
 
 impl Default for EvolutionConfig {
     fn default() -> Self {
@@ -91,6 +113,48 @@ impl Default for EvolutionConfig {
             max_runtime_seconds: 0,
             workers: default_workers(),
             hall_of_fame_size: default_hall_of_fame_size(),
+            execution: ExecutionModelConfig::mvp(),
+            gates: InstitutionalGatesConfig::default(),
+            stress_testing_enabled: false,
+            min_stress_scenarios_passed: default_min_stress_pass(),
+        }
+    }
+}
+
+impl EvolutionConfig {
+    /// Create a configuration optimized for production use.
+    /// Uses conservative execution costs and enables stress testing.
+    #[must_use]
+    pub fn production() -> Self {
+        Self {
+            execution: ExecutionModelConfig::mvp(),
+            gates: InstitutionalGatesConfig::default(),
+            stress_testing_enabled: true,
+            min_stress_scenarios_passed: 4,
+            ..Default::default()
+        }
+    }
+
+    /// Create a configuration for fast development/testing.
+    /// Uses zero costs and disables stress testing.
+    #[must_use]
+    pub fn development() -> Self {
+        Self {
+            execution: ExecutionModelConfig::zero_cost(),
+            stress_testing_enabled: false,
+            ..Default::default()
+        }
+    }
+
+    /// Create B3 institutional grade configuration.
+    #[must_use]
+    pub fn b3_institutional() -> Self {
+        Self {
+            execution: ExecutionModelConfig::b3_institutional(),
+            gates: InstitutionalGatesConfig::default(),
+            stress_testing_enabled: true,
+            min_stress_scenarios_passed: 4,
+            ..Default::default()
         }
     }
 }
@@ -105,6 +169,30 @@ mod tests {
         assert_eq!(config.population_size, 100);
         assert_eq!(config.max_generations, 50);
         assert!(config.crossover_rate > 0.0);
+        assert!(config.execution.has_costs());
+    }
+
+    #[test]
+    fn test_production_config() {
+        let config = EvolutionConfig::production();
+        assert!(config.execution.has_costs());
+        assert!(config.stress_testing_enabled);
+    }
+
+    #[test]
+    fn test_development_config() {
+        let config = EvolutionConfig::development();
+        assert!(!config.execution.has_costs());
+        assert!(!config.stress_testing_enabled);
+    }
+
+    #[test]
+    fn test_serialization() {
+        let config = EvolutionConfig::default();
+        let toml_str = toml::to_string(&config).expect("Failed to serialize");
+        assert!(toml_str.contains("population_size"));
+        
+        let parsed: EvolutionConfig = toml::from_str(&toml_str).expect("Failed to deserialize");
+        assert_eq!(parsed.population_size, config.population_size);
     }
 }
-

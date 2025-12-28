@@ -1,11 +1,11 @@
 //! Export command - Export top strategies.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
 /// Execute the export command.
-pub fn execute(experiment_id: &str, n: usize, output: Option<&str>) -> Result<()> {
+pub fn execute(experiment_id: &str, n: usize, output: Option<&str>, include_execution_config: bool) -> Result<()> {
     let input_dir = Path::new("output/scg").join(experiment_id).join("hall_of_fame");
 
     if !input_dir.exists() {
@@ -31,7 +31,11 @@ pub fn execute(experiment_id: &str, n: usize, output: Option<&str>) -> Result<()
 
     let to_export = entries.into_iter().take(n);
 
-    println!("Exporting top {} strategies to {:?}\n", n, output_dir);
+    println!("Exporting top {} strategies to {:?}", n, output_dir);
+    if include_execution_config {
+        println!("  (including execution config parameters)");
+    }
+    println!();
 
     let mut exported = 0;
     for entry in to_export {
@@ -45,7 +49,27 @@ pub fn execute(experiment_id: &str, n: usize, output: Option<&str>) -> Result<()
             );
             let dest_path = output_dir.join(&dest_name);
 
-            fs::copy(&toml_path, &dest_path)?;
+            if include_execution_config {
+                // Read the config and append execution parameters
+                let mut content = fs::read_to_string(&toml_path)?;
+                content.push_str("\n\n# === Execution Configuration (for production) ===\n");
+                content.push_str("[execution]\n");
+                content.push_str("delay_bars = 1\n");
+                content.push_str("\n[execution.slippage]\n");
+                content.push_str("type = \"Constant\"\n");
+                content.push_str("bps = 10.0\n");
+                content.push_str("\n[execution.fees]\n");
+                content.push_str("tier = \"B3Retail\"\n");
+                content.push_str("commission_rate = 0.0015\n");
+                content.push_str("emolument_rate = 0.00035\n");
+                content.push_str("\n[execution.fill_policy]\n");
+                content.push_str("allow_partial = false\n");
+                content.push_str("max_participation = 0.05\n");
+                fs::write(&dest_path, content)?;
+            } else {
+                fs::copy(&toml_path, &dest_path)?;
+            }
+            
             println!("  Exported: {}", dest_name);
             exported += 1;
         }
@@ -55,4 +79,3 @@ pub fn execute(experiment_id: &str, n: usize, output: Option<&str>) -> Result<()
 
     Ok(())
 }
-

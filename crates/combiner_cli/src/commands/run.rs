@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use backtester_execution::{SlippageModelConfig, FeeModelConfig, FeeTier};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -18,6 +19,8 @@ use combiner_engine::{
     FinalReportGenerator,
 };
 use combiner_runner::{BacktestExecutor, CliExecutor, ValidationCache};
+
+use crate::ExecutionOverrides;
 
 /// SCG configuration file format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +74,7 @@ pub fn execute(
     dry_run: bool,
     ultra: bool,
     top_k: usize,
+    exec_overrides: ExecutionOverrides,
 ) -> Result<()> {
     // Load configuration
     let config = load_config(config_path)?;
@@ -81,6 +85,12 @@ pub fn execute(
     if let Some(s) = seed {
         evo_config.seed = Some(s);
     }
+
+    // Apply execution overrides
+    apply_execution_overrides(&mut evo_config, &exec_overrides);
+
+    // Log execution configuration
+    log_execution_config(&evo_config, &exec_overrides);
 
     if dry_run {
         return execute_dry_run(&evo_config);
@@ -149,6 +159,74 @@ pub fn execute(
     Ok(())
 }
 
+/// Apply CLI execution overrides to the evolution configuration.
+fn apply_execution_overrides(config: &mut EvolutionConfig, overrides: &ExecutionOverrides) {
+    // Override delay bars
+    if let Some(delay) = overrides.delay_bars {
+        config.execution.delay_bars = delay;
+    }
+
+    // Override slippage
+    if let Some(bps) = overrides.slippage_bps {
+        config.execution.slippage = SlippageModelConfig::Constant { bps };
+    }
+
+    // Override fee tier
+    if let Some(ref tier_str) = overrides.fee_tier {
+        let tier = match tier_str.to_lowercase().as_str() {
+            "b3-retail" | "b3_retail" => FeeTier::B3Retail,
+            "b3-prime" | "b3_prime" => FeeTier::B3Prime,
+            "us-retail" | "us_retail" => FeeTier::USRetail,
+            "us-prime" | "us_prime" => FeeTier::USPrime,
+            _ => {
+                warn!("Unknown fee tier '{}', using B3Retail", tier_str);
+                FeeTier::B3Retail
+            }
+        };
+        config.execution.fees = FeeModelConfig::from_tier(tier);
+    }
+
+    // Override stress testing
+    if overrides.stress_enabled {
+        config.stress_testing_enabled = true;
+    }
+
+    if let Some(min_pass) = overrides.min_stress_pass {
+        config.min_stress_scenarios_passed = min_pass;
+    }
+
+    // Bypass costs (for debugging)
+    if overrides.bypass_costs {
+        config.execution.bypass_for_debug = true;
+        warn!("Costs bypassed - NOT FOR PRODUCTION");
+    }
+}
+
+/// Log the execution configuration being used.
+fn log_execution_config(config: &EvolutionConfig, overrides: &ExecutionOverrides) {
+    info!("Execution Model Configuration:");
+    info!("  Delay bars: {}", config.execution.delay_bars);
+    info!("  Slippage: {:.1} bps", config.execution.slippage.base_bps());
+    info!("  Fee tier: {:?}", config.execution.fees.tier);
+    info!("  Stress testing: {}", config.stress_testing_enabled);
+    info!("  Min stress pass: {}/5", config.min_stress_scenarios_passed);
+    
+    if config.execution.bypass_for_debug {
+        warn!("  ⚠️  COSTS BYPASSED (debug mode)");
+    }
+
+    // Log any CLI overrides applied
+    if overrides.delay_bars.is_some() {
+        info!("  (delay_bars overridden from CLI)");
+    }
+    if overrides.slippage_bps.is_some() {
+        info!("  (slippage_bps overridden from CLI)");
+    }
+    if overrides.fee_tier.is_some() {
+        info!("  (fee_tier overridden from CLI)");
+    }
+}
+
 /// Execute dry run (validation only).
 fn execute_dry_run(config: &EvolutionConfig) -> Result<()> {
     info!("Dry run: validating configuration and generating sample population");
@@ -196,6 +274,11 @@ fn execute_dry_run(config: &EvolutionConfig) -> Result<()> {
     println!("\n--- Dry Run Summary ---");
     println!("Valid genomes: {}", valid);
     println!("Invalid genomes: {}", invalid);
+    println!("\n--- Execution Config ---");
+    println!("Delay bars: {}", config.execution.delay_bars);
+    println!("Slippage: {:.1} bps", config.execution.slippage.base_bps());
+    println!("Fee tier: {:?}", config.execution.fees.tier);
+    println!("Stress testing: {}", config.stress_testing_enabled);
     println!("Configuration OK");
 
     Ok(())
@@ -406,4 +489,3 @@ fn print_ultra_summary(result: &UltraEvolutionResult) {
              perf.stage_a_time_pct, perf.stage_b_time_pct, perf.pareto_time_pct);
     println!("╚══════════════════════════════════════════════════════════════╝");
 }
-
