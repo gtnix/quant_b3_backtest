@@ -1,0 +1,204 @@
+{
+  "schema_version": "fx_report_v1.3",
+  "date": "2025-01-15",
+  "equity": "105000.00",
+  "return_pct": "5.00",
+  "drawdown_pct": "2.00",
+  "pnl": {
+    "realized": "3000.00",
+    "unrealized": "2000.00",
+    "total": "5000.00"
+  },
+  "costs": {
+    "total": "150.00",
+    "fees": "100.00",
+    "slippage": "50.00"
+  },
+  "attribution": [
+    {
+      "technique": "momentum",
+      "weight_pct": "60.00",
+      "pnl": "3000.00"
+    },
+    {
+      "technique": "value",
+      "weight_pct": "40.00",
+      "pnl": "2000.00"
+    }
+  ],
+  "risk": {
+    "vol_ann": "15.00",
+    "var_95": "-2500.00",
+    "sharpe": "1.25"
+  },
+  "exposure": {
+    "gross": "100000.00",
+    "net": "80000.00",
+    "by_market": [
+      {
+        "market": "BR",
+        "value": "60000.00"
+      },
+      {
+        "market": "US",
+        "value": "40000.00"
+      }
+    ]
+  },
+  "turnover": {
+    "buy": "10000.00",
+    "sell": "8000.00",
+    "pct": "18.00"
+  },
+  "sector_exposure": [
+    {
+      "sector": "Energy",
+      "gross": "40000.00",
+      "net": "40000.00",
+      "long": "40000.00",
+      "short": "0.00",
+      "weight_pct": "40.00"
+    },
+    {
+      "sector": "Financials",
+      "gross": "35000.00",
+      "net": "35000.00",
+      "long": "35000.00",
+      "short": "0.00",
+      "weight_pct": "35.00"
+    },
+    {
+      "sector": "Materials",
+      "gross": "25000.00",
+      "net": "25000.00",
+      "long": "25000.00",
+      "short": "0.00",
+      "weight_pct": "25.00"
+    }
+  ],
+  "concentration": {
+    "hhi": "0.33",
+    "effective_n": "3.03",
+    "top_1_weight_pct": "40.00",
+    "top_5_weight_pct": "100.00",
+    "top_10_weight_pct": "100.00",
+    "max_position_weight_pct": "40.00",
+    "n_positions": 3,
+    "gini": "0.11",
+    "concentration_level": "High"
+  },
+  "regime_summary": {
+    "config": {
+      "trend_lookback": 20,
+      "trend_threshold": "0.00",
+      "vol_lookback": 20,
+      "vol_quantile_count": 5,
+      "benchmark_symbol": null
+    },
+    "by_regime": [
+      {
+        "trend_state": "Uptrend",
+        "vol_quantile": "Q3",
+        "day_count": 15,
+        "mean_return_pct": "0.50",
+        "cumulative_return_pct": "7.50",
+        "win_rate_pct": "80.00",
+        "mean_turnover_pct": "5.00",
+        "mean_cost_pct": "0.10"
+      },
+      {
+        "trend_state": "Sideways",
+        "vol_quantile": "Q2",
+        "day_count": 10,
+        "mean_return_pct": "0.10",
+        "cumulative_return_pct": "1.00",
+        "win_rate_pct": "55.00",
+        "mean_turnover_pct": "3.00",
+        "mean_cost_pct": "0.05"
+      }
+    ],
+    "total_days": 30,
+    "warmup_days": 5,
+    "tags_file": null
+  },
+  "compliance": {
+    "config_snapshot": {
+      "max_gross_exposure_pct": {
+        "soft": "90.00",
+        "hard": "100.00",
+        "action": "BlockNewTrades"
+      },
+      "max_single_name_weight_pct": {
+        "soft": "15.00",
+        "hard": "20.00",
+        "action": "BlockNewTrades"
+      },
+      "max_sector_weight_pct": {
+        "soft": "30.00",
+        "hard": "40.00",
+        "action": "LogOnly"
+      }
+    },
+    "summary": {
+      "total_breaches": 2,
+      "breaches_by_severity": {
+        "WARN": 1,
+        "CRIT": 1
+      },
+      "worst_severity": "CRIT",
+      "days_out_of_limit": 1,
+      "constraints_violated": [
+        "MaxSectorWeightPct:Energy",
+        "MaxSingleNameWeightPct"
+      ],
+      "ex_ante_breaches": 0,
+      "ex_post_breaches": 2
+    },
+    "breaches": [
+      {
+        "date": "2025-01-15",
+        "constraint_id": "MaxSingleNameWeightPct",
+        "scope": "Portfolio",
+        "measured_value": "22.50",
+        "limit_value": "20.00",
+        "magnitude": "2.50",
+        "magnitude_pct": "12.50",
+        "severity": "CRIT",
+        "action_taken": "BlockNewTrades",
+        "is_ex_ante": false,
+        "evidence": {
+          "top_contributors": [
+            ["PETR4", "22.50"]
+          ],
+          "context": "Top position 22.50% exceeds single-name limit"
+        }
+      },
+      {
+        "date": "2025-01-15",
+        "constraint_id": "MaxSectorWeightPct:Energy",
+        "scope": "Sector:Energy",
+        "measured_value": "40.00",
+        "limit_value": "30.00",
+        "magnitude": "10.00",
+        "magnitude_pct": "33.33",
+        "severity": "WARN",
+        "action_taken": "LogOnly",
+        "is_ex_ante": false,
+        "evidence": {
+          "top_contributors": [
+            ["Energy", "40000.00"]
+          ],
+          "context": "Sector Energy at 40.00% exceeds soft limit"
+        }
+      }
+    ],
+    "actions_taken": [
+      {
+        "date": "2025-01-15",
+        "action": "BlockNewTrades",
+        "reason": "Top position 22.50% exceeds single-name limit"
+      }
+    ]
+  }
+}
+

@@ -6,6 +6,9 @@ use backtester_intelligence::performance::{
     PerformanceSnapshot, PnLBreakdown, CostBreakdown, ExposureBreakdown,
     DrawdownMetrics, TurnoverMetrics, AttributionBreakdown, TechniqueAttribution,
     VolatilityMetrics, VaRMetrics, VaRMethod, PerformanceReporter,
+    SectorExposure, ConcentrationMetrics, ConcentrationCalculator,
+    RegimeConfig, RegimeSummary, RegimePerformance, TrendState, VolQuantile,
+    PERFORMANCE_REPORT_SCHEMA_VERSION,
 };
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -17,6 +20,10 @@ fn make_snapshot() -> PerformanceSnapshot {
         date: NaiveDate::from_ymd_opt(2025, 1, 15).unwrap(),
         equity: dec!(105000),
         cash: dec!(50000),
+        base_currency: None,
+        equity_base: None,
+        cash_base: None,
+        fx_rates_used: None,
         exposure: ExposureBreakdown {
             gross: dec!(55000),
             net: dec!(55000),
@@ -26,6 +33,9 @@ fn make_snapshot() -> PerformanceSnapshot {
                 ("BR".to_string(), dec!(30000)),
                 ("US".to_string(), dec!(25000)),
             ].into_iter().collect(),
+            by_currency: Default::default(),
+            by_currency_base: Default::default(),
+            by_sector: Default::default(),
         },
         pnl: PnLBreakdown {
             realized: dec!(3000),
@@ -285,6 +295,214 @@ fn generate_golden_output() {
     println!("=== GOLDEN JSON ===");
     println!("{}", json);
     println!("=== END ===");
+}
+
+// ==============================================================
+// Research-Grade Report Tests (v1.2/v1.3)
+// ==============================================================
+
+fn make_snapshot_with_sectors() -> PerformanceSnapshot {
+    let mut snapshot = make_snapshot();
+    snapshot.exposure.by_sector = vec![
+        SectorExposure {
+            sector: "Energy".to_string(),
+            gross: dec!(22000),
+            net: dec!(22000),
+            long: dec!(22000),
+            short: Decimal::ZERO,
+            weight_pct: dec!(40),
+        },
+        SectorExposure {
+            sector: "Financials".to_string(),
+            gross: dec!(19250),
+            net: dec!(19250),
+            long: dec!(19250),
+            short: Decimal::ZERO,
+            weight_pct: dec!(35),
+        },
+        SectorExposure {
+            sector: "Materials".to_string(),
+            gross: dec!(13750),
+            net: dec!(13750),
+            long: dec!(13750),
+            short: Decimal::ZERO,
+            weight_pct: dec!(25),
+        },
+    ];
+    snapshot
+}
+
+fn make_concentration() -> ConcentrationMetrics {
+    ConcentrationCalculator::calculate(&[
+        ("PETR4".to_string(), dec!(22000)),
+        ("ITUB4".to_string(), dec!(19250)),
+        ("VALE3".to_string(), dec!(13750)),
+    ])
+}
+
+fn make_regime_summary() -> RegimeSummary {
+    RegimeSummary {
+        config: RegimeConfig::default(),
+        by_regime: vec![
+            RegimePerformance {
+                trend_state: TrendState::Uptrend,
+                vol_quantile: VolQuantile::Q3,
+                day_count: 15,
+                mean_return_pct: dec!(0.50),
+                cumulative_return_pct: dec!(7.50),
+                win_rate_pct: dec!(80),
+                mean_turnover_pct: dec!(5),
+                mean_cost_pct: dec!(0.10),
+            },
+            RegimePerformance {
+                trend_state: TrendState::Sideways,
+                vol_quantile: VolQuantile::Q2,
+                day_count: 10,
+                mean_return_pct: dec!(0.10),
+                cumulative_return_pct: dec!(1.00),
+                win_rate_pct: dec!(55),
+                mean_turnover_pct: dec!(3),
+                mean_cost_pct: dec!(0.05),
+            },
+        ],
+        total_days: 30,
+        warmup_days: 5,
+    }
+}
+
+#[test]
+fn golden_schema_version() {
+    assert_eq!(PERFORMANCE_REPORT_SCHEMA_VERSION, "fx_report_v1.3");
+}
+
+#[test]
+fn golden_research_grade_report() {
+    let reporter = PerformanceReporter::default();
+    let snapshot = make_snapshot_with_sectors();
+    let attr = make_attribution();
+    let vol = make_vol();
+    let var = make_var();
+    let concentration = make_concentration();
+    let regime = make_regime_summary();
+    
+    let report = reporter.to_json_full(
+        &snapshot,
+        &attr,
+        &vol,
+        &var,
+        dec!(1.25),
+        dec!(100000),
+        None,
+        Some(&concentration),
+        Some(&regime),
+    );
+    
+    // Verify schema version
+    assert_eq!(report.schema_version, "fx_report_v1.3");
+    
+    // Verify sector exposure
+    assert!(report.sector_exposure.is_some());
+    let sectors = report.sector_exposure.as_ref().unwrap();
+    assert_eq!(sectors.len(), 3);
+    assert_eq!(sectors[0].sector, "Energy");
+    
+    // Verify concentration
+    assert!(report.concentration.is_some());
+    let conc = report.concentration.as_ref().unwrap();
+    assert_eq!(conc.n_positions, 3);
+    assert!(conc.gini.is_some());
+    
+    // Verify regime summary
+    assert!(report.regime_summary.is_some());
+    let regime = report.regime_summary.as_ref().unwrap();
+    assert_eq!(regime.total_days, 30);
+    assert_eq!(regime.warmup_days, 5);
+    assert_eq!(regime.by_regime.len(), 2);
+}
+
+#[test]
+fn golden_concentration_metrics() {
+    let conc = make_concentration();
+    
+    // HHI for 3 positions with weights ~40%, ~35%, ~25%
+    // HHI = 0.4^2 + 0.35^2 + 0.25^2 = 0.16 + 0.1225 + 0.0625 = 0.345
+    assert!(conc.hhi > dec!(0.3) && conc.hhi < dec!(0.4));
+    
+    // Effective N = 1/HHI ≈ 2.9
+    assert!(conc.effective_n > dec!(2.5) && conc.effective_n < dec!(3.5));
+    
+    // Top 1 weight is largest position (~40%)
+    assert!(conc.top_1_weight_pct > dec!(35) && conc.top_1_weight_pct < dec!(45));
+    
+    // n_positions
+    assert_eq!(conc.n_positions, 3);
+    
+    // Gini should be calculated
+    assert!(conc.gini.is_some());
+}
+
+#[test]
+fn golden_regime_fields() {
+    let regime = make_regime_summary();
+    
+    // Check best/worst regime
+    let best = regime.best_regime().unwrap();
+    assert_eq!(best.trend_state, TrendState::Uptrend);
+    
+    let worst = regime.worst_regime().unwrap();
+    assert_eq!(worst.trend_state, TrendState::Sideways);
+    
+    // Get performance for specific regime
+    let uptrend_q3 = regime.get_performance(TrendState::Uptrend, VolQuantile::Q3);
+    assert!(uptrend_q3.is_some());
+    assert_eq!(uptrend_q3.unwrap().day_count, 15);
+}
+
+#[test]
+fn golden_sector_exposure_sums() {
+    let snapshot = make_snapshot_with_sectors();
+    
+    // Sector weights should sum to 100%
+    let total_weight: Decimal = snapshot.exposure.by_sector.iter()
+        .map(|s| s.weight_pct)
+        .sum();
+    assert_eq!(total_weight, dec!(100));
+    
+    // Gross should match sum of sector gross
+    let total_gross: Decimal = snapshot.exposure.by_sector.iter()
+        .map(|s| s.gross)
+        .sum();
+    assert_eq!(total_gross, snapshot.exposure.gross);
+}
+
+#[test]
+fn golden_report_parses_fixture() {
+    // Read the v1.2 fixture and verify it parses (backward compatibility)
+    let fixture_v12 = include_str!("golden/performance_report_v1.2.json");
+    let report_v12: serde_json::Value = serde_json::from_str(fixture_v12)
+        .expect("v1.2 fixture should parse as JSON");
+    
+    // Verify v1.2 fields exist
+    assert!(report_v12.get("sector_exposure").is_some());
+    assert!(report_v12.get("concentration").is_some());
+    assert!(report_v12.get("regime_summary").is_some());
+    assert_eq!(report_v12["schema_version"], "fx_report_v1.2");
+    
+    // Read the v1.3 fixture and verify it parses
+    let fixture_v13 = include_str!("golden/performance_report_v1.3.json");
+    let report_v13: serde_json::Value = serde_json::from_str(fixture_v13)
+        .expect("v1.3 fixture should parse as JSON");
+    
+    // Verify v1.3 compliance field exists
+    assert!(report_v13.get("compliance").is_some());
+    assert_eq!(report_v13["schema_version"], "fx_report_v1.3");
+    
+    // Verify compliance structure
+    let compliance = report_v13.get("compliance").unwrap();
+    assert!(compliance.get("config_snapshot").is_some());
+    assert!(compliance.get("summary").is_some());
+    assert!(compliance.get("breaches").is_some());
+    assert!(compliance.get("actions_taken").is_some());
 }
 
 

@@ -1,0 +1,125 @@
+{
+  "schema_version": "fx_report_v1.2",
+  "date": "2025-01-15",
+  "equity": "105000.00",
+  "return_pct": "5.00",
+  "drawdown_pct": "2.00",
+  "pnl": {
+    "realized": "3000.00",
+    "unrealized": "2000.00",
+    "total": "5000.00"
+  },
+  "costs": {
+    "total": "150.00",
+    "fees": "100.00",
+    "slippage": "50.00"
+  },
+  "attribution": [
+    {
+      "technique": "momentum",
+      "weight_pct": "60.00",
+      "pnl": "3000.00"
+    },
+    {
+      "technique": "value",
+      "weight_pct": "40.00",
+      "pnl": "2000.00"
+    }
+  ],
+  "risk": {
+    "vol_ann": "15.00",
+    "var_95": "-2500.00",
+    "sharpe": "1.25"
+  },
+  "exposure": {
+    "gross": "100000.00",
+    "net": "80000.00",
+    "by_market": [
+      {
+        "market": "BR",
+        "value": "60000.00"
+      },
+      {
+        "market": "US",
+        "value": "40000.00"
+      }
+    ]
+  },
+  "turnover": {
+    "buy": "10000.00",
+    "sell": "8000.00",
+    "pct": "18.00"
+  },
+  "sector_exposure": [
+    {
+      "sector": "Energy",
+      "gross": "40000.00",
+      "net": "40000.00",
+      "long": "40000.00",
+      "short": "0.00",
+      "weight_pct": "40.00"
+    },
+    {
+      "sector": "Financials",
+      "gross": "35000.00",
+      "net": "35000.00",
+      "long": "35000.00",
+      "short": "0.00",
+      "weight_pct": "35.00"
+    },
+    {
+      "sector": "Materials",
+      "gross": "25000.00",
+      "net": "25000.00",
+      "long": "25000.00",
+      "short": "0.00",
+      "weight_pct": "25.00"
+    }
+  ],
+  "concentration": {
+    "hhi": "0.33",
+    "effective_n": "3.03",
+    "top_1_weight_pct": "40.00",
+    "top_5_weight_pct": "100.00",
+    "top_10_weight_pct": "100.00",
+    "max_position_weight_pct": "40.00",
+    "n_positions": 3,
+    "gini": "0.11",
+    "concentration_level": "High"
+  },
+  "regime_summary": {
+    "config": {
+      "trend_lookback": 20,
+      "trend_threshold": "0.00",
+      "vol_lookback": 20,
+      "vol_quantile_count": 5,
+      "benchmark_symbol": null
+    },
+    "by_regime": [
+      {
+        "trend_state": "Uptrend",
+        "vol_quantile": "Q3",
+        "day_count": 15,
+        "mean_return_pct": "0.50",
+        "cumulative_return_pct": "7.50",
+        "win_rate_pct": "80.00",
+        "mean_turnover_pct": "5.00",
+        "mean_cost_pct": "0.10"
+      },
+      {
+        "trend_state": "Sideways",
+        "vol_quantile": "Q2",
+        "day_count": 10,
+        "mean_return_pct": "0.10",
+        "cumulative_return_pct": "1.00",
+        "win_rate_pct": "55.00",
+        "mean_turnover_pct": "3.00",
+        "mean_cost_pct": "0.05"
+      }
+    ],
+    "total_days": 30,
+    "warmup_days": 5,
+    "tags_file": null
+  }
+}
+

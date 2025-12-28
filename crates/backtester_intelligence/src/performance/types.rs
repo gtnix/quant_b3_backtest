@@ -285,11 +285,16 @@ pub struct ExposureBreakdown {
     pub short: Decimal,
     pub by_market: BTreeMap<String, Decimal>,
     
-    // NEW: Currency-based exposure breakdown
+    // Currency-based exposure breakdown
     /// Exposure by currency in local currency values.
     pub by_currency: BTreeMap<String, Decimal>,
     /// Exposure by currency converted to base currency.
     pub by_currency_base: BTreeMap<String, Decimal>,
+    
+    // Sector-based exposure breakdown (NEW)
+    /// Complete exposure breakdown by sector with long/short/gross/net.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_sector: Vec<SectorExposure>,
 }
 
 impl ExposureBreakdown {
@@ -306,6 +311,7 @@ impl ExposureBreakdown {
             by_market: BTreeMap::new(),
             by_currency: BTreeMap::new(),
             by_currency_base: BTreeMap::new(),
+            by_sector: Vec::new(),
         }
     }
     
@@ -317,6 +323,20 @@ impl ExposureBreakdown {
     /// Get exposure for a currency in base currency.
     pub fn currency_exposure_base(&self, currency: &str) -> Decimal {
         self.by_currency_base.get(currency).copied().unwrap_or(Decimal::ZERO)
+    }
+    
+    /// Get exposure for a specific sector.
+    pub fn sector_exposure(&self, sector: &str) -> Option<&SectorExposure> {
+        self.by_sector.iter().find(|s| s.sector == sector)
+    }
+    
+    /// Get total sector count (excluding Unknown if desired).
+    pub fn sector_count(&self, include_unknown: bool) -> usize {
+        if include_unknown {
+            self.by_sector.len()
+        } else {
+            self.by_sector.iter().filter(|s| s.sector != "Unknown").count()
+        }
     }
 }
 
@@ -341,6 +361,69 @@ pub struct TurnoverMetrics {
     pub buy_notional: Decimal,
     pub sell_notional: Decimal,
     pub turnover_pct: Decimal,
+}
+
+// =============================================================================
+// SECTOR EXPOSURE
+// =============================================================================
+
+/// Sector exposure breakdown for a single sector.
+///
+/// Provides complete long/short/gross/net exposure for each sector,
+/// enabling analysis of sector concentration and risk.
+///
+/// # Weight Calculation
+///
+/// `weight_pct` is calculated as: `gross / portfolio_gross * 100`
+/// This represents the sector's contribution to total portfolio gross exposure.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SectorExposure {
+    /// Sector name (e.g., "Energy", "Financials", "Unknown").
+    pub sector: String,
+    /// Gross exposure in this sector (|long| + |short|).
+    pub gross: Decimal,
+    /// Net exposure in this sector (long - |short|).
+    pub net: Decimal,
+    /// Long exposure in this sector.
+    pub long: Decimal,
+    /// Short exposure in this sector (absolute value).
+    pub short: Decimal,
+    /// Weight as percentage of total portfolio gross exposure.
+    pub weight_pct: Decimal,
+}
+
+impl SectorExposure {
+    /// Create a new sector exposure entry.
+    pub fn new(sector: impl Into<String>) -> Self {
+        Self {
+            sector: sector.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Add a long position value.
+    pub fn add_long(&mut self, value: Decimal) {
+        self.long += value;
+        self.gross += value;
+        self.net += value;
+    }
+
+    /// Add a short position value (as positive number).
+    pub fn add_short(&mut self, value: Decimal) {
+        let abs_value = value.abs();
+        self.short += abs_value;
+        self.gross += abs_value;
+        self.net -= abs_value;
+    }
+
+    /// Calculate weight percentage given total portfolio gross.
+    pub fn calculate_weight(&mut self, portfolio_gross: Decimal) {
+        self.weight_pct = if portfolio_gross.is_zero() {
+            Decimal::ZERO
+        } else {
+            self.gross / portfolio_gross * Decimal::from(100)
+        };
+    }
 }
 
 impl TurnoverMetrics {

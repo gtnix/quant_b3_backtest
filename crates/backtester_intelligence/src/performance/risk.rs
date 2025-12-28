@@ -1,10 +1,13 @@
 //! Risk metrics calculation: Volatility, VaR, Exposure.
+//!
+//! Includes sector-based exposure analysis for research-grade reporting.
 
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
 use crate::filters::Market;
-use super::types::{VolatilityMetrics, VaRMetrics, VaRMethod, DrawdownMetrics, ExposureBreakdown, PositionLot};
+use super::sector::SectorProvider;
+use super::types::{VolatilityMetrics, VaRMetrics, VaRMethod, DrawdownMetrics, ExposureBreakdown, PositionLot, SectorExposure};
 
 /// Risk calculator for volatility, VaR, and exposure metrics.
 #[derive(Debug, Clone)]
@@ -146,7 +149,82 @@ impl RiskCalculator {
             by_market,
             by_currency: BTreeMap::new(),
             by_currency_base: BTreeMap::new(),
+            by_sector: Vec::new(),
         }
+    }
+
+    /// Calculate exposure breakdown by sector.
+    ///
+    /// Uses the provided `SectorProvider` to classify each position.
+    /// Positions with unknown sectors are grouped under "Unknown".
+    ///
+    /// # Arguments
+    ///
+    /// * `positions` - Map of symbol to position
+    /// * `prices` - Current market prices
+    /// * `sector_provider` - Provider for sector lookups
+    ///
+    /// # Returns
+    ///
+    /// Vector of `SectorExposure` sorted by gross exposure (descending).
+    pub fn calculate_exposure_by_sector(
+        &self,
+        positions: &BTreeMap<String, PositionLot>,
+        prices: &BTreeMap<String, Decimal>,
+        sector_provider: &dyn SectorProvider,
+    ) -> Vec<SectorExposure> {
+        if positions.is_empty() {
+            return Vec::new();
+        }
+
+        // Accumulate by sector
+        let mut sector_map: BTreeMap<String, SectorExposure> = BTreeMap::new();
+        let mut total_gross = Decimal::ZERO;
+
+        for (symbol, pos) in positions {
+            let price = prices.get(symbol).copied().unwrap_or(pos.wap_cost_basis);
+            let value = price * Decimal::from(pos.shares);
+            
+            let sector = sector_provider.get_sector(symbol);
+            let sector_name = sector.as_str().to_string();
+
+            let entry = sector_map
+                .entry(sector_name.clone())
+                .or_insert_with(|| SectorExposure::new(sector_name));
+
+            if pos.shares >= 0 {
+                entry.add_long(value);
+            } else {
+                entry.add_short(value.abs());
+            }
+            
+            total_gross += value.abs();
+        }
+
+        // Calculate weights and convert to sorted vec
+        let mut result: Vec<SectorExposure> = sector_map.into_values().collect();
+        for exposure in &mut result {
+            exposure.calculate_weight(total_gross);
+        }
+
+        // Sort by gross exposure descending for consistent ordering
+        result.sort_by(|a, b| b.gross.cmp(&a.gross));
+
+        result
+    }
+
+    /// Calculate full exposure breakdown including sectors.
+    ///
+    /// Combines market, currency, and sector exposure calculations.
+    pub fn calculate_exposure_with_sectors(
+        &self,
+        positions: &BTreeMap<String, PositionLot>,
+        prices: &BTreeMap<String, Decimal>,
+        sector_provider: &dyn SectorProvider,
+    ) -> ExposureBreakdown {
+        let mut exposure = self.calculate_exposure(positions, prices);
+        exposure.by_sector = self.calculate_exposure_by_sector(positions, prices, sector_provider);
+        exposure
     }
 
     /// Calculate Sharpe ratio from returns.
@@ -211,6 +289,7 @@ fn decimal_sqrt(x: Decimal) -> Decimal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::performance::sector::InMemorySectorProvider;
     use rust_decimal_macros::dec;
 
     #[test]
@@ -312,6 +391,151 @@ mod tests {
 
         let sqrt9 = decimal_sqrt(dec!(9));
         assert!((sqrt9 - dec!(3)).abs() < dec!(0.001));
+    }
+
+    // ==========================================================================
+    // SECTOR EXPOSURE TESTS
+    // ==========================================================================
+
+    #[test]
+    fn test_exposure_by_sector_basic() {
+        let calc = RiskCalculator::default();
+        
+        // Set up positions
+        let mut positions = BTreeMap::new();
+        positions.insert("PETR4".to_string(), PositionLot::new(
+            "PETR4".into(), 100, dec!(30), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+        positions.insert("VALE3".to_string(), PositionLot::new(
+            "VALE3".into(), 50, dec!(60), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+        positions.insert("ITUB4".to_string(), PositionLot::new(
+            "ITUB4".into(), 200, dec!(25), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+
+        let prices: BTreeMap<String, Decimal> = [
+            ("PETR4".to_string(), dec!(35)),   // 3500
+            ("VALE3".to_string(), dec!(70)),   // 3500
+            ("ITUB4".to_string(), dec!(30)),   // 6000
+        ].into();  // Total: 13000
+
+        // Set up sector provider
+        let mut sector_provider = InMemorySectorProvider::new();
+        sector_provider.add("PETR4", "Energy");
+        sector_provider.add("VALE3", "Materials");
+        sector_provider.add("ITUB4", "Financials");
+
+        let sectors = calc.calculate_exposure_by_sector(&positions, &prices, &sector_provider);
+
+        assert_eq!(sectors.len(), 3);
+        
+        // Sorted by gross descending: Financials (6000), Energy (3500), Materials (3500)
+        assert_eq!(sectors[0].sector, "Financials");
+        assert_eq!(sectors[0].gross, dec!(6000));
+        
+        // Check weights sum to 100
+        let total_weight: Decimal = sectors.iter().map(|s| s.weight_pct).sum();
+        assert!((total_weight - dec!(100)).abs() < dec!(0.01));
+    }
+
+    #[test]
+    fn test_exposure_by_sector_unknown_fallback() {
+        let calc = RiskCalculator::default();
+        
+        let mut positions = BTreeMap::new();
+        positions.insert("UNKNOWN1".to_string(), PositionLot::new(
+            "UNKNOWN1".into(), 100, dec!(10), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+
+        let prices: BTreeMap<String, Decimal> = [
+            ("UNKNOWN1".to_string(), dec!(10)),
+        ].into();
+
+        // Empty sector provider
+        let sector_provider = InMemorySectorProvider::new();
+
+        let sectors = calc.calculate_exposure_by_sector(&positions, &prices, &sector_provider);
+
+        assert_eq!(sectors.len(), 1);
+        assert_eq!(sectors[0].sector, "Unknown");
+        assert_eq!(sectors[0].gross, dec!(1000));
+    }
+
+    #[test]
+    fn test_exposure_by_sector_empty_positions() {
+        let calc = RiskCalculator::default();
+        let positions: BTreeMap<String, PositionLot> = BTreeMap::new();
+        let prices: BTreeMap<String, Decimal> = BTreeMap::new();
+        let sector_provider = InMemorySectorProvider::new();
+
+        let sectors = calc.calculate_exposure_by_sector(&positions, &prices, &sector_provider);
+
+        assert!(sectors.is_empty());
+    }
+
+    #[test]
+    fn test_exposure_with_sectors_integration() {
+        let calc = RiskCalculator::default();
+        
+        let mut positions = BTreeMap::new();
+        positions.insert("PETR4".to_string(), PositionLot::new(
+            "PETR4".into(), 100, dec!(30), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+
+        let prices: BTreeMap<String, Decimal> = [
+            ("PETR4".to_string(), dec!(35)),
+        ].into();
+
+        let mut sector_provider = InMemorySectorProvider::new();
+        sector_provider.add("PETR4", "Energy");
+
+        let exposure = calc.calculate_exposure_with_sectors(&positions, &prices, &sector_provider);
+
+        // Check basic exposure
+        assert_eq!(exposure.long, dec!(3500));
+        assert_eq!(exposure.gross, dec!(3500));
+
+        // Check sector exposure
+        assert_eq!(exposure.by_sector.len(), 1);
+        assert_eq!(exposure.by_sector[0].sector, "Energy");
+        assert_eq!(exposure.by_sector[0].weight_pct, dec!(100));
+    }
+
+    #[test]
+    fn test_exposure_by_sector_same_sector_aggregation() {
+        let calc = RiskCalculator::default();
+        
+        // Multiple positions in same sector
+        let mut positions = BTreeMap::new();
+        positions.insert("PETR4".to_string(), PositionLot::new(
+            "PETR4".into(), 100, dec!(30), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+        positions.insert("PETR3".to_string(), PositionLot::new(
+            "PETR3".into(), 50, dec!(28), Market::BR,
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        ));
+
+        let prices: BTreeMap<String, Decimal> = [
+            ("PETR4".to_string(), dec!(35)),   // 3500
+            ("PETR3".to_string(), dec!(32)),   // 1600
+        ].into();
+
+        let mut sector_provider = InMemorySectorProvider::new();
+        sector_provider.add("PETR4", "Energy");
+        sector_provider.add("PETR3", "Energy");
+
+        let sectors = calc.calculate_exposure_by_sector(&positions, &prices, &sector_provider);
+
+        assert_eq!(sectors.len(), 1);
+        assert_eq!(sectors[0].sector, "Energy");
+        assert_eq!(sectors[0].gross, dec!(5100));
+        assert_eq!(sectors[0].weight_pct, dec!(100));
     }
 }
 

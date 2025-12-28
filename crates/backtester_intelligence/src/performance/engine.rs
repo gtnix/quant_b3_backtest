@@ -1,6 +1,7 @@
 //! Performance Engine - Orchestrator for snapshot generation.
 //!
 //! Supports both local currency and base currency consolidated views.
+//! Includes sector exposure, concentration metrics, and regime detection.
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -10,9 +11,12 @@ use std::sync::Arc;
 use super::{
     TradeLedger, AttributionEngine, RiskCalculator,
     PerformanceSnapshot, TurnoverMetrics, AttributionBreakdown, VaRMetrics,
-    VolatilityMetrics, CIOView, FxRateInfo,
+    VolatilityMetrics, CIOView, FxRateInfo, SectorExposure,
     FxAttributionEngine, FxAttributionBreakdown,
+    ConcentrationMetrics, ConcentrationCalculator,
+    RegimeEngine, RegimeConfig, RegimeTag, RegimeSummary,
 };
+use super::sector::{SectorProvider, NullSectorProvider};
 use crate::currency::{Currency, FxPair};
 use crate::fx::{FxRateProvider, FxError};
 use crate::filters::Market;
@@ -27,6 +31,12 @@ pub struct PerformanceConfig {
     pub base_currency: Option<Currency>,
     /// Max gap for LOCF FX rate lookup.
     pub fx_max_gap_days: u32,
+    /// Configuration for regime detection.
+    pub regime_config: RegimeConfig,
+    /// Whether to calculate concentration metrics.
+    pub calculate_concentration: bool,
+    /// Whether to calculate regime tags.
+    pub calculate_regime: bool,
 }
 
 impl Default for PerformanceConfig {
@@ -37,6 +47,9 @@ impl Default for PerformanceConfig {
             var_confidence_levels: (Decimal::from(95), Decimal::from(99)),
             base_currency: None,
             fx_max_gap_days: 5,
+            regime_config: RegimeConfig::default(),
+            calculate_concentration: true,
+            calculate_regime: true,
         }
     }
 }
@@ -67,6 +80,18 @@ pub struct PerformanceEngine {
     fx_attribution: Option<FxAttributionEngine>,
     /// Track values by currency for attribution
     values_by_currency: BTreeMap<NaiveDate, BTreeMap<Currency, Decimal>>,
+    /// Sector provider for exposure analysis
+    sector_provider: Arc<dyn SectorProvider>,
+    /// Regime detection engine
+    regime_engine: RegimeEngine,
+    /// Daily turnover for regime analysis
+    daily_turnover: Vec<Decimal>,
+    /// Daily costs for regime analysis
+    daily_costs: Vec<Decimal>,
+    /// Constraints engine for compliance checking
+    constraints_engine: Option<super::constraints::ConstraintsEngine>,
+    /// Breach log for compliance reporting
+    breach_log: super::compliance::BreachLog,
 }
 
 impl std::fmt::Debug for PerformanceEngine {
@@ -76,6 +101,7 @@ impl std::fmt::Debug for PerformanceEngine {
             .field("equity_curve_len", &self.equity_curve.len())
             .field("initial_capital", &self.initial_capital)
             .field("has_fx_provider", &self.fx_provider.is_some())
+            .field("has_sector_provider", &!self.sector_provider.is_empty())
             .finish()
     }
 }
@@ -84,6 +110,7 @@ impl PerformanceEngine {
     pub fn new(config: PerformanceConfig, initial_capital: Decimal) -> Self {
         let risk_calc = RiskCalculator::new(config.vol_window, config.risk_free_rate);
         let fx_attribution = config.base_currency.map(FxAttributionEngine::new);
+        let regime_engine = RegimeEngine::with_config(config.regime_config.clone());
         
         Self {
             ledger: TradeLedger::new(),
@@ -96,6 +123,12 @@ impl PerformanceEngine {
             fx_provider: None,
             fx_attribution,
             values_by_currency: BTreeMap::new(),
+            sector_provider: Arc::new(NullSectorProvider),
+            regime_engine,
+            daily_turnover: Vec::new(),
+            daily_costs: Vec::new(),
+            constraints_engine: None,
+            breach_log: super::compliance::BreachLog::new(),
         }
     }
     
@@ -109,6 +142,7 @@ impl PerformanceEngine {
         let fx_attribution = config.base_currency.map(|c| {
             FxAttributionEngine::with_max_gap(c, config.fx_max_gap_days)
         });
+        let regime_engine = RegimeEngine::with_config(config.regime_config.clone());
         
         Self {
             ledger: TradeLedger::new(),
@@ -121,7 +155,45 @@ impl PerformanceEngine {
             fx_provider: Some(fx_provider),
             fx_attribution,
             values_by_currency: BTreeMap::new(),
+            sector_provider: Arc::new(NullSectorProvider),
+            regime_engine,
+            daily_turnover: Vec::new(),
+            daily_costs: Vec::new(),
+            constraints_engine: None,
+            breach_log: super::compliance::BreachLog::new(),
         }
+    }
+    
+    /// Set constraints engine for compliance checking.
+    pub fn set_constraints(&mut self, config: super::constraints::ConstraintsConfig) {
+        self.constraints_engine = Some(super::constraints::ConstraintsEngine::new(config));
+    }
+    
+    /// Create engine with constraints configuration.
+    pub fn with_constraints(mut self, config: super::constraints::ConstraintsConfig) -> Self {
+        self.constraints_engine = Some(super::constraints::ConstraintsEngine::new(config));
+        self
+    }
+    
+    /// Get the breach log for reporting.
+    pub fn breach_log(&self) -> &super::compliance::BreachLog {
+        &self.breach_log
+    }
+    
+    /// Get constraints config (if any).
+    pub fn constraints_config(&self) -> Option<&super::constraints::ConstraintsConfig> {
+        self.constraints_engine.as_ref().map(|e| e.config())
+    }
+    
+    /// Set sector provider for exposure analysis.
+    pub fn set_sector_provider(&mut self, provider: Arc<dyn SectorProvider>) {
+        self.sector_provider = provider;
+    }
+    
+    /// Create engine with sector provider.
+    pub fn with_sector_provider(mut self, provider: Arc<dyn SectorProvider>) -> Self {
+        self.sector_provider = provider;
+        self
     }
     
     /// Set FX provider after construction.
@@ -211,8 +283,40 @@ impl PerformanceEngine {
         // Update exposure by_currency
         self.populate_currency_exposure(&mut exposure, prices);
         
+        // Calculate sector exposure
+        exposure.by_sector = self.risk_calc.calculate_exposure_by_sector(
+            self.ledger.positions(),
+            prices,
+            self.sector_provider.as_ref(),
+        );
+        
         // Store values by currency for attribution
         self.store_values_by_currency(date, cash, prices);
+        
+        // Store daily metrics for regime analysis
+        let cost_pct = if equity.is_zero() {
+            Decimal::ZERO
+        } else {
+            costs.total / equity * Decimal::from(100)
+        };
+        self.store_daily_metrics(turnover.turnover_pct, cost_pct);
+
+        // Calculate concentration metrics for constraints check
+        let concentration = self.calculate_concentration(prices);
+        
+        // Ex-post constraints validation
+        if let Some(constraints) = &self.constraints_engine {
+            let breaches = constraints.evaluate_ex_post(
+                date,
+                equity,
+                &exposure,
+                &concentration,
+                &exposure.by_sector,
+                turnover.turnover_pct,
+                cost_pct,
+            );
+            self.breach_log.extend(breaches);
+        }
 
         PerformanceSnapshot {
             date,
@@ -516,6 +620,128 @@ impl PerformanceEngine {
     /// Get daily returns.
     pub fn daily_returns(&self) -> &[Decimal] {
         &self.daily_returns
+    }
+
+    // =========================================================================
+    // SECTOR EXPOSURE
+    // =========================================================================
+
+    /// Calculate sector exposure for current positions.
+    pub fn calculate_sector_exposure(
+        &self,
+        prices: &BTreeMap<String, Decimal>,
+    ) -> Vec<SectorExposure> {
+        self.risk_calc.calculate_exposure_by_sector(
+            self.ledger.positions(),
+            prices,
+            self.sector_provider.as_ref(),
+        )
+    }
+
+    /// Get sector provider.
+    pub fn sector_provider(&self) -> &dyn SectorProvider {
+        self.sector_provider.as_ref()
+    }
+
+    // =========================================================================
+    // CONCENTRATION METRICS
+    // =========================================================================
+
+    /// Calculate concentration metrics for current positions.
+    pub fn calculate_concentration(
+        &self,
+        prices: &BTreeMap<String, Decimal>,
+    ) -> ConcentrationMetrics {
+        if !self.config.calculate_concentration {
+            return ConcentrationMetrics::default();
+        }
+
+        let positions: Vec<(String, Decimal)> = self.ledger.positions()
+            .iter()
+            .map(|(symbol, lot)| {
+                let price = prices.get(symbol).copied().unwrap_or(lot.wap_cost_basis);
+                let value = price * Decimal::from(lot.shares);
+                (symbol.clone(), value)
+            })
+            .collect();
+
+        ConcentrationCalculator::calculate(&positions)
+    }
+
+    // =========================================================================
+    // REGIME DETECTION
+    // =========================================================================
+
+    /// Generate regime tags for the entire backtest period.
+    ///
+    /// Call this at the end of the backtest to classify each day.
+    pub fn generate_regime_tags(&mut self) -> Vec<RegimeTag> {
+        if !self.config.calculate_regime || self.equity_curve.is_empty() {
+            return Vec::new();
+        }
+
+        // Prepare daily data: (date, return)
+        let daily_data: Vec<(NaiveDate, Decimal)> = self.equity_curve
+            .iter()
+            .enumerate()
+            .map(|(i, (date, _))| {
+                let ret = if i < self.daily_returns.len() + 1 && i > 0 {
+                    self.daily_returns.get(i - 1).copied().unwrap_or(Decimal::ZERO)
+                } else {
+                    Decimal::ZERO
+                };
+                (*date, ret)
+            })
+            .collect();
+
+        self.regime_engine.reset();
+        self.regime_engine.classify_period(&daily_data)
+    }
+
+    /// Generate regime summary with performance breakdown.
+    ///
+    /// Call after `generate_regime_tags()` or pass pre-computed tags.
+    pub fn generate_regime_summary(&self, tags: &[RegimeTag]) -> RegimeSummary {
+        if !self.config.calculate_regime || tags.is_empty() {
+            return RegimeSummary::empty(self.config.regime_config.clone());
+        }
+
+        // Prepare aligned data arrays
+        let returns = &self.daily_returns;
+        
+        // Pad turnover/costs to match returns length
+        let turnover: Vec<Decimal> = (0..returns.len())
+            .map(|i| self.daily_turnover.get(i).copied().unwrap_or(Decimal::ZERO))
+            .collect();
+        
+        let costs: Vec<Decimal> = (0..returns.len())
+            .map(|i| self.daily_costs.get(i).copied().unwrap_or(Decimal::ZERO))
+            .collect();
+
+        // Prepend zeros to align with tags (first day has no return)
+        let mut padded_returns = vec![Decimal::ZERO];
+        padded_returns.extend(returns.iter().cloned());
+        
+        let mut padded_turnover = vec![Decimal::ZERO];
+        padded_turnover.extend(turnover);
+        
+        let mut padded_costs = vec![Decimal::ZERO];
+        padded_costs.extend(costs);
+
+        self.regime_engine.summarize(tags, &padded_returns, &padded_turnover, &padded_costs)
+    }
+
+    /// Get regime engine configuration.
+    pub fn regime_config(&self) -> &RegimeConfig {
+        &self.config.regime_config
+    }
+
+    /// Store daily turnover and cost for regime analysis.
+    /// 
+    /// Called internally during snapshot generation.
+    fn store_daily_metrics(&mut self, turnover_pct: Decimal, cost_pct: Decimal) {
+        self.daily_turnover.push(turnover_pct);
+        self.daily_costs.push(cost_pct);
     }
 }
 

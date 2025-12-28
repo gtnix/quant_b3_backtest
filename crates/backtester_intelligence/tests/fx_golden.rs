@@ -17,11 +17,11 @@ use serde_json::Value;
 
 #[test]
 fn test_schema_version_constant() {
-    // Verify the current schema version
+    // Verify the current schema version (v1.3 adds compliance/risk controls)
     assert_eq!(
         PERFORMANCE_REPORT_SCHEMA_VERSION, 
-        "fx_report_v1.1",
-        "Schema version should be fx_report_v1.1"
+        "fx_report_v1.3",
+        "Schema version should be fx_report_v1.3"
     );
 }
 
@@ -41,19 +41,44 @@ fn test_schema_version_in_report() {
 
 #[test]
 fn test_golden_file_parses() {
-    let golden = include_str!("golden/performance_report_v1.1.json");
-    let parsed: Result<PerformanceReport, _> = serde_json::from_str(golden);
+    // Test v1.1 backward compatibility - should still parse
+    let golden_v11 = include_str!("golden/performance_report_v1.1.json");
+    let parsed_v11: Result<PerformanceReport, _> = serde_json::from_str(golden_v11);
     
-    assert!(parsed.is_ok(), "Golden file should parse: {:?}", parsed.err());
+    assert!(parsed_v11.is_ok(), "Golden v1.1 file should parse: {:?}", parsed_v11.err());
+    let report_v11 = parsed_v11.unwrap();
+    assert_eq!(report_v11.schema_version, "fx_report_v1.1");
+    assert_eq!(report_v11.date, "2024-12-27");
+    // v1.1 should not have new fields
+    assert!(report_v11.sector_exposure.is_none());
+    assert!(report_v11.concentration.is_none());
+    assert!(report_v11.regime_summary.is_none());
     
-    let report = parsed.unwrap();
-    assert_eq!(report.schema_version, "fx_report_v1.1");
-    assert_eq!(report.date, "2024-12-27");
+    // Test v1.2 with research-grade fields
+    let golden_v12 = include_str!("golden/performance_report_v1.2.json");
+    let parsed_v12: Result<PerformanceReport, _> = serde_json::from_str(golden_v12);
+    
+    assert!(parsed_v12.is_ok(), "Golden v1.2 file should parse: {:?}", parsed_v12.err());
+    let report_v12 = parsed_v12.unwrap();
+    assert_eq!(report_v12.schema_version, "fx_report_v1.2");
+    // v1.2 should have research fields but not compliance
+    assert!(report_v12.compliance.is_none());
+    
+    // Test v1.3 with compliance/risk controls
+    let golden_v13 = include_str!("golden/performance_report_v1.3.json");
+    let parsed_v13: Result<PerformanceReport, _> = serde_json::from_str(golden_v13);
+    
+    assert!(parsed_v13.is_ok(), "Golden v1.3 file should parse: {:?}", parsed_v13.err());
+    let report_v13 = parsed_v13.unwrap();
+    assert_eq!(report_v13.schema_version, "fx_report_v1.3");
+    // v1.3 should have compliance field
+    assert!(report_v13.compliance.is_some());
 }
 
 #[test]
 fn test_golden_schema_version_matches() {
-    let golden = include_str!("golden/performance_report_v1.1.json");
+    // v1.3 golden file should match current version
+    let golden = include_str!("golden/performance_report_v1.3.json");
     let parsed: Value = serde_json::from_str(golden).unwrap();
     
     let schema_version = parsed.get("schema_version")
@@ -69,24 +94,34 @@ fn test_golden_schema_version_matches() {
 
 #[test]
 fn test_golden_has_required_fields() {
-    let golden = include_str!("golden/performance_report_v1.1.json");
-    let parsed: Value = serde_json::from_str(golden).unwrap();
+    // Test v1.1 FX fields
+    let golden_v11 = include_str!("golden/performance_report_v1.1.json");
+    let parsed_v11: Value = serde_json::from_str(golden_v11).unwrap();
     
     // Core required fields
-    assert!(parsed.get("schema_version").is_some(), "Missing schema_version");
-    assert!(parsed.get("date").is_some(), "Missing date");
-    assert!(parsed.get("equity").is_some(), "Missing equity");
-    assert!(parsed.get("return_pct").is_some(), "Missing return_pct");
-    assert!(parsed.get("pnl").is_some(), "Missing pnl");
-    assert!(parsed.get("costs").is_some(), "Missing costs");
-    assert!(parsed.get("risk").is_some(), "Missing risk");
-    assert!(parsed.get("exposure").is_some(), "Missing exposure");
-    assert!(parsed.get("turnover").is_some(), "Missing turnover");
+    assert!(parsed_v11.get("schema_version").is_some(), "Missing schema_version");
+    assert!(parsed_v11.get("date").is_some(), "Missing date");
+    assert!(parsed_v11.get("equity").is_some(), "Missing equity");
+    assert!(parsed_v11.get("return_pct").is_some(), "Missing return_pct");
+    assert!(parsed_v11.get("pnl").is_some(), "Missing pnl");
+    assert!(parsed_v11.get("costs").is_some(), "Missing costs");
+    assert!(parsed_v11.get("risk").is_some(), "Missing risk");
+    assert!(parsed_v11.get("exposure").is_some(), "Missing exposure");
+    assert!(parsed_v11.get("turnover").is_some(), "Missing turnover");
     
     // FX fields (V1.1)
-    assert!(parsed.get("base_currency").is_some(), "Missing base_currency");
-    assert!(parsed.get("fx_attribution").is_some(), "Missing fx_attribution");
-    assert!(parsed.get("fx_rates_used").is_some(), "Missing fx_rates_used");
+    assert!(parsed_v11.get("base_currency").is_some(), "Missing base_currency");
+    assert!(parsed_v11.get("fx_attribution").is_some(), "Missing fx_attribution");
+    assert!(parsed_v11.get("fx_rates_used").is_some(), "Missing fx_rates_used");
+    
+    // Test v1.2 research-grade fields
+    let golden_v12 = include_str!("golden/performance_report_v1.2.json");
+    let parsed_v12: Value = serde_json::from_str(golden_v12).unwrap();
+    
+    // Research-grade fields (V1.2)
+    assert!(parsed_v12.get("sector_exposure").is_some(), "Missing sector_exposure");
+    assert!(parsed_v12.get("concentration").is_some(), "Missing concentration");
+    assert!(parsed_v12.get("regime_summary").is_some(), "Missing regime_summary");
 }
 
 #[test]
@@ -239,6 +274,12 @@ fn create_sample_report() -> PerformanceReport {
                 date: None,
             },
         ]),
+        // Research-grade fields (optional)
+        sector_exposure: None,
+        concentration: None,
+        regime_summary: None,
+        // Compliance fields (v1.3)
+        compliance: None,
     }
 }
 

@@ -300,6 +300,7 @@ mod tests {
 
     #[test]
     fn test_quarterly_fixture() {
+        use chrono::Datelike;
         let divs = DividendFixtureGenerator::quarterly("TAEE11", 2024, 2024, dec!(0.50));
         assert_eq!(divs.len(), 4);
         assert_eq!(divs[0].ex_date.month(), 3);

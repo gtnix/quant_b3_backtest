@@ -1,86 +1,72 @@
 # Quant B3 Backtester
 
-High-performance, deterministic backtesting engine for B3 (Brazilian Stock Exchange) trading strategies.
+Sistema de backtesting institucional de alta performance para o mercado B3 (Brasil), construído em Rust.
 
-## Workspace Structure
+## Características
 
-| Crate | Purpose |
-|-------|---------|
-| `backtester_core` | Fundamental types, traits, and events |
-| `backtester_io` | Data ingestion and normalization |
-| `backtester_engine` | Simulation motor and order router |
-| `backtester_portfolio` | Portfolio state, PnL, drawdown |
-| `backtester_execution` | Order execution with slippage/costs |
-| `backtester_reports` | Report generation |
-| `strategy_lib` | User strategy implementations |
+- **Determinismo**: Mesmos inputs → outputs bit-identical
+- **Performance**: Hot path com zero alocações, até 124x speedup via SoA
+- **Precisão**: Cálculos financeiros com `rust_decimal`
+- **Auditabilidade**: Rastreabilidade total de decisões e artefatos
 
 ## Quick Start
 
 ```bash
-# Build (release)
+# Build
 cargo build --release
 
-# Run all tests
-cargo test
+# Testes
+cargo test --workspace
 
-# Run specific test suite
-cargo test --test determinism
-cargo test --test invariants
-cargo test --test anti_look_ahead
-```
-
-## Quality Checks
-
-```bash
-# Format check
-cargo fmt --check
-
-# Lint (strict)
+# Lint
 cargo clippy --all-targets -- -D warnings
 
-# Dependency audit (requires cargo-deny)
-cargo deny check
+# Executar estratégia
+cargo run -p backtester_cli -- run --config configs/strategies/golden_momentum.toml
 ```
+
+## Documentação
+
+**Documentação completa em [`/docs`](docs/README.md)**
+
+| Seção | Descrição |
+|-------|-----------|
+| [Visão Geral](docs/architecture/system-overview.md) | Arquitetura do sistema |
+| [Mapa de Crates](docs/architecture/crate-map.md) | Responsabilidades de cada crate |
+| [CLI](docs/operations/cli-reference.md) | Referência de comandos |
+| [Blocos](docs/strategies/block-catalog.md) | Catálogo de blocos disponíveis |
+| [Políticas](docs/policies/dividend-policy.md) | Políticas de risco |
+
+## Workspace Structure
+
+| Crate | Responsabilidade |
+|-------|------------------|
+| `backtester_core` | Tipos fundamentais, traits, eventos |
+| `backtester_engine` | UnifiedEngine (simulação) |
+| `backtester_strategy` | Strategy Factory (DSL) |
+| `backtester_intelligence` | Entry/Exit engines, performance |
+| `backtester_cli` | Interface CLI |
+
+## Princípios de Design
+
+1. **Determinism-First**: Outputs idênticos para inputs idênticos
+2. **Performance-First**: Zero alocações no hot path
+3. **Hot Path Sacred**: Sem I/O, sem `dyn Trait` no loop de simulação
 
 ## Benchmarks
 
 ```bash
-# Run all benchmarks
-cargo bench
+# Benchmarks de estratégia
+cargo bench --bench strategy_bench
 
-# Run specific crate benchmark
-cargo bench -p backtester_engine
+# Benchmarks de engine
+cargo bench --bench scenarios_bench
 ```
 
-## Design Principles
-
-1. **Determinism-First**: Identical inputs produce bit-identical outputs
-2. **Performance-First**: Zero allocations in hot path
-3. **Hot Path Sacred**: No I/O, no `dyn Trait`, no allocations in simulation loop
-
-See `/docs` for full architecture documentation.
-
-## Interest Rates & Carry Filter (Technique 7)
-
-Sync risk-free rates for BR (SELIC) and US (T-Bill 3M):
-
-```bash
-# Set FRED API key (get free at fred.stlouisfed.org)
-export FRED_API_KEY="your_api_key_here"
-
-# Sync all rates (5 years default)
-cargo run -p market_data -- sync-interest-rates --all
-
-# Check status
-cargo run -p market_data -- interest-rates-status
-```
-
-Enable in backtest config:
-```toml
-[risk_free]
-source = "db"
-allow_fallback = false
-```
+| Cenário | Tempo | Speedup |
+|---------|-------|---------|
+| Standard (1K assets) | 75.7ms | 1x |
+| Fast SoA (1K assets) | 1.0ms | **93x** |
 
 
 

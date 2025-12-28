@@ -1,15 +1,25 @@
 //! Performance Reporter - Human and AI-readable outputs.
 //!
 //! Supports multi-currency reporting with FX attribution.
+//! Includes sector exposure, concentration metrics, and regime analysis.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::{PerformanceSnapshot, AttributionBreakdown, CIOView, VolatilityMetrics, VaRMetrics, FxAttributionBreakdown};
+use super::{
+    PerformanceSnapshot, AttributionBreakdown, CIOView, VolatilityMetrics, VaRMetrics,
+    FxAttributionBreakdown, ConcentrationMetrics, RegimeSummary, SectorExposure,
+};
 
 /// Schema version for the performance report JSON.
 /// Increment this when making breaking changes to the JSON structure.
-pub const PERFORMANCE_REPORT_SCHEMA_VERSION: &str = "fx_report_v1.1";
+///
+/// Version history:
+/// - fx_report_v1.0: Initial FX support
+/// - fx_report_v1.1: Added FX audit trail fields
+/// - fx_report_v1.2: Added sector_exposure, concentration, regime_summary
+/// - fx_report_v1.3: Added compliance (constraints & risk controls)
+pub const PERFORMANCE_REPORT_SCHEMA_VERSION: &str = "fx_report_v1.3";
 
 /// Full performance report in AI-friendly JSON format.
 ///
@@ -18,7 +28,7 @@ pub const PERFORMANCE_REPORT_SCHEMA_VERSION: &str = "fx_report_v1.1";
 /// The `schema_version` field identifies the report format version.
 /// This enables consumers to handle different versions appropriately.
 ///
-/// Current version: `fx_report_v1.1` (added audit trail fields)
+/// Current version: `fx_report_v1.3` (added compliance/risk controls)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceReport {
     /// Schema version for this report format.
@@ -47,6 +57,24 @@ pub struct PerformanceReport {
     pub exposure_by_currency: Option<Vec<CurrencyExposureJson>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fx_rates_used: Option<Vec<FxRateUsedJson>>,
+    
+    // Research-grade fields (NEW in v1.2)
+    /// Sector exposure breakdown (NEW in v1.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sector_exposure: Option<Vec<SectorExposureJson>>,
+    
+    /// Portfolio concentration metrics (NEW in v1.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concentration: Option<ConcentrationJson>,
+    
+    /// Regime analysis summary (NEW in v1.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_summary: Option<RegimeSummaryJson>,
+    
+    // Compliance / Risk Controls (NEW in v1.3)
+    /// Compliance status and breach log (NEW in v1.3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compliance: Option<ComplianceJson>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +187,394 @@ pub struct FxRateUsedJson {
     /// The date (alias for date_resolved).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<String>,
+}
+
+// =============================================================================
+// SECTOR EXPOSURE JSON (NEW in v1.2)
+// =============================================================================
+
+/// Sector exposure in JSON format.
+///
+/// Provides complete breakdown of exposure by sector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectorExposureJson {
+    /// Sector name (e.g., "Energy", "Financials", "Unknown").
+    pub sector: String,
+    /// Gross exposure in this sector.
+    pub gross: String,
+    /// Net exposure in this sector.
+    pub net: String,
+    /// Long exposure in this sector.
+    pub long: String,
+    /// Short exposure in this sector.
+    pub short: String,
+    /// Weight as percentage of total portfolio gross.
+    pub weight_pct: String,
+}
+
+impl SectorExposureJson {
+    /// Create from SectorExposure.
+    pub fn from_exposure(exp: &SectorExposure, format_fn: impl Fn(Decimal) -> String) -> Self {
+        Self {
+            sector: exp.sector.clone(),
+            gross: format_fn(exp.gross),
+            net: format_fn(exp.net),
+            long: format_fn(exp.long),
+            short: format_fn(exp.short),
+            weight_pct: format_fn(exp.weight_pct),
+        }
+    }
+}
+
+// =============================================================================
+// CONCENTRATION JSON (NEW in v1.2)
+// =============================================================================
+
+/// Portfolio concentration metrics in JSON format.
+///
+/// All metrics use absolute weights (shorts count positively).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConcentrationJson {
+    /// Herfindahl-Hirschman Index (sum of squared weights).
+    /// Range: [0, 1] where 1 = single position.
+    pub hhi: String,
+    /// Effective number of positions = 1 / HHI.
+    pub effective_n: String,
+    /// Weight of largest position (%).
+    pub top_1_weight_pct: String,
+    /// Sum of top 5 position weights (%).
+    pub top_5_weight_pct: String,
+    /// Sum of top 10 position weights (%).
+    pub top_10_weight_pct: String,
+    /// Maximum position weight (%) - same as top_1.
+    pub max_position_weight_pct: String,
+    /// Number of positions.
+    pub n_positions: u32,
+    /// Gini coefficient (0 = equality, 1 = inequality).
+    /// Optional due to computation cost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gini: Option<String>,
+    /// Human-readable concentration level.
+    pub concentration_level: String,
+}
+
+impl ConcentrationJson {
+    /// Create from ConcentrationMetrics.
+    pub fn from_metrics(m: &ConcentrationMetrics, format_fn: impl Fn(Decimal) -> String) -> Self {
+        Self {
+            hhi: format_fn(m.hhi),
+            effective_n: format_fn(m.effective_n),
+            top_1_weight_pct: format_fn(m.top_1_weight_pct),
+            top_5_weight_pct: format_fn(m.top_5_weight_pct),
+            top_10_weight_pct: format_fn(m.top_10_weight_pct),
+            max_position_weight_pct: format_fn(m.max_position_weight_pct),
+            n_positions: m.n_positions,
+            gini: m.gini.map(&format_fn),
+            concentration_level: m.concentration_level().to_string(),
+        }
+    }
+}
+
+// =============================================================================
+// REGIME SUMMARY JSON (NEW in v1.2)
+// =============================================================================
+
+/// Regime detection configuration in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegimeConfigJson {
+    pub trend_lookback: u32,
+    pub trend_threshold: String,
+    pub vol_lookback: u32,
+    pub vol_quantile_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub benchmark_symbol: Option<String>,
+}
+
+/// Performance by regime in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegimePerformanceJson {
+    /// Trend state: "Uptrend", "Downtrend", or "Sideways".
+    pub trend_state: String,
+    /// Volatility quantile: "Q1" through "Q5".
+    pub vol_quantile: String,
+    /// Number of days in this regime.
+    pub day_count: u32,
+    /// Mean daily return (%).
+    pub mean_return_pct: String,
+    /// Cumulative return (%).
+    pub cumulative_return_pct: String,
+    /// Win rate (% of days with positive return).
+    pub win_rate_pct: String,
+    /// Mean daily turnover (%).
+    pub mean_turnover_pct: String,
+    /// Mean daily cost (%).
+    pub mean_cost_pct: String,
+}
+
+/// Complete regime summary in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegimeSummaryJson {
+    /// Configuration used for regime detection.
+    pub config: RegimeConfigJson,
+    /// Performance breakdown by regime.
+    pub by_regime: Vec<RegimePerformanceJson>,
+    /// Total days in backtest.
+    pub total_days: u32,
+    /// Days in warmup period (insufficient data).
+    pub warmup_days: u32,
+    /// Path to detailed regime tags CSV (if externalized).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags_file: Option<String>,
+}
+
+impl RegimeSummaryJson {
+    /// Create from RegimeSummary.
+    pub fn from_summary(s: &RegimeSummary, format_fn: impl Fn(Decimal) -> String) -> Self {
+        Self {
+            config: RegimeConfigJson {
+                trend_lookback: s.config.trend_lookback,
+                trend_threshold: format_fn(s.config.trend_threshold),
+                vol_lookback: s.config.vol_lookback,
+                vol_quantile_count: s.config.vol_quantile_count,
+                benchmark_symbol: s.config.benchmark_symbol.clone(),
+            },
+            by_regime: s.by_regime.iter().map(|p| RegimePerformanceJson {
+                trend_state: p.trend_state.as_str().to_string(),
+                vol_quantile: format!("{}", p.vol_quantile),
+                day_count: p.day_count,
+                mean_return_pct: format_fn(p.mean_return_pct),
+                cumulative_return_pct: format_fn(p.cumulative_return_pct),
+                win_rate_pct: format_fn(p.win_rate_pct),
+                mean_turnover_pct: format_fn(p.mean_turnover_pct),
+                mean_cost_pct: format_fn(p.mean_cost_pct),
+            }).collect(),
+            total_days: s.total_days,
+            warmup_days: s.warmup_days,
+            tags_file: None,
+        }
+    }
+}
+
+// =============================================================================
+// COMPLIANCE JSON (NEW in v1.3)
+// =============================================================================
+
+use super::compliance::{BreachEvent, ComplianceReport, ComplianceSummary};
+use super::constraints::ConstraintsConfig;
+use std::collections::BTreeMap;
+
+/// Constraint policy snapshot in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstraintPolicyJson {
+    /// Soft threshold (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soft: Option<String>,
+    /// Hard threshold.
+    pub hard: String,
+    /// Action on breach.
+    pub action: String,
+}
+
+/// Breach event in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreachEventJson {
+    /// Date of breach.
+    pub date: String,
+    /// Constraint identifier.
+    pub constraint_id: String,
+    /// Scope of breach (e.g., "Portfolio", "Sector:Energy").
+    pub scope: String,
+    /// Measured value that exceeded limit.
+    pub measured_value: String,
+    /// Limit that was exceeded.
+    pub limit_value: String,
+    /// Absolute magnitude of breach.
+    pub magnitude: String,
+    /// Magnitude as percentage of limit.
+    pub magnitude_pct: String,
+    /// Severity level.
+    pub severity: String,
+    /// Action taken in response.
+    pub action_taken: String,
+    /// Whether this was ex-ante (pre-order) or ex-post (EOD).
+    pub is_ex_ante: bool,
+    /// Evidence supporting the breach.
+    pub evidence: BreachEvidenceJson,
+}
+
+/// Breach evidence in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreachEvidenceJson {
+    /// Top contributors (name, value) pairs.
+    pub top_contributors: Vec<Vec<String>>,
+    /// Context description.
+    pub context: String,
+}
+
+/// Action record in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionRecordJson {
+    /// Date of action.
+    pub date: String,
+    /// Action type.
+    pub action: String,
+    /// Reason for action.
+    pub reason: String,
+}
+
+/// Compliance summary in JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplianceSummaryJson {
+    /// Total number of breaches.
+    pub total_breaches: usize,
+    /// Breaches by severity level.
+    pub breaches_by_severity: BTreeMap<String, usize>,
+    /// Worst severity encountered.
+    pub worst_severity: String,
+    /// Number of days with breaches.
+    pub days_out_of_limit: usize,
+    /// List of violated constraint IDs.
+    pub constraints_violated: Vec<String>,
+    /// Number of ex-ante breaches.
+    pub ex_ante_breaches: usize,
+    /// Number of ex-post breaches.
+    pub ex_post_breaches: usize,
+}
+
+/// Complete compliance report in JSON format (NEW in v1.3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplianceJson {
+    /// Configuration snapshot showing active limits.
+    pub config_snapshot: BTreeMap<String, ConstraintPolicyJson>,
+    /// Summary statistics.
+    pub summary: ComplianceSummaryJson,
+    /// Top breaches (sorted by severity then magnitude).
+    pub breaches: Vec<BreachEventJson>,
+    /// Actions taken during the backtest.
+    pub actions_taken: Vec<ActionRecordJson>,
+}
+
+impl ComplianceJson {
+    /// Create from ComplianceReport.
+    pub fn from_report(report: &ComplianceReport, format_fn: impl Fn(Decimal) -> String + Copy) -> Self {
+        Self {
+            config_snapshot: report.config_snapshot.iter().map(|(k, v)| {
+                (k.clone(), ConstraintPolicyJson {
+                    soft: v.soft.clone(),
+                    hard: v.hard.clone(),
+                    action: v.action.clone(),
+                })
+            }).collect(),
+            summary: ComplianceSummaryJson {
+                total_breaches: report.summary.total_breaches,
+                breaches_by_severity: report.summary.breaches_by_severity.clone(),
+                worst_severity: report.summary.worst_severity.clone(),
+                days_out_of_limit: report.summary.days_out_of_limit,
+                constraints_violated: report.summary.constraints_violated.clone(),
+                ex_ante_breaches: report.summary.ex_ante_breaches,
+                ex_post_breaches: report.summary.ex_post_breaches,
+            },
+            breaches: report.breaches.iter().map(|b| Self::breach_to_json(b, format_fn)).collect(),
+            actions_taken: report.actions_taken.iter().map(|a| ActionRecordJson {
+                date: a.date.format("%Y-%m-%d").to_string(),
+                action: format!("{}", a.action),
+                reason: a.reason.clone(),
+            }).collect(),
+        }
+    }
+
+    /// Convert a single breach event to JSON.
+    fn breach_to_json(b: &BreachEvent, format_fn: impl Fn(Decimal) -> String) -> BreachEventJson {
+        BreachEventJson {
+            date: b.date.format("%Y-%m-%d").to_string(),
+            constraint_id: format!("{}", b.constraint_id),
+            scope: format!("{}", b.scope),
+            measured_value: format_fn(b.measured_value),
+            limit_value: format_fn(b.limit_value),
+            magnitude: format_fn(b.magnitude),
+            magnitude_pct: format_fn(b.magnitude_pct),
+            severity: format!("{}", b.severity),
+            action_taken: format!("{}", b.action_taken),
+            is_ex_ante: b.is_ex_ante,
+            evidence: BreachEvidenceJson {
+                top_contributors: b.evidence.top_contributors.iter()
+                    .map(|(name, val)| vec![name.clone(), format_fn(*val)])
+                    .collect(),
+                context: b.evidence.context.clone(),
+            },
+        }
+    }
+
+    /// Create config snapshot from ConstraintsConfig.
+    pub fn config_to_snapshot(config: &ConstraintsConfig, format_fn: impl Fn(Decimal) -> String) -> BTreeMap<String, ConstraintPolicyJson> {
+        let mut snapshot = BTreeMap::new();
+
+        if let Some(p) = &config.max_gross_exposure_pct {
+            snapshot.insert("max_gross_exposure_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_net_exposure_pct {
+            snapshot.insert("max_net_exposure_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_single_name_weight_pct {
+            snapshot.insert("max_single_name_weight_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_top5_weight_pct {
+            snapshot.insert("max_top5_weight_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_hhi {
+            snapshot.insert("max_hhi".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_sector_weight_pct {
+            snapshot.insert("max_sector_weight_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_unknown_sector_weight_pct {
+            snapshot.insert("max_unknown_sector_weight_pct".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_turnover_pct_per_period {
+            snapshot.insert("max_turnover_pct_per_period".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+        if let Some(p) = &config.max_cost_pct_per_period {
+            snapshot.insert("max_cost_pct_per_period".to_string(), ConstraintPolicyJson {
+                soft: p.soft_threshold.map(&format_fn),
+                hard: format_fn(p.hard_threshold),
+                action: format!("{}", p.action),
+            });
+        }
+
+        snapshot
+    }
 }
 
 /// Performance reporter for generating outputs.
@@ -295,6 +711,35 @@ impl PerformanceReporter {
         initial_capital: Decimal,
         fx_attribution: Option<&FxAttributionBreakdown>,
     ) -> PerformanceReport {
+        self.to_json_full(
+            snapshot,
+            attribution,
+            vol,
+            var,
+            sharpe,
+            initial_capital,
+            fx_attribution,
+            None,
+            None,
+        )
+    }
+
+    /// Generate full research-grade JSON report.
+    ///
+    /// Includes all optional fields: FX attribution, sector exposure,
+    /// concentration metrics, and regime summary.
+    pub fn to_json_full(
+        &self,
+        snapshot: &PerformanceSnapshot,
+        attribution: &AttributionBreakdown,
+        vol: &VolatilityMetrics,
+        var: &VaRMetrics,
+        sharpe: Decimal,
+        initial_capital: Decimal,
+        fx_attribution: Option<&FxAttributionBreakdown>,
+        concentration: Option<&ConcentrationMetrics>,
+        regime_summary: Option<&RegimeSummary>,
+    ) -> PerformanceReport {
         let return_pct = if initial_capital.is_zero() {
             Decimal::ZERO
         } else {
@@ -390,6 +835,25 @@ impl PerformanceReporter {
             }
         });
 
+        // Sector exposure
+        let sector_exposure = if !snapshot.exposure.by_sector.is_empty() {
+            Some(snapshot.exposure.by_sector.iter()
+                .map(|s| SectorExposureJson::from_exposure(s, |d| self.format_decimal(d)))
+                .collect())
+        } else {
+            None
+        };
+
+        // Concentration metrics
+        let concentration_json = concentration.map(|c| {
+            ConcentrationJson::from_metrics(c, |d| self.format_decimal(d))
+        });
+
+        // Regime summary
+        let regime_summary_json = regime_summary.map(|r| {
+            RegimeSummaryJson::from_summary(r, |d| self.format_decimal(d))
+        });
+
         PerformanceReport {
             schema_version: PERFORMANCE_REPORT_SCHEMA_VERSION.to_string(),
             date: snapshot.date.to_string(),
@@ -432,6 +896,10 @@ impl PerformanceReporter {
             fx_attribution: fx_attr_json,
             exposure_by_currency,
             fx_rates_used,
+            sector_exposure,
+            concentration: concentration_json,
+            regime_summary: regime_summary_json,
+            compliance: None,
         }
     }
 
@@ -521,6 +989,7 @@ mod tests {
                 by_market: [("BR".to_string(), dec!(30000)), ("US".to_string(), dec!(25000))].into(),
                 by_currency: Default::default(),
                 by_currency_base: Default::default(),
+                by_sector: Default::default(),
             },
             pnl: PnLBreakdown {
                 realized: dec!(3000),
