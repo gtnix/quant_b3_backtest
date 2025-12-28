@@ -4,6 +4,7 @@
 //! - `combiner run --config <path>` - Run evolution
 //! - `combiner status <experiment_id>` - Check status
 //! - `combiner export-top <experiment_id> --n 10` - Export top strategies
+//! - `combiner factory ...` - Strategy Factory orchestration
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -98,7 +99,7 @@ enum Commands {
         /// Output directory for TOMLs
         #[arg(short, long)]
         output: Option<String>,
-        
+
         /// Include execution config parameters in exported files
         #[arg(long)]
         include_execution_config: bool,
@@ -116,10 +117,88 @@ enum Commands {
         /// Enable full validation (CPCV + PBO/DSR)
         #[arg(long)]
         full: bool,
-        
+
         /// Enable stress testing during validation
         #[arg(long)]
         stress_enabled: bool,
+    },
+
+    /// Strategy Factory - Campaign orchestration and promotion
+    Factory {
+        #[command(subcommand)]
+        action: FactoryAction,
+    },
+}
+
+/// Factory subcommands for campaign management.
+#[derive(Subcommand)]
+enum FactoryAction {
+    /// Initialize a new campaign (creates config template)
+    Init {
+        /// Campaign name
+        #[arg(short, long)]
+        name: String,
+    },
+
+    /// Run a campaign (executes multi-seed SCG runs)
+    Run {
+        /// Path to campaign config file
+        #[arg(short, long)]
+        campaign: String,
+    },
+
+    /// Resume an interrupted campaign
+    Resume {
+        /// Path to campaign config file
+        #[arg(short, long)]
+        campaign: String,
+    },
+
+    /// List campaigns
+    List {
+        /// Filter by tag
+        #[arg(short, long)]
+        tag: Option<String>,
+    },
+
+    /// Show campaign or run details
+    Show {
+        /// Campaign ID or Run ID
+        id: String,
+    },
+
+    /// Compare candidates across multiple runs
+    Compare {
+        /// Comma-separated run IDs
+        #[arg(short, long, value_delimiter = ',')]
+        runs: Vec<String>,
+
+        /// Number of top candidates per run
+        #[arg(short, long, default_value = "5")]
+        top: usize,
+    },
+
+    /// Promote candidates to next stage
+    Promote {
+        /// Run ID to promote from
+        #[arg(short, long)]
+        run: Option<String>,
+
+        /// Campaign ID to promote from (all completed runs)
+        #[arg(short, long)]
+        campaign: Option<String>,
+
+        /// Number of top candidates to promote
+        #[arg(short, long, default_value = "3")]
+        top: usize,
+
+        /// Promotion stage: research, candidate, paper
+        #[arg(short, long, default_value = "candidate")]
+        stage: String,
+
+        /// Force re-promotion (ignore duplicates)
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
@@ -135,11 +214,20 @@ pub struct ExecutionOverrides {
 }
 
 fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env().add_directive("combiner=info".parse()?))
-        .init();
+    // Initialize tracing with JSON format for structured logging
+    let json_layer = std::env::var("FACTORY_JSON_LOGS").is_ok();
+
+    if json_layer {
+        tracing_subscriber::registry()
+            .with(fmt::layer().json())
+            .with(EnvFilter::from_default_env().add_directive("combiner=info".parse()?))
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env().add_directive("combiner=info".parse()?))
+            .init();
+    }
 
     let cli = Cli::parse();
 
@@ -192,5 +280,42 @@ fn main() -> Result<()> {
             full,
             stress_enabled,
         } => commands::validate::execute(&experiment_id, top_k, full, stress_enabled),
+
+        Commands::Factory { action } => match action {
+            FactoryAction::Init { name } => {
+                commands::factory::execute_init(&name)
+            }
+
+            FactoryAction::Run { campaign } => {
+                commands::factory::execute_run(&campaign)
+            }
+
+            FactoryAction::Resume { campaign } => {
+                commands::factory::execute_resume(&campaign)
+            }
+
+            FactoryAction::List { tag } => {
+                commands::factory::execute_list(tag.as_deref())
+            }
+
+            FactoryAction::Show { id } => {
+                commands::factory::execute_show(&id)
+            }
+
+            FactoryAction::Compare { runs, top } => {
+                commands::factory::execute_compare(&runs, top)
+            }
+
+            FactoryAction::Promote { run, campaign, top, stage, force } => {
+                commands::factory::execute_promote(
+                    run.as_deref(),
+                    campaign.as_deref(),
+                    top,
+                    &stage,
+                    force,
+                )
+            }
+        },
     }
 }
+

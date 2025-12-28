@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use tokio::runtime::Runtime;
-use tracing::info;
 
 use super::registry::Registry;
 

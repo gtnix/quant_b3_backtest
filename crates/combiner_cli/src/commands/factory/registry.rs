@@ -4,11 +4,12 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use native_tls::TlsConnector;
-use postgres_native_tls::MakeTlsConnector;
+use rustls::ClientConfig;
 use serde::{Deserialize, Serialize};
+
 use tokio_postgres::{Client, Row};
-use tracing::{info, warn};
+use tokio_postgres_rustls::MakeRustlsConnect;
+use tracing::info;
 
 /// Connection string environment variable name.
 pub const DATABASE_URL_ENV: &str = "NEON_DATABASE_URL";
@@ -145,12 +146,17 @@ impl Registry {
 
     /// Connect to the PostgreSQL database with a specific connection string.
     pub async fn connect_with_url(database_url: &str) -> Result<Self> {
-        let connector = TlsConnector::builder()
-            .build()
-            .context("Failed to build TLS connector")?;
-        let connector = MakeTlsConnector::new(connector);
+        // Build rustls config with webpki roots
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        let (client, connection) = tokio_postgres::connect(database_url, connector)
+        let tls_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        let tls = MakeRustlsConnect::new(tls_config);
+
+        let (client, connection) = tokio_postgres::connect(database_url, tls)
             .await
             .context("Failed to connect to PostgreSQL")?;
 
@@ -681,21 +687,20 @@ impl Registry {
 
 /// Generate a unique run ID.
 pub fn generate_run_id() -> String {
-    format!("run_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string())
+    format!("run_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12])
 }
 
 /// Generate a unique campaign ID.
 pub fn generate_campaign_id() -> String {
-    format!("camp_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string())
+    format!("camp_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12])
 }
 
 /// Generate a unique candidate ID.
 pub fn generate_candidate_id() -> String {
-    format!("cand_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string())
+    format!("cand_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12])
 }
 
 /// Generate a unique promotion ID.
 pub fn generate_promotion_id() -> String {
-    format!("prom_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string())
+    format!("prom_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12])
 }
-

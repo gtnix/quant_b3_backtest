@@ -1,0 +1,62 @@
+# Strategy Factory Campaign Configuration
+# ========================================
+#
+# This file defines a complete campaign for the Strategy Factory.
+# A campaign runs multiple SCG experiments with different seeds,
+# tracks all results in the registry, and enables promotion of
+# top candidates to paper trading.
+#
+# Usage:
+#   combiner factory run --campaign configs/factory_campaign.toml
+
+[campaign]
+name = "momentum_exploration_q1"
+tag = "momentum"
+owner = "quant_team"
+notes = "Exploring momentum-based strategies for B3 with institutional execution model"
+
+[dataset]
+# Market: BR (B3 Brazil) or US
+market = "BR"
+start_date = "2018-01-01"
+end_date = "2024-12-01"
+universe = "ibov"  # IBOV constituents
+# data_path = "data/ohlcv"  # Optional: for dataset hash computation
+
+[evolution]
+# Reference to base SCG config (optional - uses defaults if not specified)
+# base_config = "configs/optimization/scg_base.toml"
+
+# Override evolution parameters
+population_size = 100
+max_generations = 50
+# convergence_generations = 5  # Optional early stopping
+
+[execution]
+# Reference to execution config file
+config_path = "configs/execution_institutional.toml"
+
+# Or specify inline overrides:
+# slippage_bps = 10.0  # 10 bps slippage
+# delay_bars = 1       # Execute on next bar open
+
+[seeds]
+# Run with multiple seeds for robustness
+count = 3          # Run 3 different seeds
+base_seed = 42     # Seeds: 42, 43, 44
+
+[budget]
+# Resource constraints
+max_runs = 3                  # Maximum runs (should match seeds.count)
+top_k = 10                    # Validate top 10 candidates per run
+timeout_per_run_secs = 3600   # 1 hour max per run
+stress_enabled = true         # Enable stress testing (S1-S5)
+
+[promotion]
+# Thresholds for promoting candidates to paper trading
+min_oos_sharpe_net = 0.5     # Minimum net-of-costs OOS Sharpe
+max_pbo = 0.15               # Maximum probability of backtest overfitting
+min_stress_passed = 4        # At least 4 of 5 stress scenarios passed
+gates_required = true        # Must pass all institutional gates
+# min_dsr = 0.05             # Optional: Deflated Sharpe Ratio threshold
+

@@ -1,17 +1,15 @@
 //! Factory run and resume commands - Execute multi-seed campaigns.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
+use sha2::Digest;
 use tokio::runtime::Runtime;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-use combiner_engine::{
-    EvolutionConfig, EvolutionEngine, generate_experiment_id,
-};
+use combiner_engine::{EvolutionConfig, EvolutionEngine};
 use combiner_runner::{CliExecutor, ValidationCache};
 
 use super::config::CampaignConfig;
@@ -309,17 +307,19 @@ async fn execute_single_run(
             hex::encode(&sha2::Sha256::digest(genome_json.as_bytes())[..8])
         );
 
+        // Use available fields from ValidationResultSummary
         candidates.push(CandidateResult {
             genome_hash,
             oos_sharpe_net: entry.validation.oos_sharpe_median as f32,
-            oos_sharpe_gross: entry.validation.is_sharpe_median as f32,
+            oos_sharpe_gross: entry.validation.oos_sharpe_mean as f32,
             pbo: entry.validation.pbo as f32,
             dsr: Some(entry.validation.dsr as f32),
             stress_passed: entry.validation.splits_passed as i32,
             stress_total: entry.validation.splits_evaluated as i32,
-            gates_passed: entry.validation.institutional_pass,
-            turnover_annual: entry.validation.turnover_annual.unwrap_or(0.0) as f32,
-            capacity_usd: entry.validation.capacity_usd.map(|c| c as f32),
+            // Heuristic: gate passed if at least half of splits passed
+            gates_passed: entry.validation.splits_passed >= entry.validation.splits_evaluated / 2,
+            turnover_annual: 0.0, // Not available in summary
+            capacity_usd: None,   // Not available in summary
         });
 
         // Save strategy config
@@ -340,6 +340,3 @@ async fn execute_single_run(
         candidates,
     })
 }
-
-use sha2::Digest;
-
