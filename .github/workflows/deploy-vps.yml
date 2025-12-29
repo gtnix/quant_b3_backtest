@@ -1,0 +1,51 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - 'crates/**'
+      - 'configs/**'
+      - 'scripts/vps/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy Alpha Forge
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASS }}
+          script: |
+            cd /opt/alpha-forge/quant_b3_backtest
+            
+            echo ">>> Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+            
+            echo ">>> Building dashboard..."
+            cd dashboard
+            npm ci --silent
+            NODE_OPTIONS='--max-old-space-size=1024' npm run build
+            
+            echo ">>> Restarting services..."
+            pm2 restart ecosystem.config.cjs --update-env
+            
+            echo ">>> Deploy complete!"
+            pm2 status
+
+      - name: Health Check
+        run: |
+          sleep 5
+          curl -sf http://${{ secrets.VPS_IP }}/health || exit 1
+          echo "Health check passed!"
+
