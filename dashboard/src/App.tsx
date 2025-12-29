@@ -11,9 +11,12 @@ import { StrategyComparison } from './pages/StrategyComparison';
 import { WalkForward } from './pages/WalkForward';
 import { MonteCarlo } from './pages/MonteCarlo';
 import { RegimeAnalysis } from './pages/RegimeAnalysis';
+import { Cockpit } from './pages/Cockpit';
+import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
 
 export type Page = 
+  | 'cockpit'
   | 'campaigns' 
   | 'dashboard' 
   | 'evolution' 
@@ -26,7 +29,7 @@ export type Page =
   | 'regimes';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('campaigns');
+  const [currentPage, setCurrentPage] = useState<Page>('cockpit');
   const { startWatcher, artifactsRoot } = useDataStore();
 
   // Start file watcher when artifacts root is set
@@ -39,7 +42,7 @@ function App() {
   // Listen for navigation events (from Campaigns page)
   useEffect(() => {
     const handleNavigate = (e: CustomEvent<string>) => {
-      const validPages = ['campaigns', 'dashboard', 'evolution', 'candidates', 'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes'];
+      const validPages = ['cockpit', 'campaigns', 'dashboard', 'evolution', 'candidates', 'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes'];
       if (validPages.includes(e.detail)) {
         setCurrentPage(e.detail as Page);
       }
@@ -51,6 +54,8 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'cockpit':
+        return <Cockpit />;
       case 'campaigns':
         return <Campaigns />;
       case 'dashboard':
@@ -72,7 +77,7 @@ function App() {
       case 'regimes':
         return <RegimeAnalysis />;
       default:
-        return <Campaigns />;
+        return <Cockpit />;
     }
   };
 
@@ -85,6 +90,8 @@ function App() {
           {renderPage()}
         </main>
       </div>
+      {/* Global Glossary Overlay (activated by '?' key) */}
+      <GlossaryOverlay />
     </div>
   );
 }

@@ -10,7 +10,8 @@ import {
   GitCompare,
   BarChart3,
   Shuffle,
-  Layers
+  Layers,
+  Gauge
 } from 'lucide-react';
 import type { Page } from '../../App';
 
@@ -20,6 +21,9 @@ interface SidebarProps {
 }
 
 const navItems: { id: Page; label: string; icon: React.ElementType; group?: string }[] = [
+  // Cockpit (main control panel)
+  { id: 'cockpit', label: 'Cockpit', icon: Gauge, group: 'Control' },
+  
   // Core
   { id: 'campaigns', label: 'Campaigns', icon: FolderKanban, group: 'Core' },
   { id: 'candidates', label: 'Candidates', icon: Users, group: 'Core' },
@@ -39,7 +43,7 @@ const navItems: { id: Page; label: string; icon: React.ElementType; group?: stri
 
 export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
   // Group items
-  const groups = ['Core', 'Analytics', 'System'];
+  const groups = ['Control', 'Core', 'Analytics', 'System'];
   
   return (
     <aside className="w-64 bg-terminal-surface border-r border-terminal-border flex flex-col">

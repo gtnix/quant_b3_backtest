@@ -2,6 +2,7 @@
 //!
 //! Provides commands for loading SCG artifacts, candidates, and backtest results.
 //! Integrates with artifacts/site/*.json structure for institutional-grade UX.
+//! Includes Cockpit commands for starting/stopping SCG runs.
 
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -10,6 +11,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // =============================================================================
 // ARTIFACT TYPES - Aligned with artifacts/site/*.json schema
@@ -353,8 +357,136 @@ pub struct EquityPoint {
 }
 
 // =============================================================================
+// COCKPIT TYPES - For SCG run orchestration
+// =============================================================================
+
+/// Configuration for starting a new SCG run from Cockpit
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CockpitRunConfig {
+    /// Preset name (rapid, institutional, exhaustive)
+    pub preset: String,
+    /// Maximum runtime in seconds (0 = unlimited)
+    pub max_runtime_seconds: u64,
+    /// Population size for genetic algorithm
+    pub population_size: u32,
+    /// Maximum generations to evolve
+    pub max_generations: u32,
+    /// Generations without improvement to trigger early stop
+    pub convergence_generations: u32,
+    /// Number of worker threads
+    pub workers: u32,
+    /// Random seeds (empty = auto)
+    pub seeds: Vec<u64>,
+    /// Enable stress testing
+    pub stress_testing_enabled: bool,
+    /// Minimum OOS Sharpe to pass gates
+    pub min_oos_sharpe_net: f64,
+    /// Maximum PBO to pass gates
+    pub max_pbo: f64,
+    /// Minimum stress tests passed
+    pub min_stress_passed: u32,
+    /// Campaign config path (optional, uses default if not set)
+    pub campaign_config: Option<String>,
+    /// Custom run name/tag
+    pub run_tag: Option<String>,
+}
+
+impl Default for CockpitRunConfig {
+    fn default() -> Self {
+        Self {
+            preset: "institutional".to_string(),
+            max_runtime_seconds: 900, // 15 minutes
+            population_size: 100,
+            max_generations: 50,
+            convergence_generations: 10,
+            workers: 8,
+            seeds: vec![],
+            stress_testing_enabled: true,
+            min_oos_sharpe_net: 0.5,
+            max_pbo: 0.15,
+            min_stress_passed: 4,
+            campaign_config: None,
+            run_tag: None,
+        }
+    }
+}
+
+/// Progress/status of a running SCG job
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunProgress {
+    /// Unique run identifier
+    pub run_id: String,
+    /// Current status
+    pub status: RunStatus,
+    /// Current generation number
+    pub current_generation: u32,
+    /// Maximum generations
+    pub max_generations: u32,
+    /// Elapsed time in seconds
+    pub elapsed_seconds: u64,
+    /// Maximum runtime in seconds
+    pub max_runtime_seconds: u64,
+    /// Best Sharpe found so far
+    pub best_sharpe: Option<f64>,
+    /// Best CAGR found so far
+    pub best_cagr: Option<f64>,
+    /// Total candidates evaluated
+    pub candidates_evaluated: u32,
+    /// Candidates passing gates
+    pub candidates_passing_gates: u32,
+    /// Pareto front size
+    pub pareto_size: u32,
+    /// Latest log line
+    pub latest_log: Option<String>,
+    /// Percentage complete (0-100)
+    pub percent_complete: f64,
+    /// Error message if failed
+    pub error_message: Option<String>,
+}
+
+/// Status enum for run progress
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum RunStatus {
+    Idle,
+    Starting,
+    Running,
+    Stopping,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// Internal state for a running process
+struct ActiveRun {
+    #[allow(dead_code)]
+    run_id: String,
+    child: Child,
+    #[allow(dead_code)]
+    config: CockpitRunConfig,
+    started_at: std::time::Instant,
+    progress: RunProgress,
+    stop_requested: Arc<AtomicBool>,
+}
+
+// =============================================================================
 // STATE MANAGEMENT
 // =============================================================================
+
+/// State for managing active SCG runs
+pub struct RunnerState {
+    active_runs: Mutex<HashMap<String, ActiveRun>>,
+    workspace_root: Mutex<Option<PathBuf>>,
+}
+
+impl Default for RunnerState {
+    fn default() -> Self {
+        Self {
+            active_runs: Mutex::new(HashMap::new()),
+            workspace_root: Mutex::new(None),
+        }
+    }
+}
 
 /// Artifact cache for efficient loading
 pub struct ArtifactCache {
@@ -953,6 +1085,317 @@ fn get_artifacts_root(state: tauri::State<'_, ArtifactState>) -> Result<Option<S
 }
 
 // =============================================================================
+// COCKPIT COMMANDS - SCG Run Orchestration
+// =============================================================================
+
+/// Set workspace root for CLI execution
+#[tauri::command]
+fn set_workspace_root(
+    path: String,
+    state: tauri::State<'_, RunnerState>,
+) -> Result<String, String> {
+    let root = PathBuf::from(&path);
+    
+    // Verify it's a valid workspace (has Cargo.toml or combiner binary)
+    let cargo_toml = root.join("Cargo.toml");
+    let combiner_cli = root.join("target").join("release").join("combiner");
+    
+    if !cargo_toml.exists() && !combiner_cli.exists() {
+        return Err(format!(
+            "Invalid workspace: {} (no Cargo.toml or combiner binary found)",
+            path
+        ));
+    }
+    
+    let mut guard = state.workspace_root.lock();
+    *guard = Some(root.clone());
+    
+    Ok(root.to_string_lossy().to_string())
+}
+
+/// Get workspace root
+#[tauri::command]
+fn get_workspace_root(state: tauri::State<'_, RunnerState>) -> Result<Option<String>, String> {
+    let guard = state.workspace_root.lock();
+    Ok(guard.as_ref().map(|p| p.to_string_lossy().to_string()))
+}
+
+/// Start a new SCG run with the given configuration
+#[tauri::command]
+async fn start_scg_run(
+    config: CockpitRunConfig,
+    app: tauri::AppHandle,
+    runner_state: tauri::State<'_, RunnerState>,
+) -> Result<String, String> {
+    // Generate unique run ID
+    let run_id = format!("cockpit_{}", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
+    
+    // Get workspace root
+    let workspace_root = {
+        let guard = runner_state.workspace_root.lock();
+        guard.clone().ok_or("Workspace root not set. Call set_workspace_root first.")?
+    };
+    
+    // Build the command
+    let combiner_path = workspace_root.join("target").join("release").join("combiner");
+    
+    if !combiner_path.exists() {
+        return Err(format!(
+            "Combiner CLI not found at {}. Build with 'cargo build --release -p combiner_cli'",
+            combiner_path.display()
+        ));
+    }
+    
+    // Build CLI arguments
+    let mut args = vec![
+        "factory".to_string(),
+        "run".to_string(),
+    ];
+    
+    // Add config file if specified
+    if let Some(ref config_path) = config.campaign_config {
+        args.push("--config".to_string());
+        args.push(config_path.clone());
+    }
+    
+    // Add runtime limit
+    if config.max_runtime_seconds > 0 {
+        args.push("--max-runtime".to_string());
+        args.push(config.max_runtime_seconds.to_string());
+    }
+    
+    // Add population size
+    args.push("--population".to_string());
+    args.push(config.population_size.to_string());
+    
+    // Add max generations
+    args.push("--max-generations".to_string());
+    args.push(config.max_generations.to_string());
+    
+    // Add convergence threshold
+    args.push("--convergence".to_string());
+    args.push(config.convergence_generations.to_string());
+    
+    // Add workers
+    args.push("--workers".to_string());
+    args.push(config.workers.to_string());
+    
+    // Add seeds if specified
+    for seed in &config.seeds {
+        args.push("--seed".to_string());
+        args.push(seed.to_string());
+    }
+    
+    // Add stress testing flag
+    if config.stress_testing_enabled {
+        args.push("--stress".to_string());
+    }
+    
+    // Add gates
+    args.push("--min-sharpe".to_string());
+    args.push(format!("{:.2}", config.min_oos_sharpe_net));
+    args.push("--max-pbo".to_string());
+    args.push(format!("{:.2}", config.max_pbo));
+    
+    // Add run tag if specified
+    if let Some(ref tag) = config.run_tag {
+        args.push("--tag".to_string());
+        args.push(tag.clone());
+    }
+    
+    // Spawn the process
+    let child = Command::new(&combiner_path)
+        .args(&args)
+        .current_dir(&workspace_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start combiner: {}", e))?;
+    
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    
+    // Create initial progress
+    let progress = RunProgress {
+        run_id: run_id.clone(),
+        status: RunStatus::Starting,
+        current_generation: 0,
+        max_generations: config.max_generations,
+        elapsed_seconds: 0,
+        max_runtime_seconds: config.max_runtime_seconds,
+        best_sharpe: None,
+        best_cagr: None,
+        candidates_evaluated: 0,
+        candidates_passing_gates: 0,
+        pareto_size: 0,
+        latest_log: Some("Initializing SCG engine...".to_string()),
+        percent_complete: 0.0,
+        error_message: None,
+    };
+    
+    // Store active run
+    let active_run = ActiveRun {
+        run_id: run_id.clone(),
+        child,
+        config: config.clone(),
+        started_at: std::time::Instant::now(),
+        progress: progress.clone(),
+        stop_requested: stop_flag.clone(),
+    };
+    
+    {
+        let mut runs = runner_state.active_runs.lock();
+        runs.insert(run_id.clone(), active_run);
+    }
+    
+    // Spawn monitoring thread (placeholder for future progress streaming)
+    let _run_id_clone = run_id.clone();
+    
+    // Emit initial event
+    let _ = app.emit("scg-progress", progress);
+    
+    Ok(run_id)
+}
+
+/// Stop a running SCG job gracefully
+#[tauri::command]
+async fn stop_scg_run(
+    run_id: String,
+    runner_state: tauri::State<'_, RunnerState>,
+) -> Result<(), String> {
+    let mut runs = runner_state.active_runs.lock();
+    
+    if let Some(run) = runs.get_mut(&run_id) {
+        // Signal stop request
+        run.stop_requested.store(true, Ordering::SeqCst);
+        run.progress.status = RunStatus::Stopping;
+        
+        // Try graceful termination first (SIGTERM)
+        #[cfg(unix)]
+        {
+            let pid = run.child.id();
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
+        }
+        
+        #[cfg(windows)]
+        {
+            let _ = run.child.kill();
+        }
+        
+        // Give it a moment, then force kill if needed
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = run.child.kill();
+        
+        run.progress.status = RunStatus::Cancelled;
+        Ok(())
+    } else {
+        Err(format!("Run not found: {}", run_id))
+    }
+}
+
+/// Get the current status of a run
+#[tauri::command]
+fn get_run_status(
+    run_id: String,
+    runner_state: tauri::State<'_, RunnerState>,
+) -> Result<RunProgress, String> {
+    let mut runs = runner_state.active_runs.lock();
+    
+    if let Some(run) = runs.get_mut(&run_id) {
+        // Update elapsed time
+        run.progress.elapsed_seconds = run.started_at.elapsed().as_secs();
+        
+        // Calculate percent complete
+        if run.progress.max_runtime_seconds > 0 {
+            run.progress.percent_complete = (run.progress.elapsed_seconds as f64 
+                / run.progress.max_runtime_seconds as f64 * 100.0).min(100.0);
+        } else if run.progress.max_generations > 0 {
+            run.progress.percent_complete = (run.progress.current_generation as f64 
+                / run.progress.max_generations as f64 * 100.0).min(100.0);
+        }
+        
+        // Check if process has exited
+        if let Ok(Some(exit_status)) = run.child.try_wait() {
+            if exit_status.success() {
+                run.progress.status = RunStatus::Completed;
+                run.progress.percent_complete = 100.0;
+            } else {
+                run.progress.status = RunStatus::Failed;
+                run.progress.error_message = Some(format!("Process exited with: {}", exit_status));
+            }
+        } else if run.progress.status == RunStatus::Starting {
+            run.progress.status = RunStatus::Running;
+        }
+        
+        Ok(run.progress.clone())
+    } else {
+        // Check if it was a completed run that was cleaned up
+        Ok(RunProgress {
+            run_id,
+            status: RunStatus::Idle,
+            current_generation: 0,
+            max_generations: 0,
+            elapsed_seconds: 0,
+            max_runtime_seconds: 0,
+            best_sharpe: None,
+            best_cagr: None,
+            candidates_evaluated: 0,
+            candidates_passing_gates: 0,
+            pareto_size: 0,
+            latest_log: None,
+            percent_complete: 0.0,
+            error_message: None,
+        })
+    }
+}
+
+/// List all active runs
+#[tauri::command]
+fn list_active_runs(
+    runner_state: tauri::State<'_, RunnerState>,
+) -> Result<Vec<RunProgress>, String> {
+    let runs = runner_state.active_runs.lock();
+    Ok(runs.values().map(|r| r.progress.clone()).collect())
+}
+
+/// Update progress for a run (internal, called from watcher)
+#[allow(dead_code)]
+fn update_run_progress(
+    run_id: &str,
+    generation: Option<u32>,
+    best_sharpe: Option<f64>,
+    best_cagr: Option<f64>,
+    candidates_evaluated: Option<u32>,
+    pareto_size: Option<u32>,
+    log_line: Option<String>,
+    runner_state: &RunnerState,
+) {
+    let mut runs = runner_state.active_runs.lock();
+    if let Some(run) = runs.get_mut(run_id) {
+        if let Some(gen) = generation {
+            run.progress.current_generation = gen;
+        }
+        if let Some(sharpe) = best_sharpe {
+            run.progress.best_sharpe = Some(sharpe);
+        }
+        if let Some(cagr) = best_cagr {
+            run.progress.best_cagr = Some(cagr);
+        }
+        if let Some(count) = candidates_evaluated {
+            run.progress.candidates_evaluated = count;
+        }
+        if let Some(size) = pareto_size {
+            run.progress.pareto_size = size;
+        }
+        if let Some(log) = log_line {
+            run.progress.latest_log = Some(log);
+        }
+        run.progress.elapsed_seconds = run.started_at.elapsed().as_secs();
+    }
+}
+
+// =============================================================================
 // FILE WATCHER
 // =============================================================================
 
@@ -1058,6 +1501,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ArtifactState::default())
+        .manage(RunnerState::default())
         .invoke_handler(tauri::generate_handler![
             // Artifact indexer commands
             set_artifacts_root,
@@ -1070,6 +1514,13 @@ pub fn run() {
             invalidate_cache,
             get_artifacts_root,
             watch_artifacts,
+            // Cockpit commands
+            set_workspace_root,
+            get_workspace_root,
+            start_scg_run,
+            stop_scg_run,
+            get_run_status,
+            list_active_runs,
             // Legacy commands
             list_experiments,
             load_scg_report,
