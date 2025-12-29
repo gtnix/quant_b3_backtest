@@ -7,6 +7,7 @@
 #   ./scripts/auto_cleanup.sh --runs --days 3    # Clean runs older than 3 days
 #   ./scripts/auto_cleanup.sh --target           # Clean target/ folder
 #   ./scripts/auto_cleanup.sh --all              # Clean runs + cache + cockpit
+#   ./scripts/auto_cleanup.sh --nuke             # NUCLEAR: delete ALL output + target
 #   ./scripts/auto_cleanup.sh --dry-run          # Show what would be deleted
 
 set -euo pipefail
@@ -15,6 +16,7 @@ DRY_RUN=false
 CLEAN_RUNS=false
 CLEAN_TARGET=false
 CLEAN_ALL=false
+NUKE=false
 DAYS=7
 
 while [[ $# -gt 0 ]]; do
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
         --runs) CLEAN_RUNS=true; shift ;;
         --target) CLEAN_TARGET=true; shift ;;
         --all) CLEAN_ALL=true; shift ;;
+        --nuke) NUKE=true; shift ;;
         --days) DAYS=$2; shift 2 ;;
         *) echo "Unknown: $1"; exit 1 ;;
     esac
@@ -88,6 +91,27 @@ if [[ "$CLEAN_TARGET" == "true" ]]; then
     fi
 fi
 
-if [[ "$CLEAN_RUNS" == "false" && "$CLEAN_TARGET" == "false" && "$CLEAN_ALL" == "false" ]]; then
-    echo "Use --runs, --target, or --all to clean"
+if [[ "$NUKE" == "true" ]]; then
+    echo ""
+    echo "🔥 NUCLEAR CLEANUP..."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [DRY-RUN] Would delete:"
+        echo "    - output/ (ALL)"
+        echo "    - target/"
+        echo "    - dashboard/src-tauri/target/"
+        echo "    - cache/"
+        echo "    - .tmp/"
+        echo "    - artifacts/cockpit_runs/"
+    else
+        rm -rf "$PROJECT_DIR/output" "$PROJECT_DIR/target" "$PROJECT_DIR/cache" "$PROJECT_DIR/.tmp" 2>/dev/null || true
+        rm -rf "$PROJECT_DIR/dashboard/src-tauri/target" 2>/dev/null || true
+        rm -rf "$PROJECT_DIR/artifacts/cockpit_runs" 2>/dev/null || true
+        mkdir -p "$PROJECT_DIR/cache" "$PROJECT_DIR/artifacts/cockpit_runs"
+        git gc --prune=now --quiet 2>/dev/null || true
+        echo "  ✓ NUKED everything. Run 'cargo build --release' to rebuild."
+    fi
+fi
+
+if [[ "$CLEAN_RUNS" == "false" && "$CLEAN_TARGET" == "false" && "$CLEAN_ALL" == "false" && "$NUKE" == "false" ]]; then
+    echo "Use --runs, --target, --all, or --nuke to clean"
 fi

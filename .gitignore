@@ -1,5 +1,6 @@
 # Build artifacts
 /target/
+/dashboard/src-tauri/target/
 
 # IDE
 .idea/
@@ -18,7 +19,7 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Cache and output (generated data)
+# Cache and output (generated data - can grow to 10GB+)
 /cache/
 /output/
 
@@ -30,3 +31,6 @@ Thumbs.db
 
 # Cockpit test runs
 /artifacts/cockpit_runs/
+
+# Node modules (1GB+)
+node_modules/
