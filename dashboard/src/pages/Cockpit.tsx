@@ -122,6 +122,7 @@ function TimeSlider() {
   };
   
   const current = TIME_PRESETS[index];
+  const progress = (index / (TIME_PRESETS.length - 1)) * 100;
   
   return (
     <div className="space-y-3">
@@ -130,25 +131,66 @@ function TimeSlider() {
           Tempo Máximo
           <InfoIcon tooltipKey="max_runtime" />
         </label>
-        <span className="text-lg font-mono text-cyan-400">{current.label}</span>
+        <span className="text-lg font-mono text-cyan-400 transition-all duration-300">{current.label}</span>
       </div>
       
-      <input
-        type="range"
-        min={0}
-        max={TIME_PRESETS.length - 1}
-        value={index}
-        onChange={handleChange}
-        className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-      />
+      {/* Custom smooth slider */}
+      <div className="relative h-8 flex items-center">
+        {/* Track background */}
+        <div className="absolute inset-x-0 h-2 bg-slate-700 rounded-full" />
+        
+        {/* Filled track with smooth transition */}
+        <div 
+          className="absolute left-0 h-2 bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-300 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+        
+        {/* Invisible range input for interaction */}
+        <input
+          type="range"
+          min={0}
+          max={TIME_PRESETS.length - 1}
+          value={index}
+          onChange={handleChange}
+          className="absolute inset-x-0 w-full h-8 opacity-0 cursor-pointer z-10"
+        />
+        
+        {/* Custom thumb with smooth transition */}
+        <div 
+          className="absolute w-5 h-5 bg-white rounded-full shadow-lg shadow-cyan-500/50 border-2 border-cyan-400 transition-all duration-300 ease-out pointer-events-none"
+          style={{ left: `calc(${progress}% - 10px)` }}
+        />
+        
+        {/* Tick marks */}
+        <div className="absolute inset-x-0 flex justify-between pointer-events-none">
+          {TIME_PRESETS.map((_, i) => (
+            <div 
+              key={i} 
+              className={`w-1 h-1 rounded-full transition-colors duration-200 ${
+                i <= index ? 'bg-cyan-400' : 'bg-slate-600'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
       
-      <div className="flex justify-between text-xs text-slate-500">
+      {/* Labels with smooth highlight transition */}
+      <div className="flex justify-between text-xs">
         {TIME_PRESETS.map((p, i) => (
-          <span key={i} className={i === index ? 'text-cyan-400' : ''}>{p.label}</span>
+          <span 
+            key={i} 
+            className={`transition-all duration-200 ${
+              i === index 
+                ? 'text-cyan-400 font-medium transform scale-110' 
+                : 'text-slate-500'
+            }`}
+          >
+            {p.label}
+          </span>
         ))}
       </div>
       
-      <p className="text-xs text-slate-500 italic">{current.description}</p>
+      <p className="text-xs text-slate-500 italic transition-opacity duration-300">{current.description}</p>
     </div>
   );
 }
@@ -332,17 +374,41 @@ function ProgressDisplay() {
   
   return (
     <div className="space-y-4">
-      {/* Progress bar */}
+      {/* Progress bar with smooth animation */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm">
           <span className="text-slate-400">Progresso</span>
-          <span className="text-cyan-400 font-mono">{percent.toFixed(1)}%</span>
+          <span className="text-cyan-400 font-mono tabular-nums transition-all duration-500">{percent.toFixed(1)}%</span>
         </div>
-        <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500"
-            style={{ width: `${percent}%` }}
+        <div className="h-4 bg-slate-700/50 rounded-full overflow-hidden relative">
+          {/* Background glow */}
+          <div 
+            className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 to-emerald-500/20 blur-sm transition-all duration-1000 ease-out"
+            style={{ width: `${Math.min(percent + 10, 100)}%` }}
           />
+          {/* Main progress bar with smooth easing */}
+          <div
+            className="h-full bg-gradient-to-r from-cyan-500 via-cyan-400 to-emerald-400 relative overflow-hidden transition-all duration-1000 ease-out"
+            style={{ 
+              width: `${percent}%`,
+              boxShadow: '0 0 20px rgba(34, 211, 238, 0.4)'
+            }}
+          >
+            {/* Animated shimmer effect */}
+            <div 
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer"
+              style={{
+                animation: 'shimmer 2s infinite linear',
+              }}
+            />
+          </div>
+          {/* Pulse dot at the end */}
+          {percent > 0 && percent < 100 && (
+            <div 
+              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full shadow-lg transition-all duration-1000 ease-out animate-pulse"
+              style={{ left: `calc(${percent}% - 4px)` }}
+            />
+          )}
         </div>
       </div>
       

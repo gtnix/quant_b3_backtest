@@ -454,3 +454,5 @@ await listen<{ paths: string[] }>('artifacts_changed', (event) => {
 - [ ] Strategy replay com visualização tick-by-tick
 
 
+
+

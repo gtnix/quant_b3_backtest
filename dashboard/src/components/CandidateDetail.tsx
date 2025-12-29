@@ -1,28 +1,27 @@
 import { useState } from 'react';
-import { open } from '@tauri-apps/plugin-shell';
 import { 
   X, 
   Copy, 
   Check,
-  ExternalLink,
-  FileCode,
-  FolderOpen,
-  Play,
-  BarChart3,
+  TrendingUp,
+  TrendingDown,
   Shield,
-  GitBranch,
+  Target,
+  Zap,
+  Award,
   Clock,
-  Layers,
-  Settings,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
+  GitBranch,
   ChevronDown,
   ChevronRight,
-  FileText
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  BarChart3,
+  Layers,
+  Settings,
+  Database
 } from 'lucide-react';
 import type { CandidateDetailFull, PipelineBlock } from '../stores/dataStore';
-import { ExportModal } from './ExportModal';
 
 interface CandidateDetailProps {
   candidate: CandidateDetailFull;
@@ -31,9 +30,8 @@ interface CandidateDetailProps {
 
 export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [showExport, setShowExport] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(['strategy', 'metrics'])
+    new Set(['scorecard', 'validation', 'provenance'])
   );
 
   const copyToClipboard = async (text: string, field: string) => {
@@ -52,426 +50,295 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
     setExpandedSections(newExpanded);
   };
 
-  const openInExplorer = async (path: string) => {
-    try {
-      await open(path);
-    } catch (e) {
-      console.error('Failed to open path:', e);
-    }
-  };
+  // Compute scores for scorecard
+  const sharpeScore = Math.min(100, (candidate.oos_sharpe_net / 2) * 100);
+  const pboScore = Math.max(0, 100 - (candidate.pbo * 500)); // Lower is better
+  const dsrScore = (candidate.dsr || 0) * 100;
+  const stressScore = candidate.stress_total > 0 
+    ? (candidate.stress_passed / candidate.stress_total) * 100 
+    : 0;
 
-  const runReplay = async () => {
-    if (candidate.replay_script_path) {
-      try {
-        await open(candidate.replay_script_path);
-      } catch (e) {
-        console.error('Failed to run replay:', e);
-      }
-    }
+  // Determine quality tier
+  const getQualityTier = () => {
+    const avgScore = (sharpeScore + pboScore + dsrScore + stressScore) / 4;
+    if (avgScore >= 80) return { label: 'Excellent', color: 'text-profit', bg: 'bg-profit/20' };
+    if (avgScore >= 60) return { label: 'Good', color: 'text-accent-cyan', bg: 'bg-accent-cyan/20' };
+    if (avgScore >= 40) return { label: 'Fair', color: 'text-accent-yellow', bg: 'bg-accent-yellow/20' };
+    return { label: 'Research', color: 'text-terminal-muted', bg: 'bg-terminal-surface' };
   };
+  const qualityTier = getQualityTier();
 
-  // Group pipeline blocks by type (handle missing strategy)
+  // Group pipeline blocks by type
   const blocksByType = (candidate.strategy?.pipeline || []).reduce((acc, block) => {
     const type = block.block_type;
     if (!acc[type]) acc[type] = [];
     acc[type].push(block);
     return acc;
   }, {} as Record<string, PipelineBlock[]>);
-  
-  // Check if bundle is missing
-  const bundleMissing = (candidate as any).bundle_missing === true;
 
-  const SectionHeader = ({ 
-    title, 
-    section, 
-    icon: Icon 
-  }: { 
-    title: string; 
-    section: string; 
-    icon: React.ElementType;
-  }) => (
+  const hasBundle = !((candidate as any).bundle_missing === true);
+  const dataSource = (candidate as any).data_source === 'neon' ? 'neon' : 'local';
+
+  const SectionHeader = ({ title, section, icon: Icon }: { title: string; section: string; icon: React.ElementType }) => (
     <button
       onClick={() => toggleSection(section)}
-      className="flex items-center gap-2 w-full py-2 text-left font-semibold text-lg hover:text-profit transition-colors"
+      className="flex items-center gap-2 w-full py-2 text-left font-semibold text-base hover:text-profit transition-colors"
     >
-      {expandedSections.has(section) ? (
-        <ChevronDown className="w-5 h-5" />
-      ) : (
-        <ChevronRight className="w-5 h-5" />
-      )}
-      <Icon className="w-5 h-5 text-terminal-muted" />
+      {expandedSections.has(section) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+      <Icon className="w-4 h-4 text-terminal-muted" />
       {title}
-    </button>
-  );
-
-  const CopyButton = ({ value, field }: { value: string; field: string }) => (
-    <button
-      onClick={() => copyToClipboard(value, field)}
-      className="p-1 hover:bg-terminal-surface rounded transition-colors"
-      title="Copy to clipboard"
-    >
-      {copiedField === field ? (
-        <Check className="w-4 h-4 text-profit" />
-      ) : (
-        <Copy className="w-4 h-4 text-terminal-muted" />
-      )}
     </button>
   );
 
   return (
     <div className="fixed inset-0 z-50 flex">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/60"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       
-      {/* Drawer */}
-      <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-terminal-bg border-l border-terminal-border overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-terminal-border bg-terminal-surface">
-          <div>
-            <h2 className="text-xl font-bold">Candidate Detail</h2>
-            <p className="text-sm text-terminal-muted font-mono">{candidate.candidate_id}</p>
-          </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-terminal-bg rounded-lg transition-colors"
-          >
+      <div className="absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-gradient-to-b from-terminal-bg to-terminal-surface border-l border-terminal-border overflow-hidden flex flex-col">
+        {/* Hero Header */}
+        <div className="relative p-6 border-b border-terminal-border bg-gradient-to-r from-terminal-surface via-terminal-bg to-terminal-surface">
+          <button onClick={onClose} className="absolute right-4 top-4 p-2 hover:bg-terminal-bg rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
+          
+          <div className="flex items-start gap-4">
+            {/* Rank Badge */}
+            <div className="flex-shrink-0 w-16 h-16 rounded-xl bg-gradient-to-br from-accent-cyan to-profit flex items-center justify-center">
+              <span className="text-2xl font-bold text-black">#{candidate.rank || 1}</span>
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${qualityTier.bg} ${qualityTier.color}`}>
+                  {qualityTier.label}
+                </span>
+                {candidate.gates_passed && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-profit/20 text-profit flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Validated
+                  </span>
+                )}
+                {dataSource === 'neon' && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-accent-cyan/10 text-accent-cyan flex items-center gap-1">
+                    <Database className="w-3 h-3" /> Neon
+                  </span>
+                )}
+              </div>
+              <h2 className="text-xl font-bold truncate">{candidate.display_name}</h2>
+              <p className="text-sm text-terminal-muted font-mono truncate">{candidate.candidate_id}</p>
+            </div>
+          </div>
+          
+          {/* Quick Stats */}
+          <div className="grid grid-cols-4 gap-3 mt-4">
+            <QuickStat 
+              icon={TrendingUp} 
+              label="Sharpe" 
+              value={candidate.oos_sharpe_net.toFixed(2)} 
+              color={candidate.oos_sharpe_net >= 1 ? 'profit' : 'default'} 
+            />
+            <QuickStat 
+              icon={Target} 
+              label="CAGR" 
+              value={candidate.oos_cagr_net ? `${(candidate.oos_cagr_net * 100).toFixed(1)}%` : 'N/A'} 
+              color="accent-cyan" 
+            />
+            <QuickStat 
+              icon={TrendingDown} 
+              label="Max DD" 
+              value={candidate.max_drawdown_net ? `-${(Math.abs(candidate.max_drawdown_net) * 100).toFixed(1)}%` : 'N/A'} 
+              color="loss" 
+            />
+            <QuickStat 
+              icon={Shield} 
+              label="PBO" 
+              value={`${(candidate.pbo * 100).toFixed(1)}%`} 
+              color={candidate.pbo <= 0.15 ? 'profit' : 'loss'} 
+            />
+          </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-4 space-y-6">
-          {/* Bundle Missing Warning */}
-          {bundleMissing && (
-            <div className="p-4 bg-loss/10 rounded-lg border border-loss/30 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-loss flex-shrink-0 mt-0.5" />
-              <div>
-                <div className="font-medium text-loss">Bundle Not Available</div>
-                <div className="text-sm text-terminal-muted mt-1">
-                  {(candidate as any).bundle_message || 'This candidate was not promoted. Strategy details are limited to CSV metrics.'}
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Display Name Banner */}
-          <div className="p-4 bg-terminal-surface rounded-lg border border-terminal-border">
-            <div className="text-sm text-terminal-muted mb-1">Strategy Signature</div>
-            <div className="text-lg font-medium">{candidate.display_name}</div>
-          </div>
-
-          {/* Quick Actions - Only show if bundle exists */}
-          {!bundleMissing && (
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => openInExplorer(candidate.strategy_toml_path)}
-                className="flex items-center gap-2 px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg hover:border-profit transition-colors text-sm"
-              >
-                <FileCode className="w-4 h-4" />
-                Open strategy.toml
-              </button>
-              <button
-                onClick={() => openInExplorer(candidate.bundle_path)}
-                className="flex items-center gap-2 px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg hover:border-profit transition-colors text-sm"
-              >
-                <FolderOpen className="w-4 h-4" />
-                Open Bundle
-              </button>
-              <button
-                onClick={() => setShowExport(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg hover:border-accent-cyan transition-colors text-sm"
-              >
-                <FileText className="w-4 h-4" />
-                Export Tearsheet
-              </button>
-              {candidate.replay_script_path && (
-                <button
-                  onClick={runReplay}
-                  className="flex items-center gap-2 px-3 py-2 bg-profit/10 text-profit border border-profit/30 rounded-lg hover:bg-profit/20 transition-colors text-sm"
-                >
-                  <Play className="w-4 h-4" />
-                  Run Replay
-                </button>
-              )}
-            </div>
-          )}
-          
-          {/* Export Modal */}
-          <ExportModal
-            isOpen={showExport}
-            onClose={() => setShowExport(false)}
-            candidateId={candidate.candidate_id}
-            candidateName={candidate.display_name}
-          />
-
-          {/* Metrics Section */}
-          <div>
-            <SectionHeader title="Performance Metrics" section="metrics" icon={BarChart3} />
-            {expandedSections.has('metrics') && (
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <MetricBox 
-                  label="OOS Sharpe NET" 
-                  value={candidate.oos_sharpe_net.toFixed(2)}
-                  color={candidate.oos_sharpe_net >= 1 ? 'profit' : 'default'}
-                />
-                <MetricBox 
-                  label="PBO" 
-                  value={`${(candidate.pbo * 100).toFixed(1)}%`}
-                  color={candidate.pbo <= 0.1 ? 'profit' : candidate.pbo <= 0.15 ? 'warning' : 'loss'}
-                />
-                <MetricBox 
-                  label="DSR" 
-                  value={candidate.dsr?.toFixed(2) ?? 'N/A'}
-                  color={candidate.dsr && candidate.dsr >= 0.5 ? 'profit' : 'default'}
-                />
-                <MetricBox 
-                  label="CAGR NET" 
-                  value={candidate.oos_cagr_net ? `${(candidate.oos_cagr_net * 100).toFixed(1)}%` : 'N/A'}
-                />
-                <MetricBox 
-                  label="Max DD NET" 
-                  value={candidate.max_drawdown_net ? `-${(Math.abs(candidate.max_drawdown_net) * 100).toFixed(1)}%` : 'N/A'}
-                  color="loss"
-                />
-                <MetricBox 
-                  label="Turnover" 
-                  value={candidate.turnover_annual?.toFixed(2) ?? 'N/A'}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Gates & Stress */}
-          <div>
-            <SectionHeader title="Validation Gates" section="gates" icon={Shield} />
-            {expandedSections.has('gates') && (
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          {/* Scorecard - Why This Strategy is Good */}
+          <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+            <SectionHeader title="Why This Strategy?" section="scorecard" icon={Award} />
+            {expandedSections.has('scorecard') && (
               <div className="mt-3 space-y-3">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    {candidate.gates_passed ? (
-                      <CheckCircle className="w-5 h-5 text-profit" />
-                    ) : (
-                      <XCircle className="w-5 h-5 text-loss" />
-                    )}
-                    <span className="font-medium">
-                      Gates: {candidate.gates_passed ? 'PASSED' : 'FAILED'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-terminal-muted">Stress:</span>
-                    <span className={`font-mono ${
-                      candidate.stress_passed === candidate.stress_total ? 'text-profit' : 'text-accent-yellow'
-                    }`}>
-                      {candidate.stress_passed}/{candidate.stress_total}
-                    </span>
-                  </div>
-                </div>
-                
-                {/* Data Integrity */}
-                {candidate.data_integrity && (
-                  <div className="p-3 bg-terminal-surface rounded-lg border border-terminal-border">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">Data Integrity</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        candidate.data_integrity.verdict === 'Pass' 
-                          ? 'bg-profit/20 text-profit' 
-                          : 'bg-loss/20 text-loss'
-                      }`}>
-                        {candidate.data_integrity.verdict}
-                      </span>
-                    </div>
-                    <div className="text-sm text-terminal-muted">
-                      Score: {(candidate.data_integrity.score * 100).toFixed(0)}% | 
-                      Passed: {candidate.data_integrity.passed_count} | 
-                      Warnings: {candidate.data_integrity.warning_count}
-                    </div>
-                    {candidate.data_integrity.warnings.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {candidate.data_integrity.warnings.map((w, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-accent-yellow">
-                            <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                            <span>{w}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <ScoreBar 
+                  label="Risk-Adjusted Return (Sharpe)" 
+                  value={sharpeScore} 
+                  detail={`${candidate.oos_sharpe_net.toFixed(2)} Sharpe ratio - measures return per unit of risk`}
+                />
+                <ScoreBar 
+                  label="Overfitting Risk (PBO)" 
+                  value={pboScore} 
+                  detail={`${(candidate.pbo * 100).toFixed(1)}% probability of backtest overfitting - lower is better`}
+                />
+                <ScoreBar 
+                  label="Statistical Confidence (DSR)" 
+                  value={dsrScore} 
+                  detail={`${(candidate.dsr || 0).toFixed(2)} deflated Sharpe ratio - accounts for multiple testing`}
+                />
+                <ScoreBar 
+                  label="Stress Resilience" 
+                  value={stressScore} 
+                  detail={`${candidate.stress_passed}/${candidate.stress_total} stress scenarios passed`}
+                />
               </div>
             )}
           </div>
 
-          {/* Strategy Blocks */}
-          <div>
-            <SectionHeader title="Strategy Pipeline" section="strategy" icon={Layers} />
-            {expandedSections.has('strategy') && (
-              <div className="mt-3 space-y-3">
-                {bundleMissing ? (
-                  <div className="p-3 bg-terminal-surface rounded-lg border border-terminal-border text-center text-terminal-muted">
-                    <Layers className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>Strategy details not available</p>
-                    <p className="text-xs mt-1">Promote this candidate to generate bundle with full strategy</p>
-                  </div>
-                ) : (
-                  <>
-                    {Object.entries(blocksByType).map(([type, blocks]) => (
-                      <div key={type} className="p-3 bg-terminal-surface rounded-lg border border-terminal-border">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-accent-cyan/20 text-accent-cyan uppercase">
-                            {type}
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {blocks.map((block, i) => (
-                            <div key={i}>
-                              <div className="font-mono text-sm text-profit">{block.block_id}</div>
-                              {Object.keys(block.params).length > 0 && (
-                                <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                                  {Object.entries(block.params).map(([key, value]) => (
-                                    <div key={key} className="flex justify-between">
-                                      <span className="text-terminal-muted">{key}:</span>
-                                      <span className="font-mono">{formatParamValue(value)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {/* Rebalance */}
-                    {candidate.strategy?.rebalance && (
-                      <div className="flex items-center gap-2 text-sm">
-                        <Clock className="w-4 h-4 text-terminal-muted" />
-                        <span>Rebalance:</span>
-                        <span className="font-mono text-accent-cyan">
-                          {candidate.strategy.rebalance.frequency}
-                          {candidate.strategy.rebalance.day && ` (${candidate.strategy.rebalance.day})`}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Constraints */}
-                    {candidate.strategy?.constraints && (
-                      <div className="text-sm text-terminal-muted">
-                        Max weight: {candidate.strategy.constraints.max_weight_per_asset ?? 'N/A'} | 
-                        Max positions: {candidate.strategy.constraints.max_positions ?? 'N/A'}
-                      </div>
-                    )}
-                  </>
-                )}
+          {/* Validation Gates */}
+          <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+            <SectionHeader title="Validation Gates" section="validation" icon={Shield} />
+            {expandedSections.has('validation') && (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <ValidationGate 
+                  label="Walk-Forward Analysis" 
+                  passed={candidate.gates_passed} 
+                  detail="Multi-period OOS testing"
+                />
+                <ValidationGate 
+                  label="CPCV Cross-Validation" 
+                  passed={candidate.gates_passed} 
+                  detail="Combinatorial purged validation"
+                />
+                <ValidationGate 
+                  label="PBO < 15%" 
+                  passed={candidate.pbo <= 0.15} 
+                  detail={`Actual: ${(candidate.pbo * 100).toFixed(1)}%`}
+                />
+                <ValidationGate 
+                  label={`Stress Tests (${candidate.stress_passed}/${candidate.stress_total})`} 
+                  passed={candidate.stress_passed >= (candidate.stress_total * 0.8)} 
+                  detail="Market crash scenarios"
+                />
+                <ValidationGate 
+                  label="DSR > 0.5" 
+                  passed={(candidate.dsr || 0) >= 0.5} 
+                  detail={`Actual: ${(candidate.dsr || 0).toFixed(2)}`}
+                />
+                <ValidationGate 
+                  label="OOS Sharpe > 0.5" 
+                  passed={candidate.oos_sharpe_net >= 0.5} 
+                  detail={`Actual: ${candidate.oos_sharpe_net.toFixed(2)}`}
+                />
               </div>
             )}
           </div>
-
-          {/* Execution Config */}
-          {!bundleMissing && candidate.execution && (
-            <div>
-              <SectionHeader title="Execution & Costs" section="execution" icon={Settings} />
-              {expandedSections.has('execution') && (
-                <div className="mt-3 p-3 bg-terminal-surface rounded-lg border border-terminal-border">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-terminal-muted">Delay Bars:</span>
-                      <span className="ml-2 font-mono">{candidate.execution.delay_bars}</span>
-                    </div>
-                    <div>
-                      <span className="text-terminal-muted">Fees Tier:</span>
-                      <span className="ml-2 font-mono">{candidate.execution.fees?.tier ?? 'N/A'}</span>
-                    </div>
-                    <div>
-                      <span className="text-terminal-muted">Slippage:</span>
-                      <span className="ml-2 font-mono">
-                        {candidate.execution.slippage?.slippage_type ?? 'N/A'}
-                        {candidate.execution.slippage?.bps && ` (${candidate.execution.slippage.bps} bps)`}
-                      </span>
-                    </div>
-                    {candidate.execution.fill_policy && (
-                      <div>
-                        <span className="text-terminal-muted">Max Participation:</span>
-                        <span className="ml-2 font-mono">
-                          {candidate.execution.fill_policy.max_participation 
-                            ? `${(candidate.execution.fill_policy.max_participation * 100).toFixed(0)}%` 
-                            : 'N/A'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Provenance */}
-          <div>
-            <SectionHeader title="Provenance & Audit" section="provenance" icon={GitBranch} />
+          <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+            <SectionHeader title="Provenance & Lineage" section="provenance" icon={GitBranch} />
             {expandedSections.has('provenance') && (
               <div className="mt-3 space-y-2">
-                <ProvenanceRow 
-                  label="Candidate ID" 
-                  value={candidate.provenance.candidate_id}
-                  copyable
-                  onCopy={(v, f) => copyToClipboard(v, f)}
-                  copiedField={copiedField}
-                />
-                <ProvenanceRow 
-                  label="Genome Hash" 
-                  value={candidate.provenance.genome_hash}
-                  copyable
-                  onCopy={(v, f) => copyToClipboard(v, f)}
-                  copiedField={copiedField}
-                />
+                {candidate.provenance.campaign_name && (
+                  <ProvenanceRow label="Campaign" value={candidate.provenance.campaign_name} />
+                )}
+                {candidate.provenance.campaign_tag && (
+                  <ProvenanceRow label="Tag" value={candidate.provenance.campaign_tag} />
+                )}
+                {candidate.provenance.campaign_owner && (
+                  <ProvenanceRow label="Owner" value={candidate.provenance.campaign_owner} />
+                )}
                 <ProvenanceRow 
                   label="Run ID" 
-                  value={candidate.provenance.run_id}
-                  copyable
-                  onCopy={(v, f) => copyToClipboard(v, f)}
-                  copiedField={copiedField}
+                  value={candidate.provenance.run_id} 
+                  copyable 
+                  onCopy={copyToClipboard} 
+                  copiedField={copiedField} 
                 />
-                <ProvenanceRow 
-                  label="Campaign ID" 
-                  value={candidate.provenance.campaign_id}
-                  copyable
-                  onCopy={(v, f) => copyToClipboard(v, f)}
-                  copiedField={copiedField}
-                />
-                <ProvenanceRow 
-                  label="Seed" 
-                  value={String(candidate.provenance.seed)}
-                />
+                <ProvenanceRow label="Seed" value={String(candidate.provenance.seed)} />
                 {candidate.provenance.git_sha && (
                   <ProvenanceRow 
                     label="Git SHA" 
-                    value={candidate.provenance.git_sha}
-                    copyable
-                    onCopy={(v, f) => copyToClipboard(v, f)}
-                    copiedField={copiedField}
+                    value={candidate.provenance.git_sha} 
+                    copyable 
+                    onCopy={copyToClipboard} 
+                    copiedField={copiedField} 
                   />
                 )}
-                {candidate.provenance.config_hash && (
+                {candidate.provenance.duration_secs && (
                   <ProvenanceRow 
-                    label="Config Hash" 
-                    value={candidate.provenance.config_hash}
-                    copyable
-                    onCopy={(v, f) => copyToClipboard(v, f)}
-                    copiedField={copiedField}
+                    label="Run Duration" 
+                    value={`${Math.floor(candidate.provenance.duration_secs / 60)}m ${candidate.provenance.duration_secs % 60}s`} 
                   />
                 )}
-                <ProvenanceRow 
-                  label="Created At" 
-                  value={new Date(candidate.provenance.created_at).toLocaleString()}
-                />
-                {candidate.provenance.scg_version && (
-                  <ProvenanceRow 
-                    label="SCG Version" 
-                    value={candidate.provenance.scg_version}
-                  />
+                {candidate.provenance.generations_completed && (
+                  <ProvenanceRow label="Generations" value={String(candidate.provenance.generations_completed)} />
                 )}
+                {candidate.provenance.created_at && (
+                  <ProvenanceRow label="Created" value={new Date(candidate.provenance.created_at).toLocaleString()} />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Strategy Pipeline - only if bundle exists */}
+          {hasBundle && Object.keys(blocksByType).length > 0 && (
+            <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+              <SectionHeader title="Strategy Pipeline" section="strategy" icon={Layers} />
+              {expandedSections.has('strategy') && (
+                <div className="mt-3 space-y-2">
+                  {Object.entries(blocksByType).map(([type, blocks]) => (
+                    <div key={type} className="p-3 bg-terminal-bg rounded-lg border border-terminal-border/50">
+                      <div className="text-xs font-medium text-accent-cyan uppercase mb-2">{type}</div>
+                      {blocks.map((block, i) => (
+                        <div key={i} className="text-sm">
+                          <span className="font-mono text-profit">{block.block_id}</span>
+                          {Object.keys(block.params).length > 0 && (
+                            <div className="ml-4 text-xs text-terminal-muted">
+                              {Object.entries(block.params).slice(0, 3).map(([k, v]) => (
+                                <span key={k} className="mr-3">{k}: <span className="text-white">{formatParamValue(v)}</span></span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Execution Config - only if bundle exists */}
+          {hasBundle && candidate.execution && (
+            <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+              <SectionHeader title="Execution Config" section="execution" icon={Settings} />
+              {expandedSections.has('execution') && (
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex justify-between py-1">
+                    <span className="text-terminal-muted">Delay Bars</span>
+                    <span className="font-mono">{candidate.execution.delay_bars}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-terminal-muted">Fees Tier</span>
+                    <span className="font-mono">{candidate.execution.fees?.tier ?? 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-terminal-muted">Slippage</span>
+                    <span className="font-mono">{candidate.execution.slippage?.bps ?? 'N/A'} bps</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* All Metrics */}
+          <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+            <SectionHeader title="All Metrics" section="metrics" icon={BarChart3} />
+            {expandedSections.has('metrics') && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <MetricTile label="OOS Sharpe NET" value={candidate.oos_sharpe_net.toFixed(3)} />
+                <MetricTile label="OOS Sharpe GROSS" value={(candidate.oos_sharpe_gross || candidate.oos_sharpe_net).toFixed(3)} />
+                <MetricTile label="OOS CAGR NET" value={candidate.oos_cagr_net ? `${(candidate.oos_cagr_net * 100).toFixed(2)}%` : 'N/A'} />
+                <MetricTile label="Max Drawdown NET" value={candidate.max_drawdown_net ? `${(candidate.max_drawdown_net * 100).toFixed(2)}%` : 'N/A'} />
+                <MetricTile label="PBO" value={`${(candidate.pbo * 100).toFixed(2)}%`} />
+                <MetricTile label="DSR" value={(candidate.dsr || 0).toFixed(3)} />
+                <MetricTile label="Turnover Annual" value={(candidate.turnover_annual || 0).toFixed(2)} />
+                <MetricTile label="Capacity USD" value={candidate.capacity_usd ? `$${(candidate.capacity_usd / 1e6).toFixed(1)}M` : 'N/A'} />
+                <MetricTile label="Stress Passed" value={`${candidate.stress_passed}/${candidate.stress_total}`} />
               </div>
             )}
           </div>
@@ -479,75 +346,104 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
 
         {/* Footer */}
         <div className="p-4 border-t border-terminal-border bg-terminal-surface">
-          <button
-            onClick={onClose}
-            className="w-full py-2 bg-terminal-bg border border-terminal-border rounded-lg hover:border-profit transition-colors"
-          >
-            Close
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => copyToClipboard(candidate.candidate_id, 'id-footer')}
+              className="flex-1 py-2 bg-terminal-bg border border-terminal-border rounded-lg hover:border-accent-cyan transition-colors flex items-center justify-center gap-2"
+            >
+              {copiedField === 'id-footer' ? <Check className="w-4 h-4 text-profit" /> : <Copy className="w-4 h-4" />}
+              Copy ID
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 py-2 bg-profit/10 text-profit border border-profit/30 rounded-lg hover:bg-profit/20 transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// Helper Components
+// Components
 
-function MetricBox({ 
-  label, 
-  value, 
-  color = 'default' 
-}: { 
-  label: string; 
-  value: string; 
-  color?: 'default' | 'profit' | 'loss' | 'warning';
-}) {
+function QuickStat({ icon: Icon, label, value, color }: { icon: React.ElementType; label: string; value: string; color?: string }) {
   const colorClass = {
-    default: 'text-white',
     profit: 'text-profit',
     loss: 'text-loss',
-    warning: 'text-accent-yellow',
-  }[color];
+    'accent-cyan': 'text-accent-cyan',
+    default: 'text-white'
+  }[color || 'default'];
 
   return (
-    <div className="p-3 bg-terminal-surface rounded-lg border border-terminal-border">
-      <div className="text-xs text-terminal-muted mb-1">{label}</div>
-      <div className={`font-mono text-lg ${colorClass}`}>{value}</div>
+    <div className="text-center">
+      <Icon className={`w-4 h-4 mx-auto mb-1 ${colorClass}`} />
+      <div className={`font-mono font-bold ${colorClass}`}>{value}</div>
+      <div className="text-xs text-terminal-muted">{label}</div>
     </div>
   );
 }
 
-function ProvenanceRow({ 
-  label, 
-  value, 
-  copyable = false,
-  onCopy,
-  copiedField
-}: { 
+function ScoreBar({ label, value, detail }: { label: string; value: number; detail: string }) {
+  const clampedValue = Math.max(0, Math.min(100, value));
+  const barColor = clampedValue >= 70 ? 'bg-profit' : clampedValue >= 40 ? 'bg-accent-yellow' : 'bg-loss';
+  
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-mono">{clampedValue.toFixed(0)}%</span>
+      </div>
+      <div className="h-2 bg-terminal-bg rounded-full overflow-hidden">
+        <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${clampedValue}%` }} />
+      </div>
+      <p className="text-xs text-terminal-muted mt-1">{detail}</p>
+    </div>
+  );
+}
+
+function ValidationGate({ label, passed, detail }: { label: string; passed: boolean; detail: string }) {
+  return (
+    <div className={`p-2 rounded-lg border ${passed ? 'border-profit/30 bg-profit/5' : 'border-loss/30 bg-loss/5'}`}>
+      <div className="flex items-center gap-2">
+        {passed ? (
+          <CheckCircle className="w-4 h-4 text-profit flex-shrink-0" />
+        ) : (
+          <XCircle className="w-4 h-4 text-loss flex-shrink-0" />
+        )}
+        <span className={`text-sm font-medium ${passed ? 'text-profit' : 'text-loss'}`}>{label}</span>
+      </div>
+      <p className="text-xs text-terminal-muted mt-1 ml-6">{detail}</p>
+    </div>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="p-2 bg-terminal-bg rounded-lg text-center">
+      <div className="text-xs text-terminal-muted mb-1">{label}</div>
+      <div className="font-mono text-sm">{value}</div>
+    </div>
+  );
+}
+
+function ProvenanceRow({ label, value, copyable, onCopy, copiedField }: { 
   label: string; 
   value: string; 
-  copyable?: boolean;
-  onCopy?: (value: string, field: string) => void;
+  copyable?: boolean; 
+  onCopy?: (v: string, f: string) => void; 
   copiedField?: string | null;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-terminal-border/50 last:border-0">
-      <span className="text-sm text-terminal-muted">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-sm truncate max-w-[200px]" title={value}>
-          {value}
-        </span>
+    <div className="flex items-center justify-between py-1 text-sm">
+      <span className="text-terminal-muted">{label}</span>
+      <div className="flex items-center gap-1">
+        <span className="font-mono truncate max-w-[180px]" title={value}>{value}</span>
         {copyable && onCopy && (
-          <button
-            onClick={() => onCopy(value, label)}
-            className="p-1 hover:bg-terminal-surface rounded transition-colors"
-            title="Copy to clipboard"
-          >
-            {copiedField === label ? (
-              <Check className="w-3 h-3 text-profit" />
-            ) : (
-              <Copy className="w-3 h-3 text-terminal-muted" />
-            )}
+          <button onClick={() => onCopy(value, label)} className="p-1 hover:bg-terminal-bg rounded">
+            {copiedField === label ? <Check className="w-3 h-3 text-profit" /> : <Copy className="w-3 h-3 text-terminal-muted" />}
           </button>
         )}
       </div>
@@ -556,15 +452,8 @@ function ProvenanceRow({
 }
 
 function formatParamValue(value: unknown): string {
-  if (typeof value === 'number') {
-    return value % 1 === 0 ? String(value) : value.toFixed(4);
-  }
-  if (typeof value === 'boolean') {
-    return value ? 'true' : 'false';
-  }
-  if (typeof value === 'string') {
-    return value;
-  }
+  if (typeof value === 'number') return value % 1 === 0 ? String(value) : value.toFixed(2);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') return value;
   return JSON.stringify(value);
 }
-

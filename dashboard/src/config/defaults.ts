@@ -56,15 +56,15 @@ export const COCKPIT_PRESETS: Record<PresetKey, PresetDefinition> = {
     icon: '⚡',
     config: {
       maxRuntimeSeconds: 180,
-      populationSize: 50,
-      maxGenerations: 20,
-      convergenceGenerations: 5,
-      workers: 4,
-      seeds: [],
-      stressTestingEnabled: false,
+      populationSize: 80,
+      maxGenerations: 30,
+      convergenceGenerations: 8,
+      workers: 8,
+      seeds: [42],
+      stressTestingEnabled: true,
       minOosSharpeNet: 0.3,
       maxPbo: 0.25,
-      minStressPassed: 0,
+      minStressPassed: 2,
     },
   },
   institutional: {
@@ -179,6 +179,7 @@ export interface TimePreset {
 }
 
 export const TIME_PRESETS: TimePreset[] = [
+  { seconds: 30, label: '30s', description: 'Debug rápido' },
   { seconds: 60, label: '1 min', description: 'Smoke test' },
   { seconds: 180, label: '3 min', description: 'Exploração rápida' },
   { seconds: 600, label: '10 min', description: 'Análise básica' },

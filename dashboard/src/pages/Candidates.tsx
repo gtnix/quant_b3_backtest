@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { DataTable } from '../components/ui/DataTable';
-import { MetricCard } from '../components/ui/MetricCard';
 import { CandidateDetail } from '../components/CandidateDetail';
 import { useDataStore } from '../stores/dataStore';
-import type { CandidateListItem } from '../stores/dataStore';
-import { open } from '@tauri-apps/plugin-dialog';
+import type { CandidateListItem, RecentRun } from '../stores/dataStore';
+import { platform } from '../lib/platform';
+import { FolderSelector } from '../components/FolderSelector';
 import { 
   Search, 
   Filter, 
@@ -19,7 +19,14 @@ import {
   GitCompare,
   Square,
   CheckSquare,
-  X
+  X,
+  TrendingUp,
+  Shield,
+  Target,
+  Zap,
+  Clock,
+  Database,
+  Globe
 } from 'lucide-react';
 
 export function Candidates() {
@@ -35,6 +42,7 @@ export function Candidates() {
     selectedRunId,
     selectedCandidateIds,
     runs,
+    recentRuns,
     isLoading,
     error,
     listCandidates,
@@ -43,9 +51,10 @@ export function Candidates() {
     setArtifactsRoot,
     toggleCandidateSelection,
     clearCandidateSelection,
+    fetchRecentRuns,
+    loadRun,
   } = useDataStore();
 
-  // Apply filters when they change
   useEffect(() => {
     if (selectedRunId) {
       listCandidates(selectedRunId, {
@@ -58,6 +67,7 @@ export function Candidates() {
 
   const handleSelectFolder = async () => {
     try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({
         directory: true,
         multiple: false,
@@ -88,7 +98,7 @@ export function Candidates() {
   };
 
   const handleSelectAll = () => {
-    candidates.forEach(c => {
+    (candidates || []).forEach(c => {
       if (!selectedCandidateIds.includes(c.candidate_id)) {
         toggleCandidateSelection(c.candidate_id);
       }
@@ -99,16 +109,21 @@ export function Candidates() {
     window.dispatchEvent(new CustomEvent('navigate', { detail: 'comparison' }));
   };
 
+  // Mini progress bar component
+  const MiniBar = ({ value, max, color }: { value: number; max: number; color: string }) => {
+    const pct = Math.min(100, Math.max(0, (value / max) * 100));
+    return (
+      <div className="w-12 h-1.5 bg-terminal-bg rounded-full overflow-hidden">
+        <div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+    );
+  };
+
   const columns = [
-    // Selection checkbox column
     {
       key: '_select',
       header: (
-        <button
-          onClick={handleSelectAll}
-          className="p-1 hover:bg-terminal-surface rounded"
-          title="Select all"
-        >
+        <button onClick={handleSelectAll} className="p-1 hover:bg-terminal-surface rounded" title="Select all">
           <Square className="w-4 h-4 text-terminal-muted" />
         </button>
       ),
@@ -116,15 +131,8 @@ export function Candidates() {
       render: (_: unknown, row: Record<string, unknown>) => {
         const isSelected = selectedCandidateIds.includes(row.candidate_id as string);
         return (
-          <button
-            onClick={(e) => handleToggleSelection(row.candidate_id as string, e)}
-            className="p-1 hover:bg-terminal-surface rounded"
-          >
-            {isSelected ? (
-              <CheckSquare className="w-4 h-4 text-profit" />
-            ) : (
-              <Square className="w-4 h-4 text-terminal-muted" />
-            )}
+          <button onClick={(e) => handleToggleSelection(row.candidate_id as string, e)} className="p-1 hover:bg-terminal-surface rounded">
+            {isSelected ? <CheckSquare className="w-4 h-4 text-profit" /> : <Square className="w-4 h-4 text-terminal-muted" />}
           </button>
         );
       },
@@ -135,48 +143,71 @@ export function Candidates() {
       sortable: true,
       width: '50px',
       render: (value: unknown) => (
-        <span className="font-mono text-terminal-muted">{String(value)}</span>
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-cyan/20 to-profit/20 flex items-center justify-center font-bold text-sm">
+          {String(value)}
+        </div>
       ),
     },
     {
       key: 'display_name',
       header: 'Strategy',
       sortable: true,
-      render: (value: unknown, row: Record<string, unknown>) => (
-        <div className="max-w-md">
-          <div className="font-medium text-sm truncate" title={String(value)}>
-            {String(value)}
+      render: (value: unknown, row: Record<string, unknown>) => {
+        const gatesPassed = row.gates_passed as boolean;
+        return (
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-8 rounded-full ${gatesPassed ? 'bg-profit' : 'bg-terminal-muted'}`} />
+            <div>
+              <div className="font-medium text-sm truncate max-w-[200px]" title={String(value)}>
+                {String(value)}
+              </div>
+              <div className="text-xs text-terminal-muted font-mono">
+                {String(row.candidate_id).substring(0, 16)}...
+              </div>
+            </div>
           </div>
-          <div className="text-xs text-terminal-muted font-mono">
-            {String(row.candidate_id).substring(0, 16)}...
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'candidate_class',
-      header: 'Class',
+      header: 'Status',
       sortable: true,
-      width: '90px',
-      render: (value: unknown) => {
+      width: '100px',
+      render: (value: unknown, row: Record<string, unknown>) => {
         const cls = String(value);
-        const color = cls === 'validated' ? 'bg-profit/20 text-profit' : 'bg-accent-cyan/20 text-accent-cyan';
+        const gatesPassed = row.gates_passed as boolean;
+        if (cls === 'validated' && gatesPassed) {
+          return (
+            <div className="flex items-center gap-1.5 text-profit">
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-xs font-medium">Validated</span>
+            </div>
+          );
+        }
         return (
-          <span className={`px-2 py-0.5 rounded text-xs font-medium ${color}`}>
-            {cls}
-          </span>
+          <div className="flex items-center gap-1.5 text-terminal-muted">
+            <Target className="w-4 h-4" />
+            <span className="text-xs font-medium">Research</span>
+          </div>
         );
       },
     },
     {
       key: 'oos_sharpe_net',
-      header: 'Sharpe NET',
+      header: 'Sharpe',
       sortable: true,
       align: 'right' as const,
       render: (value: unknown) => {
         const v = value as number;
         const color = v >= 1.0 ? 'text-profit' : v >= 0.5 ? 'text-accent-yellow' : 'text-loss';
-        return <span className={`font-mono ${color}`}>{v.toFixed(2)}</span>;
+        const barColor = v >= 1.0 ? 'bg-profit' : v >= 0.5 ? 'bg-accent-yellow' : 'bg-loss';
+        return (
+          <div className="flex items-center gap-2 justify-end">
+            <MiniBar value={v} max={2} color={barColor} />
+            <span className={`font-mono font-bold ${color}`}>{v.toFixed(2)}</span>
+          </div>
+        );
       },
     },
     {
@@ -184,32 +215,29 @@ export function Candidates() {
       header: 'PBO',
       sortable: true,
       align: 'right' as const,
-      width: '80px',
+      width: '90px',
       render: (value: unknown) => {
         const v = value as number;
         const color = v <= 0.10 ? 'text-profit' : v <= 0.15 ? 'text-accent-yellow' : 'text-loss';
-        return <span className={`font-mono ${color}`}>{(v * 100).toFixed(1)}%</span>;
+        const barColor = v <= 0.10 ? 'bg-profit' : v <= 0.15 ? 'bg-accent-yellow' : 'bg-loss';
+        return (
+          <div className="flex items-center gap-2 justify-end">
+            <MiniBar value={1 - v} max={1} color={barColor} />
+            <span className={`font-mono ${color}`}>{(v * 100).toFixed(1)}%</span>
+          </div>
+        );
       },
     },
     {
       key: 'oos_cagr_net',
-      header: 'CAGR NET',
-      sortable: true,
-      align: 'right' as const,
-      width: '90px',
-      render: (value: unknown) => (
-        <span className="font-mono">{((value as number) * 100).toFixed(1)}%</span>
-      ),
-    },
-    {
-      key: 'max_drawdown_net',
-      header: 'Max DD',
+      header: 'CAGR',
       sortable: true,
       align: 'right' as const,
       width: '80px',
       render: (value: unknown) => {
-        const v = Math.abs(value as number);
-        return <span className="font-mono text-loss">-{(v * 100).toFixed(1)}%</span>;
+        const v = value as number;
+        const color = v >= 0.15 ? 'text-profit' : 'text-terminal-text';
+        return <span className={`font-mono ${color}`}>{(v * 100).toFixed(1)}%</span>;
       },
     },
     {
@@ -234,105 +262,240 @@ export function Candidates() {
         const passed = value as number;
         const total = row.stress_total as number;
         const pct = total > 0 ? passed / total : 0;
-        const color = pct >= 0.8 ? 'text-profit' : pct >= 0.6 ? 'text-accent-yellow' : 'text-loss';
-        return <span className={`font-mono ${color}`}>{passed}/{total}</span>;
-      },
-    },
-    {
-      key: 'gates_passed',
-      header: 'Gates',
-      align: 'center' as const,
-      width: '60px',
-      render: (value: unknown) => {
-        const passed = value as boolean;
-        return passed 
-          ? <CheckCircle className="w-4 h-4 text-profit mx-auto" />
-          : <XCircle className="w-4 h-4 text-loss mx-auto" />;
+        return (
+          <div className="flex items-center gap-1.5 justify-center">
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+              pct >= 0.8 ? 'bg-profit/20 text-profit' : pct >= 0.6 ? 'bg-accent-yellow/20 text-accent-yellow' : 'bg-loss/20 text-loss'
+            }`}>
+              {passed}
+            </div>
+            <span className="text-terminal-muted text-xs">/{total}</span>
+          </div>
+        );
       },
     },
   ];
 
-  // Calculate stats
-  const passedCount = candidates.filter(c => c.gates_passed && c.pbo <= 0.15).length;
-  const warningCount = candidates.filter(c => c.gates_passed && c.pbo > 0.15).length;
-  const bestSharpe = candidates.length > 0 
-    ? Math.max(...candidates.map(c => c.oos_sharpe_net)) 
+  // Calculate stats (with safety check for undefined candidates)
+  const candidatesList = candidates || [];
+  const validatedCount = candidatesList.filter(c => c.gates_passed).length;
+  const lowPboCount = candidatesList.filter(c => c.pbo <= 0.10).length;
+  const bestSharpe = candidatesList.length > 0 ? Math.max(...candidatesList.map(c => c.oos_sharpe_net)) : 0;
+  const avgSharpe = candidatesList.length > 0 
+    ? candidatesList.reduce((sum, c) => sum + c.oos_sharpe_net, 0) / candidatesList.length 
     : 0;
 
-  // Show setup message if no artifacts root
-  if (!artifactsRoot) {
+  // Auto-initialize in browser mode - fetch recent runs even without artifactsRoot
+  useEffect(() => {
+    if (!platform.isTauri && recentRuns.length === 0 && !selectedRunId) {
+      fetchRecentRuns(10);
+    }
+  }, []);
+
+  // In browser mode, skip the artifactsRoot requirement - we can fetch directly from Neon
+  if (!artifactsRoot && platform.isTauri) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-6">
         <FolderOpen className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
+        <div className="text-center max-w-lg">
           <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
-          <p className="text-terminal-muted mb-4">
-            Select a project folder containing SCG artifacts to get started.
-          </p>
-          <button
-            onClick={handleSelectFolder}
-            className="px-6 py-3 bg-profit text-black font-medium rounded-lg hover:bg-profit/90 transition-colors"
-          >
-            Select Project Folder
-          </button>
+          <p className="text-terminal-muted mb-4">Select a project folder containing SCG artifacts.</p>
+          <FolderSelector 
+            type="artifacts"
+            label="Artifacts Folder"
+            description="Select the folder containing your SCG output"
+            onPathChange={(path) => setArtifactsRoot(path)}
+            className="mb-4"
+          />
         </div>
       </div>
     );
   }
 
-  // Show run selector if no run selected
   if (!selectedRunId) {
     return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <Award className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Run Selected</h2>
-          <p className="text-terminal-muted mb-4">
-            Select a campaign and run from the Campaigns page to view candidates.
-          </p>
-          {runs.length > 0 && (
-            <div className="mt-4">
-              <p className="text-sm text-terminal-muted mb-2">Or select a run:</p>
-              <div className="flex flex-wrap gap-2 justify-center">
-                {runs.slice(0, 5).map(run => (
-                  <button
-                    key={run.run_id}
-                    onClick={() => useDataStore.getState().loadRun(run.run_id)}
-                    className="px-3 py-1.5 bg-terminal-surface border border-terminal-border rounded text-sm font-mono hover:border-profit transition-colors"
-                  >
-                    {run.run_id.substring(0, 12)}... (seed:{run.seed})
-                  </button>
-                ))}
-              </div>
+      <div className="space-y-6 p-6">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-3 mb-4">
+            <Database className="w-8 h-8 text-accent-cyan" />
+            <h1 className="text-2xl font-bold">Candidate Explorer</h1>
+          </div>
+          <p className="text-terminal-muted">Select a run to explore strategy candidates</p>
+        </div>
+
+        {/* Run Selector Grid */}
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Clock className="w-5 h-5 text-terminal-muted" />
+              Recent Runs
+            </h2>
+            <button
+              onClick={() => fetchRecentRuns(10)}
+              className="text-sm text-terminal-muted hover:text-terminal-text flex items-center gap-1"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+
+          {isLoading && recentRuns.length === 0 ? (
+            <div className="flex items-center justify-center h-48">
+              <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+            </div>
+          ) : recentRuns.length === 0 ? (
+            <div className="text-center py-12 bg-terminal-surface rounded-xl border border-terminal-border">
+              <Award className="w-12 h-12 mx-auto mb-4 text-terminal-muted opacity-50" />
+              <p className="text-terminal-muted">No runs found</p>
+              <p className="text-sm text-terminal-muted mt-1">Generate strategies from the Cockpit</p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {recentRuns.map((run) => (
+                <button
+                  key={run.run_id}
+                  onClick={() => loadRun(run.run_id)}
+                  className="w-full p-4 bg-terminal-surface rounded-xl border border-terminal-border hover:border-profit transition-all text-left group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-accent-cyan/20 to-profit/20 flex items-center justify-center">
+                        <Award className="w-6 h-6 text-accent-cyan" />
+                      </div>
+                      <div>
+                        <div className="font-medium group-hover:text-profit transition-colors">
+                          {run.campaign_name || 'Unknown Campaign'}
+                        </div>
+                        <div className="text-sm text-terminal-muted font-mono">
+                          {run.run_id}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-right">
+                        <div className="text-sm text-terminal-muted">Candidates</div>
+                        <div className="font-mono font-bold text-accent-cyan">
+                          {run.candidates_count}
+                        </div>
+                      </div>
+                      {run.best_oos_sharpe_net && (
+                        <div className="text-right">
+                          <div className="text-sm text-terminal-muted">Best Sharpe</div>
+                          <div className="font-mono font-bold text-profit">
+                            {run.best_oos_sharpe_net.toFixed(2)}
+                          </div>
+                        </div>
+                      )}
+                      <div className="text-right">
+                        <div className="text-sm text-terminal-muted">Status</div>
+                        <div className={`font-medium ${run.status === 'completed' ? 'text-profit' : 'text-accent-yellow'}`}>
+                          {run.status}
+                        </div>
+                      </div>
+                      <ChevronDown className="w-5 h-5 text-terminal-muted -rotate-90 group-hover:text-profit transition-colors" />
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </div>
+
+        {/* Legacy runs from campaigns (if available) */}
+        {runs.length > 0 && (
+          <div className="max-w-4xl mx-auto mt-8">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <FolderOpen className="w-5 h-5 text-terminal-muted" />
+              From Local Artifacts
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {runs.slice(0, 5).map(run => (
+                <button
+                  key={run.run_id}
+                  onClick={() => loadRun(run.run_id)}
+                  className="px-4 py-2 bg-terminal-surface border border-terminal-border rounded-lg text-sm font-mono hover:border-profit transition-colors"
+                >
+                  {run.run_id.substring(0, 16)}...
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Candidate Explorer</h1>
-          <p className="text-terminal-muted mt-1">
+          <p className="text-terminal-muted text-sm mt-1">
             Run: <span className="font-mono text-accent-cyan">{selectedRunId}</span>
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button 
             onClick={() => selectedRunId && listCandidates(selectedRunId)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border hover:border-profit transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border hover:border-profit transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-profit/10 text-profit border border-profit/30 hover:bg-profit/20 transition-all">
+          <button className="flex items-center gap-2 px-3 py-2 rounded-lg bg-profit/10 text-profit border border-profit/30 hover:bg-profit/20 transition-all text-sm">
             <Download className="w-4 h-4" />
-            Export CSV
+            Export
           </button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-cyan/20 flex items-center justify-center">
+              <Award className="w-5 h-5 text-accent-cyan" />
+            </div>
+            <div>
+              <div className="text-2xl font-bold">{candidatesList.length}</div>
+              <div className="text-xs text-terminal-muted">Total Candidates</div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-profit/20 flex items-center justify-center">
+              <CheckCircle className="w-5 h-5 text-profit" />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-profit">{validatedCount}</div>
+              <div className="text-xs text-terminal-muted">Validated</div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-accent-yellow/20 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-accent-yellow" />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-accent-yellow">{lowPboCount}</div>
+              <div className="text-xs text-terminal-muted">PBO &lt; 10%</div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-profit/20 flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-profit" />
+            </div>
+            <div>
+              <div className="text-2xl font-bold">{bestSharpe.toFixed(2)}</div>
+              <div className="text-xs text-terminal-muted">Best Sharpe</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -340,7 +503,7 @@ export function Candidates() {
       {selectedCandidateIds.length > 0 && (
         <div className="flex items-center gap-4 p-3 bg-accent-cyan/10 border border-accent-cyan/30 rounded-lg">
           <span className="text-sm">
-            <span className="font-mono text-accent-cyan">{selectedCandidateIds.length}</span> candidates selected
+            <span className="font-mono text-accent-cyan font-bold">{selectedCandidateIds.length}</span> selected
           </span>
           <div className="flex-1" />
           <button
@@ -349,7 +512,7 @@ export function Candidates() {
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent-cyan text-black font-medium text-sm hover:bg-accent-cyan/90 transition-colors disabled:opacity-50"
           >
             <GitCompare className="w-4 h-4" />
-            Compare Selected
+            Compare
           </button>
           <button
             onClick={clearCandidateSelection}
@@ -361,47 +524,20 @@ export function Candidates() {
         </div>
       )}
 
-      {/* Error message */}
       {error && (
-        <div className="p-4 bg-loss/10 border border-loss/30 rounded-lg text-loss">
-          {error}
-        </div>
+        <div className="p-4 bg-loss/10 border border-loss/30 rounded-lg text-loss">{error}</div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <MetricCard
-          label="Total Candidates"
-          value={candidates.length}
-          icon={<Award className="w-5 h-5" />}
-        />
-        <MetricCard
-          label="Passed All Gates"
-          value={passedCount}
-          icon={<CheckCircle className="w-5 h-5 text-profit" />}
-        />
-        <MetricCard
-          label="Warnings (PBO>15%)"
-          value={warningCount}
-          icon={<AlertCircle className="w-5 h-5 text-accent-yellow" />}
-        />
-        <MetricCard
-          label="Best Sharpe NET"
-          value={bestSharpe}
-          format="ratio"
-        />
-      </div>
-
       {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-terminal-muted" />
           <input
             type="text"
-            placeholder="Search by strategy or ID..."
+            placeholder="Search strategies..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-terminal-bg border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm"
+            className="w-full pl-10 pr-4 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm"
           />
         </div>
         
@@ -410,37 +546,33 @@ export function Candidates() {
           <select
             value={filterPbo ?? ''}
             onChange={(e) => setFilterPbo(e.target.value ? Number(e.target.value) : null)}
-            className="px-3 py-2 bg-terminal-bg border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm appearance-none pr-8"
+            className="px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm cursor-pointer"
           >
             <option value="">All PBO</option>
-            <option value="0.10">PBO &le; 10%</option>
-            <option value="0.15">PBO &le; 15%</option>
-            <option value="0.20">PBO &le; 20%</option>
+            <option value="0.10">PBO ≤ 10%</option>
+            <option value="0.15">PBO ≤ 15%</option>
+            <option value="0.20">PBO ≤ 20%</option>
           </select>
-          <ChevronDown className="w-4 h-4 -ml-6 text-terminal-muted pointer-events-none" />
         </div>
 
-        <div className="flex items-center gap-2">
-          <select
-            value={filterClass}
-            onChange={(e) => setFilterClass(e.target.value)}
-            className="px-3 py-2 bg-terminal-bg border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm appearance-none pr-8"
-          >
-            <option value="">All Classes</option>
-            <option value="validated">Validated</option>
-            <option value="research">Research</option>
-          </select>
-          <ChevronDown className="w-4 h-4 -ml-6 text-terminal-muted pointer-events-none" />
-        </div>
+        <select
+          value={filterClass}
+          onChange={(e) => setFilterClass(e.target.value)}
+          className="px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm cursor-pointer"
+        >
+          <option value="">All Status</option>
+          <option value="validated">Validated</option>
+          <option value="research">Research</option>
+        </select>
       </div>
 
       {/* Table */}
-      <div className="card-elevated p-0 overflow-hidden">
-        {isLoading && candidates.length === 0 ? (
+      <div className="bg-terminal-surface rounded-xl border border-terminal-border overflow-hidden">
+        {isLoading && candidatesList.length === 0 ? (
           <div className="flex items-center justify-center h-64">
             <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
           </div>
-        ) : candidates.length === 0 ? (
+        ) : candidatesList.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-terminal-muted">
             <Award className="w-12 h-12 mb-4 opacity-50" />
             <p>No candidates found</p>
@@ -448,7 +580,7 @@ export function Candidates() {
           </div>
         ) : (
           <DataTable
-            data={candidates as unknown as Record<string, unknown>[]}
+            data={candidatesList as unknown as Record<string, unknown>[]}
             columns={columns}
             maxHeight="500px"
             onRowClick={handleRowClick}
@@ -456,12 +588,9 @@ export function Candidates() {
         )}
       </div>
 
-      {/* Candidate Detail Drawer */}
+      {/* Detail Drawer */}
       {showDetail && selectedCandidate && (
-        <CandidateDetail
-          candidate={selectedCandidate}
-          onClose={handleCloseDetail}
-        />
+        <CandidateDetail candidate={selectedCandidate} onClose={handleCloseDetail} />
       )}
     </div>
   );

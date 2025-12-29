@@ -1,100 +1,18 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { cmd, createSSEConnection, type SSEEvent } from '../lib/commands';
+import { platform, config, features } from '../lib/platform';
 
 // =============================================================================
-// TAURI DETECTION & API FALLBACK
+// UNIFIED COMMAND SYSTEM
 // =============================================================================
-
-const API_BASE = 'http://localhost:3001/api';
-
-const isTauri = () => {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
-};
-
-// Safe invoke that falls back to API calls in browser mode
-async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri()) {
-    return invoke<T>(command, args);
-  }
-  
-  // Browser mode - use Express API
-  console.log(`[API] ${command}`, args);
-  return callApi<T>(command, args);
-}
-
-// API call mapper for browser mode
-async function callApi<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  let url: string;
-  let options: RequestInit = { method: 'GET' };
-  
-  switch (command) {
-    case 'set_artifacts_root':
-      url = `${API_BASE}/set-root`;
-      options = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: args?.path })
-      };
-      break;
-      
-    case 'load_index':
-      url = `${API_BASE}/index`;
-      break;
-      
-    case 'load_campaign':
-      url = `${API_BASE}/campaign/${args?.campaignId}`;
-      break;
-      
-    case 'load_run':
-      url = `${API_BASE}/run/${args?.runId}`;
-      break;
-      
-    case 'list_candidates_v2':
-      const params = new URLSearchParams();
-      if (args?.limit) params.set('limit', String(args.limit));
-      if (args?.search) params.set('search', String(args.search));
-      if (args?.candidateClass) params.set('candidate_class', String(args.candidateClass));
-      if (args?.maxPbo) params.set('max_pbo', String(args.maxPbo));
-      url = `${API_BASE}/candidates/${args?.runId}?${params.toString()}`;
-      break;
-      
-    case 'load_candidate_detail':
-      url = `${API_BASE}/candidate/${args?.candidateId}`;
-      break;
-      
-    case 'load_backtest_series':
-      url = `${API_BASE}/backtest/${args?.candidateId}`;
-      break;
-      
-    default:
-      console.warn(`[API] Unknown command: ${command}`);
-      throw new Error(`Command not supported in browser mode: ${command}`);
-  }
-  
-  const response = await fetch(url, options);
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || `API error: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  
-  // Handle set-root response format
-  if (command === 'set_artifacts_root') {
-    return data.artifacts_root as T;
-  }
-  
-  return data as T;
-}
 
 // Auto-initialize in browser mode
 async function initBrowserMode(): Promise<string | null> {
-  if (isTauri()) return null;
+  if (platform.isTauri) return null;
   
   try {
-    const response = await fetch(`${API_BASE}/health`);
+    const response = await fetch(`${config.apiBase}/health`);
     if (response.ok) {
       const data = await response.json();
       console.log('[Browser Mode] Connected to API, artifacts at:', data.artifacts_root);
@@ -657,6 +575,21 @@ export interface RegimeStat {
 // STORE STATE
 // =============================================================================
 
+/** Recent run for quick selection */
+export interface RecentRun {
+  run_id: string;
+  campaign_id: string;
+  campaign_name: string;
+  campaign_tag?: string;
+  seed: number;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_secs?: number;
+  candidates_count: number;
+  best_oos_sharpe_net?: number;
+}
+
 interface DataState {
   // Artifacts root
   artifactsRoot: string | null;
@@ -666,6 +599,7 @@ interface DataState {
   campaigns: CampaignSummary[];
   selectedCampaign: CampaignDetail | null;
   runs: RunSummary[];
+  recentRuns: RecentRun[];
   selectedRun: RunDetail | null;
   
   // Candidates
@@ -698,10 +632,12 @@ interface DataState {
   // Actions - Artifact Indexer
   setArtifactsRoot: (path: string) => Promise<void>;
   loadIndex: () => Promise<void>;
+  fetchRecentRuns: (limit?: number) => Promise<void>;
   loadCampaign: (campaignId: string) => Promise<void>;
   loadRun: (runId: string) => Promise<void>;
   listCandidates: (runId: string, filters?: CandidateFilters) => Promise<void>;
   loadCandidateDetail: (candidateId: string) => Promise<void>;
+  setSelectedCandidate: (candidate: CandidateDetailFull | null) => void;
   loadBacktest: (candidateId: string) => Promise<void>;
   setCandidateFilters: (filters: CandidateFilters) => void;
   clearSelectedCandidate: () => void;
@@ -740,6 +676,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   campaigns: [],
   selectedCampaign: null,
   runs: [],
+  recentRuns: [],
   selectedRun: null,
   candidates: [],
   selectedCandidate: null,
@@ -760,20 +697,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   selectedRunId: null,
 
   // ==========================================================================
-  // ARTIFACT INDEXER ACTIONS
+  // ARTIFACT INDEXER ACTIONS (Using Unified Command Layer)
   // ==========================================================================
 
   setArtifactsRoot: async (path: string) => {
     set({ isLoading: true, error: null });
     try {
-      // In browser mode, just set the path directly and load index
-      if (!isTauri()) {
-        set({ artifactsRoot: path, isLoading: false });
-        await get().loadIndex();
-        return;
-      }
-      
-      const artifactsRoot = await safeInvoke<string>('set_artifacts_root', { path });
+      const artifactsRoot = await cmd.setArtifactsRoot(path);
       set({ artifactsRoot, isLoading: false });
       // Auto-load index
       await get().loadIndex();
@@ -785,7 +715,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadIndex: async () => {
     set({ isLoading: true, error: null });
     try {
-      const siteIndex = await safeInvoke<SiteIndex>('load_index');
+      const siteIndex = await cmd.loadIndex();
       set({ 
         siteIndex, 
         campaigns: siteIndex.campaigns,
@@ -796,10 +726,31 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
   },
 
+  fetchRecentRuns: async (limit = 10) => {
+    set({ isLoading: true, error: null });
+    try {
+      const runs = await cmd.listRecentRuns(limit);
+      // Map to RecentRun format
+      const recentRuns = runs.map(r => ({
+        run_id: r.run_id,
+        campaign_id: '',
+        campaign_name: r.campaign_name,
+        seed: 0,
+        status: r.status,
+        candidates_count: r.candidates_count || 0,
+        best_oos_sharpe_net: r.best_oos_sharpe_net,
+        started_at: r.created_at,
+      }));
+      set({ recentRuns, isLoading: false });
+    } catch (error) {
+      set({ error: String(error), isLoading: false });
+    }
+  },
+
   loadCampaign: async (campaignId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const campaign = await safeInvoke<CampaignDetail>('load_campaign', { campaignId });
+      const campaign = await cmd.loadCampaign(campaignId);
       set({ 
         selectedCampaign: campaign, 
         runs: campaign.runs,
@@ -813,7 +764,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadRun: async (runId: string) => {
     set({ isLoading: true, error: null, selectedRunId: runId });
     try {
-      const run = await safeInvoke<RunDetail>('load_run', { runId });
+      const run = await cmd.loadRun(runId);
       set({ selectedRun: run, isLoading: false });
       // Auto-load candidates for this run
       await get().listCandidates(runId);
@@ -826,15 +777,19 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ isLoading: true, error: null });
     const mergedFilters = { ...get().candidateFilters, ...filters };
     try {
-      const candidates = await safeInvoke<CandidateListItem[]>('list_candidates_v2', {
-        runId,
+      const candidates = await cmd.listCandidates(runId, {
         candidateClass: mergedFilters.candidate_class,
         limit: mergedFilters.limit,
-        minSharpe: mergedFilters.min_sharpe,
         maxPbo: mergedFilters.max_pbo,
         search: mergedFilters.search,
       });
-      set({ candidates, candidateFilters: mergedFilters, isLoading: false });
+      // Map to CandidateListItem format
+      const mappedCandidates = candidates.map(c => ({
+        ...c,
+        stress_passed: typeof c.stress_passed === 'boolean' ? (c.stress_passed ? 1 : 0) : (c.stress_passed || 0),
+        stress_total: c.stress_total || 8,
+      }));
+      set({ candidates: mappedCandidates, candidateFilters: mergedFilters, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
     }
@@ -843,8 +798,12 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadCandidateDetail: async (candidateId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const candidate = await safeInvoke<CandidateDetailFull>('load_candidate_detail', { candidateId });
-      set({ selectedCandidate: candidate, isLoading: false });
+      const candidate = await cmd.loadCandidateDetail(candidateId);
+      // Map to CandidateDetailFull format
+      set({ 
+        selectedCandidate: candidate as unknown as CandidateDetailFull, 
+        isLoading: false 
+      });
     } catch (error) {
       set({ error: String(error), isLoading: false });
     }
@@ -853,7 +812,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadBacktest: async (candidateId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const backtest = await safeInvoke<BacktestResult>('load_backtest_series', { candidateId });
+      const backtest = await cmd.loadBacktestSeries(candidateId);
       set({ backtest, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -866,6 +825,10 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   clearSelectedCandidate: () => {
     set({ selectedCandidate: null });
+  },
+
+  setSelectedCandidate: (candidate: CandidateDetailFull | null) => {
+    set({ selectedCandidate: candidate });
   },
 
   toggleCandidateSelection: (candidateId: string) => {
@@ -948,30 +911,59 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   // ==========================================================================
-  // FILE WATCHER
+  // FILE WATCHER (Unified for Tauri and Browser)
   // ==========================================================================
 
   startWatcher: async () => {
     try {
-      await invoke('watch_artifacts');
-      
-      // Listen for artifacts_changed events
-      await listen<{ paths: string[]; event_type: string }>('artifacts_changed', (event) => {
-        console.log('Artifacts changed:', event.payload);
+      if (platform.isTauri) {
+        // Tauri: Use native file watcher
+        await cmd.watchArtifacts();
         
-        // Refresh data based on what changed
-        const { selectedRunId } = get();
-        
-        // Refresh index if campaign data changed
-        if (event.payload.paths.some(p => p.includes('index.json') || p.includes('campaign_'))) {
-          get().loadIndex();
-        }
-        
-        // Refresh candidates if top1000 changed
-        if (selectedRunId && event.payload.paths.some(p => p.includes('top1000'))) {
-          get().listCandidates(selectedRunId);
-        }
-      });
+        // Listen for artifacts_changed events
+        await listen<{ paths: string[]; event_type: string }>('artifacts_changed', (event) => {
+          console.log('Artifacts changed:', event.payload);
+          
+          const { selectedRunId } = get();
+          
+          if (event.payload.paths.some(p => p.includes('index.json') || p.includes('campaign_'))) {
+            get().loadIndex();
+          }
+          
+          if (selectedRunId && event.payload.paths.some(p => p.includes('top1000'))) {
+            get().listCandidates(selectedRunId);
+          }
+        });
+      } else if (features.useSSE) {
+        // Browser: Use SSE for real-time updates
+        createSSEConnection((event: SSEEvent) => {
+          console.log('[SSE] Event:', event.type);
+          
+          const { selectedRunId } = get();
+          
+          if (event.type === 'artifact-change' || event.type === 'cache-invalidated') {
+            get().loadIndex();
+          }
+          
+          if (event.type === 'run-complete' && selectedRunId) {
+            get().listCandidates(selectedRunId);
+          }
+        });
+      } else if (features.usePolling) {
+        // Browser fallback: Use polling
+        let lastCheck = Date.now();
+        setInterval(async () => {
+          try {
+            const { has_changes } = await cmd.pollChanges(lastCheck);
+            if (has_changes) {
+              get().loadIndex();
+            }
+            lastCheck = Date.now();
+          } catch (e) {
+            console.warn('[Polling] Failed:', e);
+          }
+        }, config.pollIntervalMs);
+      }
     } catch (error) {
       console.error('Failed to start watcher:', error);
     }
@@ -979,7 +971,7 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   invalidateCache: async () => {
     try {
-      await invoke('invalidate_cache');
+      await cmd.invalidateCache();
       // Refresh data
       await get().loadIndex();
     } catch (error) {
@@ -1066,12 +1058,15 @@ function generateMockEquityData(): EquityPoint[] {
 // =============================================================================
 
 // Auto-initialize the store in browser mode
-if (!isTauri()) {
+if (features.autoInitialize) {
   setTimeout(async () => {
     const root = await initBrowserMode();
     if (root) {
       const store = useDataStore.getState();
       store.setArtifactsRoot(root);
     }
+    // Also start watcher for real-time updates
+    const store = useDataStore.getState();
+    store.startWatcher();
   }, 100);
 }

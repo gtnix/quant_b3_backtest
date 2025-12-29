@@ -244,3 +244,5 @@ Este documento descreve o fluxo de dados end-to-end do backtester, desde a confi
 
 
 
+
+
