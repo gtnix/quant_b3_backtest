@@ -1,0 +1,8 @@
+{"header":true,"run_id":"a3928bbb-1cf2-4fd6-9ca1-b892aa24f182","strategy_id":"scg_gen15_09046e29","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"dividends_as_cashflow":true,"valuation_price":"raw","signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"requested":"auto","reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled"}}
+{"step":0,"block_id":"value","block_type":"selection","message":"Selected 2 assets","timestamp_ms":1766961888696,"params_effective":{"max_pe":50.0,"max_pb":3.5,"top_pct":30.0}}
+{"step":1,"block_id":"dividend","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961888696,"params_effective":{"top_pct":35.0,"min_yield":0.04}}
+{"step":2,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766961888696,"params_effective":{"min_roe":0.15,"max_debt_equity":0.5,"top_pct":20.0}}
+{"step":3,"block_id":"bollinger","block_type":"entry","message":"0 upper breakouts, 0 lower breakouts from 5 candidates","timestamp_ms":1766961888696,"params_effective":{"std_dev":2.5,"period":35}}
+{"step":4,"block_id":"risk_parity","block_type":"sizing","message":"1 symbols, avg 100.0% weight","timestamp_ms":1766961888696,"params_effective":{"max_positions":50,"min_weight":0.03,"fallback_vol":0.4,"max_weight":0.5}}

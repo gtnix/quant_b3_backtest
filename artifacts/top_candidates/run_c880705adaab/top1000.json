@@ -1,0 +1,120 @@
+{
+  "metadata": {
+    "schema_version": "1.0.0",
+    "run_id": "run_c880705adaab",
+    "campaign_id": "camp_59ef4ea5dd46",
+    "data_integrity_verdict": "PASS",
+    "top_n": 1000,
+    "actual_count": 6,
+    "exported_at": "2025-12-28T21:22:01.182330886Z",
+    "ranking_rules": [
+      "1. oos_sharpe_net DESC",
+      "2. pbo ASC",
+      "3. oos_cagr_net DESC (fallback: 0.0)",
+      "4. max_drawdown_net ASC (fallback: 0.0)",
+      "5. genome_hash ASC (tie-breaker)"
+    ],
+    "filters_applied": [
+      "data_integrity_verdict = 'PASS'",
+      "gates_passed = true (or NULL)"
+    ]
+  },
+  "candidates": [
+    {
+      "rank": 1,
+      "candidate_id": "cand_49770f905764",
+      "genome_hash": "sha256:0bf8f01ab43837cd",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:59.312390Z"
+    },
+    {
+      "rank": 2,
+      "candidate_id": "cand_242c293846b4",
+      "genome_hash": "sha256:27c408d583685f8d",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:56.990332Z"
+    },
+    {
+      "rank": 3,
+      "candidate_id": "cand_4554f329064a",
+      "genome_hash": "sha256:5ffe3d138b994a0f",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:57.571629Z"
+    },
+    {
+      "rank": 4,
+      "candidate_id": "cand_904bcdf8c4c7",
+      "genome_hash": "sha256:65240d6915d7ed51",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:59.825607Z"
+    },
+    {
+      "rank": 5,
+      "candidate_id": "cand_c39ca14ac14f",
+      "genome_hash": "sha256:d4dd15485de533ea",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:58.085019Z"
+    },
+    {
+      "rank": 6,
+      "candidate_id": "cand_fd69e6c1c76d",
+      "genome_hash": "sha256:e3db0608f9b71c69",
+      "oos_sharpe_net": 0.6,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.08,
+      "max_drawdown_net": 0.0,
+      "dsr": 0.55,
+      "stress_passed": 7,
+      "stress_total": 7,
+      "gates_passed": true,
+      "turnover_annual": 0.0,
+      "capacity_usd": null,
+      "created_at": "2025-12-28T21:20:58.698035Z"
+    }
+  ]
+}

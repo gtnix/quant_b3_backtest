@@ -159,17 +159,31 @@ max_participation = 0.05
 
 set -e
 
+# Navigate to project root (works from any directory)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 SEED={}
 RUN_ID="{}"
 CAMPAIGN_ID="{}"
+STRATEGY_CONFIG="$SCRIPT_DIR/strategy.toml"
 
 echo "Replaying candidate {}"
 echo "  Seed: $SEED"
 echo "  Run ID: $RUN_ID"
+echo "  Project root: $PROJECT_ROOT"
+echo "  Strategy config: $STRATEGY_CONFIG"
 
-# Run the backtest
-cargo run --release --bin combiner -- run \
-    --config configs/campaigns/$(basename "$0" .sh).toml \
+# Check if strategy.toml exists
+if [ ! -f "$STRATEGY_CONFIG" ]; then
+    echo "ERROR: strategy.toml not found in $SCRIPT_DIR"
+    exit 1
+fi
+
+# Run the backtest using pre-compiled binary
+./target/release/combiner run \
+    --config "$STRATEGY_CONFIG" \
     --seed $SEED \
     --output output/replay/$RUN_ID
 

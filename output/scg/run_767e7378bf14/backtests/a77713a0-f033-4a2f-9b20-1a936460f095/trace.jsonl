@@ -1,0 +1,6 @@
+{"header":true,"run_id":"a77713a0-f033-4a2f-9b20-1a936460f095","strategy_id":"scg_gen6_b5c31356","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"signals_price":"adjusted","dividends_as_cashflow":true,"valuation_price":"raw"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled","requested":"auto"}}
+{"step":0,"block_id":"low_vol","block_type":"selection","message":"Selected 3 assets","timestamp_ms":1766961891335,"params_effective":{"max_annualized_vol":0.30000000000000004,"lookback_days":100,"top_pct":50.0}}
+{"step":1,"block_id":"momentum","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961891335,"params_effective":{"lookback_days":63,"min_return":0.3500000000000001,"top_pct":30.0,"skip_last_days":56}}
+{"step":2,"block_id":"dividend","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961891335,"params_effective":{"min_yield":0.05,"top_pct":20.0}}

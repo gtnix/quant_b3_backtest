@@ -1,0 +1,10 @@
+{"header":true,"run_id":"67398cfa-0e8d-42fa-be2e-27bc32f8e5ef","strategy_id":"scg_gen17_2b1830dc","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","signals_price":"adjusted","dividends_as_cashflow":true}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled","requested":"auto"}}
+{"step":0,"block_id":"value","block_type":"selection","message":"Selected 2 assets","timestamp_ms":1766962836958,"params_effective":{"top_pct":40.0,"max_pe":40.0,"max_pb":3.5}}
+{"step":1,"block_id":"rsi","block_type":"entry","message":"0 oversold, 5 overbought from 5 candidates","timestamp_ms":1766962836958,"params_effective":{"period":21,"overbought":60.0,"oversold":25.0}}
+{"step":2,"block_id":"bollinger","block_type":"entry","message":"5 upper breakouts, 0 lower breakouts from 5 candidates","timestamp_ms":1766962836959,"params_effective":{"std_dev":1.0,"period":20}}
+{"step":3,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962836959,"params_effective":{"activation_pct":0.05,"trailing_pct":0.09}}
+{"step":4,"block_id":"stop_loss","block_type":"exit","message":"0 stop-loss exits triggered","timestamp_ms":1766962836959,"params_effective":{"threshold_pct":0.08}}
+{"step":5,"block_id":"stop_loss","block_type":"exit","message":"0 stop-loss exits triggered","timestamp_ms":1766962836959,"params_effective":{"threshold_pct":0.08}}
+{"step":6,"block_id":"vol_targeting","block_type":"sizing","message":"2 symbols, target 15%, estimated 15%, total weight 66.6%","timestamp_ms":1766962836959,"params_effective":{"max_weight":0.35,"min_weight":0.060000000000000005,"correlation":0.5,"max_positions":10,"max_leverage":1.4,"target_vol":0.15000000000000002,"fallback_vol":0.25}}

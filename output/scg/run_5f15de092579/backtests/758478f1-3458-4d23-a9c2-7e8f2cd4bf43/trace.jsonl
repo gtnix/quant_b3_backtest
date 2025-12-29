@@ -1,0 +1,6 @@
+{"header":true,"run_id":"758478f1-3458-4d23-a9c2-7e8f2cd4bf43","strategy_id":"scg_gen0_1c241b1f","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","dividends_as_cashflow":true,"signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"resolved":"compiled","requested":"auto","reason":"Fast mode does not support dividend cashflow tracking"}}
+{"step":0,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766957369683,"params_effective":{"top_pct":15.0,"max_debt_equity":0.1,"min_roe":0.1}}
+{"step":1,"block_id":"dividend","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766957369683,"params_effective":{"top_pct":35.0,"min_yield":0.09999999999999999}}
+{"step":2,"block_id":"vol_targeting","block_type":"sizing","message":"1 symbols, target 17%, estimated 8%, total weight 35.0%","timestamp_ms":1766957369683,"params_effective":{"max_positions":20,"fallback_vol":0.25,"target_vol":0.16999999999999998,"max_weight":0.35,"min_weight":0.01,"max_leverage":1.7000000000000002,"correlation":0.2}}

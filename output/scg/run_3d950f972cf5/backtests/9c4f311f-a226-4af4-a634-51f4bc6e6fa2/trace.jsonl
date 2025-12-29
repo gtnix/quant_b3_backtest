@@ -1,0 +1,10 @@
+{"header":true,"run_id":"9c4f311f-a226-4af4-a634-51f4bc6e6fa2","strategy_id":"scg_gen49_14a0fb2a","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","signals_price":"adjusted","dividends_as_cashflow":true}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"resolved":"compiled","requested":"auto","reason":"Fast mode does not support dividend cashflow tracking"}}
+{"step":0,"block_id":"size","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962838665,"params_effective":{"top_pct":50.0,"min_market_cap":94100000000.0,"max_market_cap":201000000000.0}}
+{"step":1,"block_id":"dividend","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962838665,"params_effective":{"top_pct":25.0,"min_yield":0.13}}
+{"step":2,"block_id":"zscore","block_type":"entry","message":"0 oversold (z<-2), 0 overbought (z>2) from 5 candidates","timestamp_ms":1766962838665,"params_effective":{"threshold":2.0,"period":15}}
+{"step":3,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962838665,"params_effective":{"activation_pct":0.15000000000000002,"trailing_pct":0.12}}
+{"step":4,"block_id":"vol_targeting","block_type":"sizing","message":"5 symbols, target 25%, estimated 11%, total weight 50.0%","timestamp_ms":1766962838665,"params_effective":{"target_vol":0.25,"fallback_vol":0.25,"max_leverage":1.5,"correlation":0.6000000000000001,"max_positions":30,"max_weight":0.1,"min_weight":0.05}}
+{"step":5,"block_id":"equal_weight","block_type":"sizing","message":"5 symbols with 20.0% each","timestamp_ms":1766962838665,"params_effective":{"max_positions":5,"min_weight":0.08,"max_weight":0.5}}
+{"step":6,"block_id":"risk_parity","block_type":"sizing","message":"5 symbols, avg 20.0% weight","timestamp_ms":1766962838665,"params_effective":{"min_weight":0.01,"fallback_vol":0.25,"max_positions":15,"max_weight":0.4}}

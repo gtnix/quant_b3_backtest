@@ -1,0 +1,118 @@
+{
+  "id": "41c07175-f2ff-4a83-9e81-64cd35597f2b",
+  "genes": [
+    {
+      "block_type": "selection",
+      "block_id": "quality",
+      "params": {
+        "min_roe": {
+          "type": "float",
+          "value": 0.45,
+          "min": 0.05,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "max_debt_equity": {
+          "type": "float",
+          "value": 0.1,
+          "min": 0.1,
+          "max": 2.0,
+          "step": 0.1
+        },
+        "top_pct": {
+          "type": "float",
+          "value": 15.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        }
+      }
+    },
+    {
+      "block_type": "selection",
+      "block_id": "dividend",
+      "params": {
+        "top_pct": {
+          "type": "float",
+          "value": 10.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "min_yield": {
+          "type": "float",
+          "value": 0.09999999999999999,
+          "min": 0.01,
+          "max": 0.15,
+          "step": 0.01
+        }
+      }
+    },
+    {
+      "block_type": "sizing",
+      "block_id": "vol_targeting",
+      "params": {
+        "correlation": {
+          "type": "float",
+          "value": 0.4,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.1
+        },
+        "max_weight": {
+          "type": "float",
+          "value": 0.1,
+          "min": 0.1,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "max_positions": {
+          "type": "int",
+          "value": 10,
+          "min": 5,
+          "max": 30,
+          "step": 5
+        },
+        "target_vol": {
+          "type": "float",
+          "value": 0.25,
+          "min": 0.05,
+          "max": 0.3,
+          "step": 0.02
+        },
+        "max_leverage": {
+          "type": "float",
+          "value": 1.9000000000000001,
+          "min": 0.5,
+          "max": 2.0,
+          "step": 0.1
+        },
+        "min_weight": {
+          "type": "float",
+          "value": 0.03,
+          "min": 0.01,
+          "max": 0.1,
+          "step": 0.01
+        }
+      }
+    }
+  ],
+  "fitness": {
+    "cagr": 0.2509999999999999,
+    "sharpe_ratio": 190.72996179927983,
+    "max_drawdown": 0.0,
+    "calmar_ratio": 0.0,
+    "sortino_ratio": 999.99,
+    "profit_factor": 0.0,
+    "total_trades": 0,
+    "volatility": 0.000917192996703488,
+    "turnover_annual": 0.0,
+    "penalty_low_trades": 0.5,
+    "penalty_extreme_turnover": 0.0,
+    "pareto_rank": 0,
+    "crowding_distance": 0.0,
+    "is_valid": true
+  },
+  "generation": 0,
+  "parent_ids": []
+}

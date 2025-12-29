@@ -1,0 +1,7 @@
+{"header":true,"run_id":"363f2d1e-8ab3-4c1b-91a9-fd00d718c826","strategy_id":"scg_gen33_b33a21de","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","dividends_as_cashflow":true,"signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"requested":"auto","resolved":"compiled","reason":"Fast mode does not support dividend cashflow tracking"}}
+{"step":0,"block_id":"carry","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961900635,"params_effective":{"top_pct":45.0,"min_carry":-0.04}}
+{"step":1,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766961900635,"params_effective":{"max_debt_equity":0.5,"min_roe":0.15,"top_pct":15.0}}
+{"step":2,"block_id":"take_profit","block_type":"exit","message":"0 take-profit exits triggered","timestamp_ms":1766961900635,"params_effective":{"target_pct":0.55}}
+{"step":3,"block_id":"equal_weight","block_type":"sizing","message":"1 symbols with 100.0% each","timestamp_ms":1766961900635,"params_effective":{"min_weight":0.05,"max_positions":15,"max_weight":0.25}}

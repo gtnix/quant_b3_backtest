@@ -1,0 +1,124 @@
+{
+  "id": "90ee3b89-4bb8-402f-b8aa-bf3eb5cbc824",
+  "genes": [
+    {
+      "block_type": "selection",
+      "block_id": "momentum",
+      "params": {
+        "top_pct": {
+          "type": "float",
+          "value": 30.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "min_return": {
+          "type": "float",
+          "value": -0.4,
+          "min": -0.5,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "skip_last_days": {
+          "type": "int",
+          "value": 28,
+          "min": 0,
+          "max": 63,
+          "step": 7
+        },
+        "lookback_days": {
+          "type": "int",
+          "value": 42,
+          "min": 21,
+          "max": 252,
+          "step": 21
+        }
+      }
+    },
+    {
+      "block_type": "entry",
+      "block_id": "bollinger",
+      "params": {
+        "std_dev": {
+          "type": "float",
+          "value": 2.5,
+          "min": 1.0,
+          "max": 3.0,
+          "step": 0.5
+        },
+        "period": {
+          "type": "int",
+          "value": 15,
+          "min": 10,
+          "max": 50,
+          "step": 5
+        }
+      }
+    },
+    {
+      "block_type": "exit",
+      "block_id": "trailing_stop",
+      "params": {
+        "trailing_pct": {
+          "type": "float",
+          "value": 0.27,
+          "min": 0.03,
+          "max": 0.3,
+          "step": 0.03
+        },
+        "activation_pct": {
+          "type": "float",
+          "value": 0.1,
+          "min": 0.0,
+          "max": 0.3,
+          "step": 0.05
+        }
+      }
+    },
+    {
+      "block_type": "sizing",
+      "block_id": "equal_weight",
+      "params": {
+        "min_weight": {
+          "type": "float",
+          "value": 0.09999999999999999,
+          "min": 0.01,
+          "max": 0.1,
+          "step": 0.01
+        },
+        "max_positions": {
+          "type": "int",
+          "value": 50,
+          "min": 5,
+          "max": 50,
+          "step": 5
+        },
+        "max_weight": {
+          "type": "float",
+          "value": 0.5,
+          "min": 0.05,
+          "max": 0.5,
+          "step": 0.05
+        }
+      }
+    }
+  ],
+  "fitness": {
+    "cagr": 0.1,
+    "sharpe_ratio": 0.8,
+    "max_drawdown": -0.12,
+    "calmar_ratio": 1.5,
+    "sortino_ratio": 1.0,
+    "profit_factor": 1.5,
+    "total_trades": 100,
+    "volatility": 0.15,
+    "turnover_annual": 2.5,
+    "penalty_low_trades": 0.0,
+    "penalty_extreme_turnover": 0.0,
+    "pareto_rank": 0,
+    "crowding_distance": 0.0,
+    "is_valid": true
+  },
+  "generation": 0,
+  "parent_ids": []
+}

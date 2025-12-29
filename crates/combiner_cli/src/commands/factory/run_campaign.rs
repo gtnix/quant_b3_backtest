@@ -192,7 +192,23 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
 
             match result {
                 Ok(run_result) => {
-                    // Register candidates
+                    // Register Stage A research candidates first
+                    for cand in &run_result.research_candidates {
+                        let candidate_id = generate_candidate_id();
+                        registry
+                            .register_research_candidate(
+                                &candidate_id,
+                                &run_id,
+                                &cand.genome_hash,
+                                cand.rank_in_run,
+                                cand.oos_sharpe,
+                                cand.oos_cagr,
+                            )
+                            .await?;
+                    }
+                    info!(run_id, "Registered {} Stage A research candidates", run_result.research_candidates.len());
+
+                    // Register Stage B validated candidates (will upsert to validated)
                     for (rank, cand) in run_result.candidates.iter().enumerate() {
                         let candidate_id = generate_candidate_id();
                         registry
@@ -215,6 +231,7 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
                             )
                             .await?;
                     }
+                    info!(run_id, "Registered {} Stage B validated candidates", run_result.candidates.len());
 
                     // Register run end (success)
                     registry
@@ -231,6 +248,15 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
                             Some(run_result.candidates.len() as i32),
                         )
                         .await?;
+
+                    // Register data integrity verdict for this run
+                    // The audit was done at campaign level, so all runs inherit PASS
+                    if config.data_integrity.enabled {
+                        let report_path = format!("artifacts/data_integrity/{}/report.json", campaign_id);
+                        registry
+                            .register_data_integrity(&run_id, "PASS", 1.0, &report_path)
+                            .await?;
+                    }
 
                     completed += 1;
                     info!(run_id, seed, "Run completed successfully");
@@ -296,10 +322,13 @@ struct RunResult {
     generations: u32,
     evaluations: u64,
     artifact_path: String,
+    /// Stage B validated candidates (top_k)
     candidates: Vec<CandidateResult>,
+    /// Stage A research candidates (persist_stage_a_top_n)
+    research_candidates: Vec<ResearchCandidateResult>,
 }
 
-/// Candidate result data.
+/// Stage B validated candidate result data.
 struct CandidateResult {
     genome_hash: String,
     oos_sharpe_net: f32,
@@ -313,6 +342,14 @@ struct CandidateResult {
     capacity_usd: Option<f32>,
     oos_cagr_net: Option<f32>,
     max_drawdown_net: Option<f32>,
+}
+
+/// Stage A research candidate result data (minimal, from evolution HoF).
+struct ResearchCandidateResult {
+    genome_hash: String,
+    rank_in_run: i32,
+    oos_sharpe: Option<f32>,
+    oos_cagr: Option<f32>,
 }
 
 /// Execute a single SCG run.
@@ -335,6 +372,9 @@ async fn execute_single_run(
         evo_config.convergence_generations = conv;
     }
 
+    // Set hall_of_fame_size to persist_stage_a_top_n for research candidates
+    evo_config.hall_of_fame_size = config.budget.persist_stage_a_top_n;
+
     // Set execution config
     evo_config.stress_testing_enabled = config.budget.stress_enabled;
 
@@ -352,12 +392,12 @@ async fn execute_single_run(
     // Create and run evolution engine
     let mut engine = EvolutionEngine::new(evo_config.clone(), executor);
 
-    info!(run_id, seed, "Starting SCG evolution");
+    info!(run_id, seed, "Starting SCG evolution with Stage A HoF size {}", config.budget.persist_stage_a_top_n);
 
     // Run ultra mode
     let result = engine.evolve_ultra(validation_cache, config.budget.top_k)?;
 
-    // Collect candidates from validated HoF
+    // Collect Stage B validated candidates
     let mut candidates = Vec::new();
     for (rank, entry) in result.validated_hall_of_fame.entries().iter().enumerate() {
         // Compute genome hash
@@ -395,11 +435,42 @@ async fn execute_single_run(
         }
     }
 
+    // Collect Stage A research candidates from evolution HoF
+    let mut research_candidates = Vec::new();
+    for (rank, entry) in result.stage_a_hall_of_fame.entries().iter().enumerate() {
+        // Compute genome hash
+        let genome_json = serde_json::to_string(&entry.genome)?;
+        let genome_hash = format!(
+            "sha256:{}",
+            hex::encode(&sha2::Sha256::digest(genome_json.as_bytes())[..8])
+        );
+
+        // Get fitness metrics if available
+        let (oos_sharpe, oos_cagr) = entry.genome.fitness.as_ref()
+            .map(|f| (Some(f.sharpe_ratio as f32), Some(f.cagr as f32)))
+            .unwrap_or((None, None));
+
+        research_candidates.push(ResearchCandidateResult {
+            genome_hash,
+            rank_in_run: (rank + 1) as i32,
+            oos_sharpe,
+            oos_cagr,
+        });
+
+        if rank >= config.budget.persist_stage_a_top_n {
+            break;
+        }
+    }
+
+    info!(run_id, "Collected {} Stage A research candidates, {} Stage B validated candidates",
+          research_candidates.len(), candidates.len());
+
     Ok(RunResult {
         generations: result.total_generations,
         evaluations: engine.stats().iter().map(|s| s.evaluated as u64).sum(),
         artifact_path: output_dir,
         candidates,
+        research_candidates,
     })
 }
 

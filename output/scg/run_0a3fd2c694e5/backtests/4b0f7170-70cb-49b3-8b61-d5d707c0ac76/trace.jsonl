@@ -1,0 +1,7 @@
+{"header":true,"run_id":"4b0f7170-70cb-49b3-8b61-d5d707c0ac76","strategy_id":"scg_gen4_0eff66a3","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"signals_price":"adjusted","dividends_as_cashflow":true,"valuation_price":"raw"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"requested":"auto","resolved":"compiled","reason":"Fast mode does not support dividend cashflow tracking"}}
+{"step":0,"block_id":"momentum","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766961335544,"params_effective":{"min_return":-0.4,"top_pct":5.0,"skip_last_days":28,"lookback_days":21}}
+{"step":1,"block_id":"quality","block_type":"selection","message":"Selected 2 assets","timestamp_ms":1766961335544,"params_effective":{"max_debt_equity":1.2000000000000002,"top_pct":35.0,"min_roe":0.45}}
+{"step":2,"block_id":"size","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961335544,"params_effective":{"min_market_cap":71100000000.0,"max_market_cap":361000000000.0,"top_pct":40.0}}
+{"step":3,"block_id":"bollinger","block_type":"entry","message":"0 upper breakouts, 0 lower breakouts from 5 candidates","timestamp_ms":1766961335544,"params_effective":{"std_dev":3.0,"period":45}}

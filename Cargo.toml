@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["dashboard/src-tauri"]
 members = [
     "crates/backtester_core",
     "crates/backtester_io",

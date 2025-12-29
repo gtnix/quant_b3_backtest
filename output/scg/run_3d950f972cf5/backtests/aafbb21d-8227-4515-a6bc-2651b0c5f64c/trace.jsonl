@@ -1,0 +1,10 @@
+{"header":true,"run_id":"aafbb21d-8227-4515-a6bc-2651b0c5f64c","strategy_id":"scg_gen29_65455ed7","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","dividends_as_cashflow":true,"signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"reason":"Fast mode does not support dividend cashflow tracking","requested":"auto","resolved":"compiled"}}
+{"step":0,"block_id":"size","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962837678,"params_effective":{"max_market_cap":441000000000.0,"top_pct":10.0,"min_market_cap":97100000000.0}}
+{"step":1,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766962837678,"params_effective":{"max_debt_equity":1.1,"min_roe":0.5,"top_pct":5.0}}
+{"step":2,"block_id":"rsi","block_type":"entry","message":"0 oversold, 5 overbought from 5 candidates","timestamp_ms":1766962837678,"params_effective":{"period":22,"overbought":60.0,"oversold":25.0}}
+{"step":3,"block_id":"bollinger","block_type":"entry","message":"5 upper breakouts, 0 lower breakouts from 5 candidates","timestamp_ms":1766962837678,"params_effective":{"period":20,"std_dev":2.0}}
+{"step":4,"block_id":"bollinger","block_type":"entry","message":"0 upper breakouts, 0 lower breakouts from 5 candidates","timestamp_ms":1766962837678,"params_effective":{"period":20,"std_dev":2.0}}
+{"step":5,"block_id":"time_exit","block_type":"exit","message":"0 time-based exits (>120 days)","timestamp_ms":1766962837678,"params_effective":{"max_days":120}}
+{"step":6,"block_id":"vol_targeting","block_type":"sizing","message":"1 symbols, target 19%, estimated 10%, total weight 40.0%","timestamp_ms":1766962837678,"params_effective":{"correlation":0.4,"target_vol":0.19,"fallback_vol":0.25,"max_positions":10,"max_leverage":0.9,"max_weight":0.4,"min_weight":0.08}}

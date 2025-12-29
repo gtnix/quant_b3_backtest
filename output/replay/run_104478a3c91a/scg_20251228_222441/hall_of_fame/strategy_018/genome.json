@@ -1,0 +1,157 @@
+{
+  "id": "9a9c01ac-52dd-441c-9235-fcafacf67820",
+  "genes": [
+    {
+      "block_type": "selection",
+      "block_id": "low_vol",
+      "params": {
+        "top_pct": {
+          "type": "float",
+          "value": 5.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "max_annualized_vol": {
+          "type": "float",
+          "value": 0.15000000000000002,
+          "min": 0.1,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "lookback_days": {
+          "type": "int",
+          "value": 100,
+          "min": 20,
+          "max": 252,
+          "step": 20
+        }
+      }
+    },
+    {
+      "block_type": "selection",
+      "block_id": "size",
+      "params": {
+        "top_pct": {
+          "type": "float",
+          "value": 25.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "min_market_cap": {
+          "type": "float",
+          "value": 40100000000.0,
+          "min": 100000000.0,
+          "max": 100000000000.0,
+          "step": 1000000000.0
+        },
+        "max_market_cap": {
+          "type": "float",
+          "value": 501000000000.0,
+          "min": 1000000000.0,
+          "max": 1000000000000.0,
+          "step": 10000000000.0
+        }
+      }
+    },
+    {
+      "block_type": "entry",
+      "block_id": "ma_crossover",
+      "params": {
+        "slow_period": {
+          "type": "int",
+          "value": 325,
+          "min": 50,
+          "max": 400,
+          "step": 25
+        },
+        "fast_period": {
+          "type": "int",
+          "value": 25,
+          "min": 5,
+          "max": 100,
+          "step": 5
+        }
+      }
+    },
+    {
+      "block_type": "exit",
+      "block_id": "stop_loss",
+      "params": {
+        "threshold_pct": {
+          "type": "float",
+          "value": 0.1,
+          "min": 0.02,
+          "max": 0.25,
+          "step": 0.02
+        }
+      }
+    },
+    {
+      "block_type": "exit",
+      "block_id": "take_profit",
+      "params": {
+        "target_pct": {
+          "type": "float",
+          "value": 0.1,
+          "min": 0.05,
+          "max": 1.0,
+          "step": 0.05
+        }
+      }
+    },
+    {
+      "block_type": "sizing",
+      "block_id": "risk_parity",
+      "params": {
+        "min_weight": {
+          "type": "float",
+          "value": 0.060000000000000005,
+          "min": 0.01,
+          "max": 0.1,
+          "step": 0.01
+        },
+        "max_positions": {
+          "type": "int",
+          "value": 35,
+          "min": 5,
+          "max": 50,
+          "step": 5
+        },
+        "max_weight": {
+          "type": "float",
+          "value": 0.25,
+          "min": 0.05,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "fallback_vol": {
+          "type": "float",
+          "value": 0.2,
+          "min": 0.1,
+          "max": 0.5,
+          "step": 0.05
+        }
+      }
+    }
+  ],
+  "fitness": {
+    "cagr": 0.2509999999999999,
+    "sharpe_ratio": 190.72996179927983,
+    "max_drawdown": 0.0,
+    "calmar_ratio": 0.0,
+    "sortino_ratio": 999.99,
+    "profit_factor": 0.0,
+    "total_trades": 0,
+    "volatility": 0.000917192996703488,
+    "turnover_annual": 0.0,
+    "penalty_low_trades": 0.5,
+    "penalty_extreme_turnover": 0.0,
+    "pareto_rank": 0,
+    "crowding_distance": 0.0,
+    "is_valid": true
+  },
+  "generation": 0,
+  "parent_ids": []
+}

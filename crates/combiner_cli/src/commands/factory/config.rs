@@ -152,9 +152,13 @@ pub struct BudgetConfig {
     /// Maximum number of runs (same as seed count unless resumed).
     #[serde(default = "default_max_runs")]
     pub max_runs: usize,
-    /// Top K candidates to validate per run.
+    /// Top K candidates to validate per run (Stage B).
     #[serde(default = "default_top_k")]
     pub top_k: usize,
+    /// Number of Stage A (research) candidates to persist per run.
+    /// These are the best candidates from evolution before Stage B validation.
+    #[serde(default = "default_persist_stage_a")]
+    pub persist_stage_a_top_n: usize,
     /// Timeout per run in seconds.
     #[serde(default = "default_timeout")]
     pub timeout_per_run_secs: u64,
@@ -168,7 +172,11 @@ fn default_max_runs() -> usize {
 }
 
 fn default_top_k() -> usize {
-    10
+    50
+}
+
+fn default_persist_stage_a() -> usize {
+    1000
 }
 
 fn default_timeout() -> u64 {
@@ -184,6 +192,7 @@ impl Default for BudgetConfig {
         Self {
             max_runs: default_max_runs(),
             top_k: default_top_k(),
+            persist_stage_a_top_n: default_persist_stage_a(),
             timeout_per_run_secs: default_timeout(),
             stress_enabled: default_stress_enabled(),
         }
@@ -355,7 +364,20 @@ impl CampaignConfig {
 
     /// Compute a hash of the dataset for reproducibility.
     pub fn dataset_hash(&self) -> Option<String> {
-        let data_path = self.dataset.data_path.as_ref()?;
+        // Try explicit data_path first
+        if let Some(data_path) = &self.dataset.data_path {
+            if let Some(hash) = self.hash_path(data_path) {
+                return Some(hash);
+            }
+        }
+
+        // Fallback: use market-based default path
+        let default_path = format!("data/{}/ohlcv", self.dataset.market.to_lowercase());
+        self.hash_path(&default_path)
+    }
+
+    /// Hash a path (file or directory) for reproducibility.
+    fn hash_path(&self, data_path: &str) -> Option<String> {
         let path = Path::new(data_path);
 
         if !path.exists() {
@@ -435,7 +457,7 @@ market = "BR"
 start_date = "2018-01-01"
 end_date = "2024-12-01"
 universe = "ibov"
-# data_path = "data/ohlcv"  # Optional: for dataset hash
+data_path = "data/br/ohlcv"  # Used for dataset_hash (reproducibility)
 
 [evolution]
 # base_config = "configs/optimization/scg_base.toml"

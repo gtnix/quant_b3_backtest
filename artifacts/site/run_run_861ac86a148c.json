@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "run_id": "run_861ac86a148c",
+    "campaign_id": "camp_539cb2beeaa9",
+    "seed": 45,
+    "status": "\"completed\"",
+    "started_at": "2025-12-28T22:44:56.818743Z",
+    "completed_at": "2025-12-28T22:44:59.459538Z",
+    "duration_secs": 1,
+    "artifact_path": "output/scg/run_861ac86a148c"
+  },
+  "config_snapshot": null,
+  "metrics": {
+    "generations_completed": 50,
+    "total_evaluations": 4990,
+    "data_integrity_verdict": "PASS",
+    "data_integrity_score": 1.0,
+    "best_oos_sharpe_net": 143.04747,
+    "best_pbo": 0.12,
+    "research_candidates_count": 0,
+    "validated_candidates_count": 10
+  },
+  "top_candidates": [
+    {
+      "candidate_id": "cand_df03e241ccd7",
+      "genome_hash": "sha256:11a732808bd40292",
+      "rank": 0,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_1a3b21b18986",
+      "genome_hash": "sha256:fd1c57abebec27dd",
+      "rank": 1,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_f7682a0a1259",
+      "genome_hash": "sha256:df50d3f3cdc3b7c4",
+      "rank": 2,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_4f60c8cee534",
+      "genome_hash": "sha256:6a477d90af9ef811",
+      "rank": 3,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_7f8a1ce7cc25",
+      "genome_hash": "sha256:d6b1a1b6b57f6bf1",
+      "rank": 4,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_25c5651798b6",
+      "genome_hash": "sha256:a0334dc75b86aa40",
+      "rank": 5,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_f1a4400b8290",
+      "genome_hash": "sha256:40610c07b82ea6f4",
+      "rank": 6,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_3aad14388f9b",
+      "genome_hash": "sha256:6cbbc50140a2b1df",
+      "rank": 7,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_951d24f96ea0",
+      "genome_hash": "sha256:25d60b0e1b578e22",
+      "rank": 8,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    },
+    {
+      "candidate_id": "cand_7156d1001e7b",
+      "genome_hash": "sha256:90483c63c53b7ac4",
+      "rank": 9,
+      "candidate_class": "validated",
+      "oos_sharpe_net": 143.04747,
+      "pbo": 0.12,
+      "oos_cagr_net": 0.2008,
+      "gates_passed": true
+    }
+  ],
+  "exports": {
+    "top1000_json": null,
+    "top1000_csv": null,
+    "data_integrity_report": "artifacts/data_integrity/camp_539cb2beeaa9/report.json"
+  }
+}

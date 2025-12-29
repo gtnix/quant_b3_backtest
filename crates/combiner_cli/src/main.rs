@@ -178,6 +178,10 @@ enum FactoryAction {
         /// Export formats (comma-separated: json,csv)
         #[arg(short, long, default_value = "json,csv")]
         format: String,
+
+        /// Candidate class filter: research, validated, or all
+        #[arg(short, long, default_value = "research")]
+        class: String,
     },
 
     /// List campaigns
@@ -191,6 +195,17 @@ enum FactoryAction {
     Show {
         /// Campaign ID or Run ID
         id: String,
+    },
+
+    /// Build site-ready JSON bundle for web consumption
+    BuildSite {
+        /// Campaign ID (optional, builds all if not provided)
+        #[arg(short, long)]
+        campaign: Option<String>,
+
+        /// Run ID (optional, builds single run detail)
+        #[arg(short, long)]
+        run: Option<String>,
     },
 
     /// Compare candidates across multiple runs
@@ -346,8 +361,13 @@ fn main() -> Result<()> {
                 commands::factory::execute_audit(&campaign, &mode)
             }
 
-            FactoryAction::ExportTop { run, top, format } => {
-                commands::factory::execute_export_top(&run, top, &format)
+            FactoryAction::ExportTop { run, top, format, class } => {
+                let class_filter = commands::factory::CandidateClassFilter::from_str(&class);
+                commands::factory::execute_export_top(&run, top, &format, class_filter)
+            }
+
+            FactoryAction::BuildSite { campaign, run } => {
+                commands::factory::execute_build_site(campaign.as_deref(), run.as_deref())
             }
         },
     }

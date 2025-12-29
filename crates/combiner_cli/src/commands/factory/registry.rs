@@ -77,6 +77,22 @@ pub struct Candidate {
     pub oos_cagr_net: Option<f32>,
     pub max_drawdown_net: Option<f32>,
     pub created_at: DateTime<Utc>,
+    /// Candidate class: 'research' (Stage A) or 'validated' (Stage B)
+    #[serde(default = "default_candidate_class")]
+    pub candidate_class: String,
+    /// Deterministic rank within the run (1 = best)
+    pub rank_in_run: Option<i32>,
+    /// Source stage: 'A' or 'B'
+    #[serde(default = "default_source_stage")]
+    pub source_stage: String,
+}
+
+fn default_candidate_class() -> String {
+    "research".to_string()
+}
+
+fn default_source_stage() -> String {
+    "A".to_string()
 }
 
 /// Promotion record from the database.
@@ -151,6 +167,12 @@ impl Registry {
 
     /// Connect to the PostgreSQL database with a specific connection string.
     pub async fn connect_with_url(database_url: &str) -> Result<Self> {
+        // Install the ring crypto provider for rustls 0.23+
+        // This is required before creating any TLS configuration
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok(); // Ignore error if already installed
+        
         // Build rustls config with webpki roots
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -524,7 +546,9 @@ impl Registry {
                     turnover_annual = $12,
                     capacity_usd = $13,
                     oos_cagr_net = $14,
-                    max_drawdown_net = $15
+                    max_drawdown_net = $15,
+                    candidate_class = 'validated',
+                    source_stage = 'B'
                 "#,
                 &[
                     &candidate_id,
@@ -610,7 +634,73 @@ impl Registry {
             oos_cagr_net: row.get("oos_cagr_net"),
             max_drawdown_net: row.get("max_drawdown_net"),
             created_at: row.get("created_at"),
+            candidate_class: row.try_get("candidate_class").unwrap_or_else(|_| "research".to_string()),
+            rank_in_run: row.try_get("rank_in_run").ok(),
+            source_stage: row.try_get("source_stage").unwrap_or_else(|_| "A".to_string()),
         }
+    }
+
+    /// Register a Stage A (research) candidate from evolution HoF.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_research_candidate(
+        &self,
+        candidate_id: &str,
+        run_id: &str,
+        genome_hash: &str,
+        rank_in_run: i32,
+        oos_sharpe: Option<f32>,
+        oos_cagr: Option<f32>,
+    ) -> Result<()> {
+        self.client
+            .execute(
+                r#"
+                INSERT INTO scg_candidates 
+                    (candidate_id, run_id, genome_hash, rank, rank_in_run, oos_sharpe_net, oos_cagr_net,
+                     candidate_class, source_stage)
+                VALUES ($1, $2, $3, $4, $4, $5, $6, 'research', 'A')
+                ON CONFLICT (run_id, genome_hash) DO NOTHING
+                "#,
+                &[
+                    &candidate_id,
+                    &run_id,
+                    &genome_hash,
+                    &rank_in_run,
+                    &oos_sharpe,
+                    &oos_cagr,
+                ],
+            )
+            .await
+            .context("Failed to register research candidate")?;
+
+        Ok(())
+    }
+
+    /// Get candidates by class for a run.
+    pub async fn get_candidates_by_class(&self, run_id: &str, candidate_class: &str) -> Result<Vec<Candidate>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT * FROM scg_candidates WHERE run_id = $1 AND candidate_class = $2 ORDER BY rank_in_run",
+                &[&run_id, &candidate_class],
+            )
+            .await
+            .context("Failed to get candidates by class")?;
+
+        Ok(rows.iter().map(Self::row_to_candidate).collect())
+    }
+
+    /// Count candidates by class for a run.
+    pub async fn count_candidates_by_class(&self, run_id: &str, candidate_class: &str) -> Result<i64> {
+        let row = self
+            .client
+            .query_one(
+                "SELECT COUNT(*) as cnt FROM scg_candidates WHERE run_id = $1 AND candidate_class = $2",
+                &[&run_id, &candidate_class],
+            )
+            .await
+            .context("Failed to count candidates")?;
+
+        Ok(row.get("cnt"))
     }
 
     // =========================================================================

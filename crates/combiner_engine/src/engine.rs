@@ -680,6 +680,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 
         Ok(UltraEvolutionResult {
             validated_hall_of_fame: validated_hof,
+            stage_a_hall_of_fame: self.hall_of_fame.clone(),
             performance_metrics: perf_metrics,
             total_generations: perf_summary.total_generations as u32,
             total_time_secs: total_elapsed.as_secs_f64(),
@@ -689,8 +690,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 
 /// Result from ultra-performance evolution
 pub struct UltraEvolutionResult {
-    /// Hall of Fame with validated strategies
+    /// Hall of Fame with validated strategies (Stage B - top_k only)
     pub validated_hall_of_fame: ValidatedHallOfFame,
+    /// Hall of Fame from evolution (Stage A - all Pareto-optimal candidates)
+    pub stage_a_hall_of_fame: HallOfFame,
     /// Performance metrics
     pub performance_metrics: Arc<PerformanceMetrics>,
     /// Total generations run

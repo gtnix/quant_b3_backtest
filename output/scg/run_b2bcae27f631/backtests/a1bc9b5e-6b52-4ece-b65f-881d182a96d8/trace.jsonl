@@ -1,0 +1,4 @@
+{"header":true,"run_id":"a1bc9b5e-6b52-4ece-b65f-881d182a96d8","strategy_id":"scg_gen8_fdb824e4","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"dividends_as_cashflow":true,"valuation_price":"raw","signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"resolved":"compiled","reason":"Fast mode does not support dividend cashflow tracking","requested":"auto"}}
+{"step":0,"block_id":"size","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766961899981,"params_effective":{"top_pct":20.0,"min_market_cap":1000000000.0,"max_market_cap":121000000000.0}}

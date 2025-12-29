@@ -1,0 +1,144 @@
+{
+  "id": "a3013803-d1ec-4cdd-83d0-ecda4817e601",
+  "genes": [
+    {
+      "block_type": "selection",
+      "block_id": "value",
+      "params": {
+        "max_pb": {
+          "type": "float",
+          "value": 4.0,
+          "min": 0.5,
+          "max": 10.0,
+          "step": 0.5
+        },
+        "top_pct": {
+          "type": "float",
+          "value": 10.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "max_pe": {
+          "type": "float",
+          "value": 50.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        }
+      }
+    },
+    {
+      "block_type": "selection",
+      "block_id": "momentum",
+      "params": {
+        "lookback_days": {
+          "type": "int",
+          "value": 231,
+          "min": 21,
+          "max": 252,
+          "step": 21
+        },
+        "skip_last_days": {
+          "type": "int",
+          "value": 42,
+          "min": 0,
+          "max": 63,
+          "step": 7
+        },
+        "top_pct": {
+          "type": "float",
+          "value": 20.0,
+          "min": 5.0,
+          "max": 50.0,
+          "step": 5.0
+        },
+        "min_return": {
+          "type": "float",
+          "value": -0.04999999999999999,
+          "min": -0.5,
+          "max": 0.5,
+          "step": 0.05
+        }
+      }
+    },
+    {
+      "block_type": "entry",
+      "block_id": "zscore",
+      "params": {
+        "threshold": {
+          "type": "float",
+          "value": 1.0,
+          "min": 1.0,
+          "max": 3.0,
+          "step": 0.5
+        },
+        "period": {
+          "type": "int",
+          "value": 15,
+          "min": 10,
+          "max": 60,
+          "step": 5
+        }
+      }
+    },
+    {
+      "block_type": "exit",
+      "block_id": "time_exit",
+      "params": {
+        "max_days": {
+          "type": "int",
+          "value": 165,
+          "min": 5,
+          "max": 252,
+          "step": 5
+        }
+      }
+    },
+    {
+      "block_type": "sizing",
+      "block_id": "equal_weight",
+      "params": {
+        "max_weight": {
+          "type": "float",
+          "value": 0.15000000000000002,
+          "min": 0.05,
+          "max": 0.5,
+          "step": 0.05
+        },
+        "max_positions": {
+          "type": "int",
+          "value": 35,
+          "min": 5,
+          "max": 50,
+          "step": 5
+        },
+        "min_weight": {
+          "type": "float",
+          "value": 0.03,
+          "min": 0.01,
+          "max": 0.1,
+          "step": 0.01
+        }
+      }
+    }
+  ],
+  "fitness": {
+    "cagr": 0.2509999999999999,
+    "sharpe_ratio": 190.72996179927983,
+    "max_drawdown": 0.0,
+    "calmar_ratio": 0.0,
+    "sortino_ratio": 999.99,
+    "profit_factor": 0.0,
+    "total_trades": 0,
+    "volatility": 0.000917192996703488,
+    "turnover_annual": 0.0,
+    "penalty_low_trades": 0.5,
+    "penalty_extreme_turnover": 0.0,
+    "pareto_rank": 0,
+    "crowding_distance": 0.0,
+    "is_valid": true
+  },
+  "generation": 0,
+  "parent_ids": []
+}

@@ -22,6 +22,7 @@ mod promote;
 mod bundle;
 mod audit;
 mod export_top;
+mod build_site;
 
 pub use init::execute_init;
 pub use list::{execute_list, execute_show};
@@ -29,5 +30,6 @@ pub use run_campaign::{execute_run, execute_resume};
 pub use compare::execute_compare;
 pub use promote::execute_promote;
 pub use audit::execute_audit;
-pub use export_top::execute_export_top;
+pub use export_top::{execute_export_top, CandidateClassFilter};
+pub use build_site::execute_build_site;
 

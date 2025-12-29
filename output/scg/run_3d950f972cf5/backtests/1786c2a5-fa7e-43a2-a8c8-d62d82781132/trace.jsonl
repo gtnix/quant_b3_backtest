@@ -1,0 +1,10 @@
+{"header":true,"run_id":"1786c2a5-fa7e-43a2-a8c8-d62d82781132","strategy_id":"scg_gen42_5ff913ed","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","signals_price":"adjusted","dividends_as_cashflow":true}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled","requested":"auto"}}
+{"step":0,"block_id":"momentum","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962838325,"params_effective":{"skip_last_days":42,"min_return":0.20000000000000007,"top_pct":45.0,"lookback_days":231}}
+{"step":1,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766962838325,"params_effective":{"min_roe":0.45,"top_pct":5.0,"max_debt_equity":1.0}}
+{"step":2,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766962838325,"params_effective":{"min_roe":0.45,"top_pct":5.0,"max_debt_equity":1.0}}
+{"step":3,"block_id":"zscore","block_type":"entry","message":"0 oversold (z<-2), 0 overbought (z>2) from 5 candidates","timestamp_ms":1766962838325,"params_effective":{"threshold":2.0,"period":15}}
+{"step":4,"block_id":"take_profit","block_type":"exit","message":"0 take-profit exits triggered","timestamp_ms":1766962838325,"params_effective":{"target_pct":0.3}}
+{"step":5,"block_id":"stop_loss","block_type":"exit","message":"0 stop-loss exits triggered","timestamp_ms":1766962838325,"params_effective":{"threshold_pct":0.1}}
+{"step":6,"block_id":"vol_targeting","block_type":"sizing","message":"1 symbols, target 5%, estimated 3%, total weight 15.0%","timestamp_ms":1766962838325,"params_effective":{"target_vol":0.05,"max_leverage":1.7000000000000002,"min_weight":0.02,"correlation":0.5,"max_weight":0.15000000000000002,"fallback_vol":0.25,"max_positions":15}}

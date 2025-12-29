@@ -10,10 +10,10 @@
 //! Filters:
 //! - Run must have data_integrity_verdict = 'PASS'
 //! - Candidate must have gates_passed = true (if field populated)
+//! - Candidate class filter (research, validated, all)
 
 use std::cmp::Ordering;
 use std::fs;
-use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -21,6 +21,36 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
 use super::registry::{Candidate, Registry};
+
+/// Candidate class filter options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandidateClassFilter {
+    /// Only research candidates (Stage A)
+    Research,
+    /// Only validated candidates (Stage B)
+    Validated,
+    /// All candidates
+    All,
+}
+
+impl CandidateClassFilter {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "research" | "a" => Self::Research,
+            "validated" | "b" => Self::Validated,
+            "all" => Self::All,
+            _ => Self::Research, // Default to research
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Research => "research",
+            Self::Validated => "validated",
+            Self::All => "all",
+        }
+    }
+}
 
 /// Schema version for export format.
 const EXPORT_SCHEMA_VERSION: &str = "1.0.0";
@@ -70,6 +100,7 @@ pub fn execute_export_top(
     run_id: &str,
     top_n: usize,
     formats: &str,
+    class_filter: CandidateClassFilter,
 ) -> Result<()> {
     let rt = Runtime::new()?;
     rt.block_on(async {
@@ -88,18 +119,37 @@ pub fn execute_export_top(
             ));
         }
 
-        // Get ALL candidates for this run (we'll sort and filter in memory)
-        let all_candidates = registry.get_all_candidates(run_id).await?;
+        // Get candidates based on class filter
+        let all_candidates = match class_filter {
+            CandidateClassFilter::Research => {
+                registry.get_candidates_by_class(run_id, "research").await?
+            }
+            CandidateClassFilter::Validated => {
+                registry.get_candidates_by_class(run_id, "validated").await?
+            }
+            CandidateClassFilter::All => {
+                registry.get_all_candidates(run_id).await?
+            }
+        };
+
+        println!("Found {} {} candidates for run {}", all_candidates.len(), class_filter.as_str(), run_id);
 
         if all_candidates.is_empty() {
-            println!("No candidates found for run {}", run_id);
+            println!("No candidates found for run {} with class filter '{}'", run_id, class_filter.as_str());
             return Ok(());
         }
 
-        // Filter: gates_passed = true (if populated)
+        // Filter: gates_passed = true (if populated) - only for validated candidates
         let filtered: Vec<Candidate> = all_candidates
             .into_iter()
-            .filter(|c| c.gates_passed.unwrap_or(true)) // If NULL, assume passed
+            .filter(|c| {
+                // For research candidates, skip gates filter (they haven't been validated)
+                if c.candidate_class == "research" {
+                    true
+                } else {
+                    c.gates_passed.unwrap_or(true) // If NULL, assume passed
+                }
+            })
             .collect();
 
         // Sort with deterministic ranking
@@ -149,7 +199,8 @@ pub fn execute_export_top(
             ],
             filters_applied: vec![
                 "data_integrity_verdict = 'PASS'".to_string(),
-                "gates_passed = true (or NULL)".to_string(),
+                format!("candidate_class = '{}'", class_filter.as_str()),
+                "gates_passed = true (for validated, ignored for research)".to_string(),
             ],
         };
 
@@ -193,6 +244,7 @@ pub fn execute_export_top(
         println!("║                  EXPORT TOP SUMMARY                          ║");
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║ Run ID:           {}                         ", run_id);
+        println!("║ Candidate Class:  {}                                   ", class_filter.as_str());
         println!("║ Data Integrity:   {}                                      ", integrity_verdict);
         println!("║ Requested Top:    {}                                      ", top_n);
         println!("║ Actual Exported:  {}                                      ", export.candidates.len());

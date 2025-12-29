@@ -145,7 +145,7 @@ pub struct CliExecutor {
 impl CliExecutor {
     pub fn new() -> Self {
         Self {
-            cli_path: PathBuf::from("target/release/backtester_cli"),
+            cli_path: PathBuf::from("target/release/backtest"),
             output_dir: PathBuf::from("output/scg/backtests"),
             timeout: Duration::from_secs(60),
         }

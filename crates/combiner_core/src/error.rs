@@ -64,5 +64,8 @@ pub enum ValidationError {
 
     #[error("Duplicate block type not allowed: {0}")]
     DuplicateBlock(String),
+
+    #[error("Invalid weight constraints: {0}")]
+    InvalidConstraints(String),
 }
 

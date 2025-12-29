@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "campaign": {
+    "campaign_id": "camp_987740ca502c",
+    "name": "scg_blast_1000",
+    "tag": "blast",
+    "owner": "quant_platform",
+    "status": "completed",
+    "config_hash": "sha256:d80c65008f8d32ef",
+    "git_sha": "dcabc06",
+    "created_at": "2025-12-28T23:00:35.734704Z",
+    "notes": "Blast run to generate >= 1000 research candidates for Top 1000 export"
+  },
+  "runs": [
+    {
+      "run_id": "run_3d950f972cf5",
+      "seed": 42,
+      "status": "\"completed\"",
+      "data_integrity_verdict": "PASS",
+      "data_integrity_score": 1.0,
+      "candidates_count": 51,
+      "research_candidates_count": 949,
+      "validated_candidates_count": 51,
+      "best_oos_sharpe_net": 143.04747,
+      "duration_secs": 2,
+      "detail_path": "run_run_3d950f972cf5.json",
+      "export_path": "artifacts/top_candidates/run_3d950f972cf5/top1000.json"
+    }
+  ]
+}

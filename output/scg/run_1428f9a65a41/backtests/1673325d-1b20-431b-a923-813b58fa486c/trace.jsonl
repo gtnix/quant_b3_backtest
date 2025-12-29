@@ -1,0 +1,9 @@
+{"header":true,"run_id":"1673325d-1b20-431b-a923-813b58fa486c","strategy_id":"scg_gen16_bf3265e4","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"dividends_as_cashflow":true,"signals_price":"adjusted","valuation_price":"raw"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled","requested":"auto"}}
+{"step":0,"block_id":"momentum","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766962705585,"params_effective":{"top_pct":45.0,"skip_last_days":35,"min_return":0.20000000000000007,"lookback_days":231}}
+{"step":1,"block_id":"momentum","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962705585,"params_effective":{"top_pct":45.0,"skip_last_days":35,"min_return":0.20000000000000007,"lookback_days":231}}
+{"step":2,"block_id":"ma_crossover","block_type":"entry","message":"0 long signals from 5 candidates","timestamp_ms":1766962705585,"params_effective":{"fast_period":70,"slow_period":300}}
+{"step":3,"block_id":"time_exit","block_type":"exit","message":"0 time-based exits (>90 days)","timestamp_ms":1766962705585,"params_effective":{"max_days":90}}
+{"step":4,"block_id":"stop_loss","block_type":"exit","message":"0 stop-loss exits triggered","timestamp_ms":1766962705585,"params_effective":{"threshold_pct":0.1}}
+{"step":5,"block_id":"risk_parity","block_type":"sizing","message":"1 symbols, avg 100.0% weight","timestamp_ms":1766962705585,"params_effective":{"max_positions":20,"min_weight":0.02,"fallback_vol":0.25,"max_weight":0.2}}

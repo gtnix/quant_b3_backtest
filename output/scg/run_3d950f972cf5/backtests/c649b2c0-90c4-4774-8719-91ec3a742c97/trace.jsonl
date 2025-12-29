@@ -1,0 +1,10 @@
+{"header":true,"run_id":"c649b2c0-90c4-4774-8719-91ec3a742c97","strategy_id":"scg_gen31_f681a5bc","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"signals_price":"adjusted","dividends_as_cashflow":true,"valuation_price":"raw"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"resolved":"compiled","requested":"auto","reason":"Fast mode does not support dividend cashflow tracking"}}
+{"step":0,"block_id":"momentum","block_type":"selection","message":"Selected 2 assets","timestamp_ms":1766962837772,"params_effective":{"skip_last_days":49,"lookback_days":105,"min_return":-0.09999999999999998,"top_pct":35.0}}
+{"step":1,"block_id":"low_vol","block_type":"selection","message":"Selected 0 assets","timestamp_ms":1766962837772,"params_effective":{"max_annualized_vol":0.2,"top_pct":40.0,"lookback_days":180}}
+{"step":2,"block_id":"value","block_type":"selection","message":"Selected 3 assets","timestamp_ms":1766962837772,"params_effective":{"max_pb":1.5,"top_pct":45.0,"max_pe":50.0}}
+{"step":3,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962837772,"params_effective":{"activation_pct":0.0,"trailing_pct":0.21}}
+{"step":4,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962837772,"params_effective":{"activation_pct":0.0,"trailing_pct":0.21}}
+{"step":5,"block_id":"equal_weight","block_type":"sizing","message":"3 symbols with 33.3% each","timestamp_ms":1766962837772,"params_effective":{"max_weight":0.2,"max_positions":20,"min_weight":0.02}}
+{"step":6,"block_id":"risk_parity","block_type":"sizing","message":"3 symbols, avg 33.3% weight","timestamp_ms":1766962837772,"params_effective":{"max_weight":0.45,"max_positions":20,"min_weight":0.01,"fallback_vol":0.2}}

@@ -62,6 +62,9 @@ impl GenomeValidator {
             // In non-strict mode, just log a warning (caller should handle)
         }
 
+        // Validate weight constraints (P0 fix: detect incompatible max_weight/max_positions)
+        Self::validate_weight_constraints(genome)?;
+
         // Validate each gene
         for gene in &genome.genes {
             // Check block_id exists
@@ -123,6 +126,9 @@ impl GenomeValidator {
             warnings.push("Entry blocks present without Exit blocks".into());
         }
 
+        // Validate weight constraints (P0 fix)
+        Self::validate_weight_constraints(genome)?;
+
         // Validate each gene
         for gene in &genome.genes {
             // Check block_id exists
@@ -166,6 +172,52 @@ impl GenomeValidator {
     /// Check if a genome is valid (returns bool).
     pub fn is_valid(&self, genome: &StrategyGenome) -> bool {
         self.validate(genome).is_ok()
+    }
+
+    /// Validate weight constraints are compatible.
+    ///
+    /// Checks that max_weight and max_positions don't create impossible constraints.
+    /// For example, with equal_weight sizing and 3 positions, each position gets ~33%.
+    /// If max_weight is set to 0.25, this is impossible.
+    fn validate_weight_constraints(genome: &StrategyGenome) -> Result<(), ValidationError> {
+        let sizing_genes = genome.genes_by_type(BlockType::Sizing);
+
+        // Extract max_weight from sizing blocks
+        let max_weight = sizing_genes
+            .iter()
+            .filter_map(|g| g.get_param("max_weight"))
+            .map(|p| p.as_f64())
+            .next()
+            .unwrap_or(1.0);
+
+        // Extract max_positions from sizing blocks
+        let max_positions = sizing_genes
+            .iter()
+            .filter_map(|g| g.get_param("max_positions"))
+            .map(|p| p.as_i64() as usize)
+            .next()
+            .unwrap_or(20);
+
+        // Skip validation if max_weight is 1.0 (no constraint)
+        if max_weight >= 0.99 {
+            return Ok(());
+        }
+
+        // Calculate minimum weight per position for equal weight distribution
+        // This is the theoretical minimum if all max_positions are filled
+        let min_weight_per_position = 1.0 / max_positions as f64;
+
+        // If equal distribution would exceed max_weight, it's invalid
+        // Allow small epsilon for floating point
+        if min_weight_per_position > max_weight + 0.01 {
+            return Err(ValidationError::InvalidConstraints(format!(
+                "max_weight ({:.2}) incompatible with max_positions ({}): \
+                 equal distribution requires {:.2} per position",
+                max_weight, max_positions, min_weight_per_position
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -270,6 +322,48 @@ mod tests {
 
         let result = validator.validate(&genome);
         assert!(matches!(result, Err(ValidationError::ParamOutOfRange { .. })));
+    }
+
+    #[test]
+    fn test_incompatible_weight_constraints() {
+        let validator = GenomeValidator::new();
+
+        // Create a genome with max_weight=0.10 but max_positions=5
+        // This is invalid because equal weight would require 0.20 per position
+        let genome = StrategyGenome::new(vec![
+            BlockGene::new(
+                BlockType::Sizing,
+                "equal_weight",
+                vec![
+                    ("max_weight", ParamValue::float(0.10, 0.05, 0.5, 0.05)),
+                    ("max_positions", ParamValue::int(5, 5, 50, 5)),
+                ],
+            ),
+        ]);
+
+        let result = validator.validate(&genome);
+        assert!(matches!(result, Err(ValidationError::InvalidConstraints(_))));
+    }
+
+    #[test]
+    fn test_compatible_weight_constraints() {
+        let validator = GenomeValidator::new();
+
+        // Create a genome with max_weight=0.25 and max_positions=10
+        // This is valid because equal weight would require 0.10 per position
+        let genome = StrategyGenome::new(vec![
+            BlockGene::new(
+                BlockType::Sizing,
+                "equal_weight",
+                vec![
+                    ("max_weight", ParamValue::float(0.25, 0.05, 0.5, 0.05)),
+                    ("max_positions", ParamValue::int(10, 5, 50, 5)),
+                ],
+            ),
+        ]);
+
+        let result = validator.validate(&genome);
+        assert!(result.is_ok());
     }
 }
 

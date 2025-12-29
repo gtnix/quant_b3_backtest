@@ -1,0 +1,43 @@
+# Strategy Factory Campaign Configuration - BLAST 60s
+# Purpose: Volume controlled run for 60 seconds
+
+[campaign]
+name = "scg_blast_60s_001"
+tag = "blast"
+owner = "debug_agent"
+notes = "Volume controlled run - 60 seconds with large population"
+
+[dataset]
+market = "BR"
+start_date = "2020-01-01"
+end_date = "2024-06-01"
+universe = "ibov"
+
+[evolution]
+population_size = 256       # Large population
+max_generations = 100       # Many generations (will timeout before completing)
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+delay_bars = 1
+
+[seeds]
+count = 1
+base_seed = 42
+
+[budget]
+max_runs = 1
+top_k = 50                  # Top 50 for Stage B
+timeout_per_run_secs = 60   # 60 seconds
+
+[promotion]
+min_oos_sharpe_net = 0.0    # Permissive for test
+max_pbo = 1.0
+min_stress_passed = 0
+gates_required = false
+
+[data_integrity]
+mode = "fast"
+max_gap_days = 10
+universe_type = "static"
+enabled = true

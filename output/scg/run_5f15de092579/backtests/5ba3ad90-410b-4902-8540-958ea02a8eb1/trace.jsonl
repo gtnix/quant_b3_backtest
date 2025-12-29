@@ -1,0 +1,7 @@
+{"header":true,"run_id":"5ba3ad90-410b-4902-8540-958ea02a8eb1","strategy_id":"scg_gen8_372095fe","execution_mode":"compiled","schema_version":"1.0"}
+{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","dividends_as_cashflow":true,"signals_price":"adjusted"}}
+{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"resolved":"compiled","reason":"Fast mode does not support dividend cashflow tracking","requested":"auto"}}
+{"step":0,"block_id":"value","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766957370090,"params_effective":{"max_pb":0.5,"max_pe":15.0,"top_pct":20.0}}
+{"step":1,"block_id":"low_vol","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766957370090,"params_effective":{"lookback_days":60,"max_annualized_vol":0.25,"top_pct":20.0}}
+{"step":2,"block_id":"macd","block_type":"entry","message":"0 bullish, 0 bearish crossovers from 5 candidates","timestamp_ms":1766957370090,"params_effective":{"slow_ema":30,"fast_ema":17,"signal":10}}
+{"step":3,"block_id":"vol_targeting","block_type":"sizing","message":"1 symbols, target 11%, estimated 7%, total weight 30.0%","timestamp_ms":1766957370090,"params_effective":{"max_positions":20,"max_weight":0.30000000000000004,"min_weight":0.08,"correlation":0.2,"target_vol":0.11,"fallback_vol":0.25,"max_leverage":0.7}}

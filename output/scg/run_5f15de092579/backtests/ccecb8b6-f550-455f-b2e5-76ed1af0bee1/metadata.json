@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "run_id": "ccecb8b6-f550-455f-b2e5-76ed1af0bee1",
+  "config_hash": "d8a8a01a43d8027a5977b752efdd207e6e6c1f26f71fb2c7c2a079c41a105372",
+  "strategy_id": "scg_gen20_e6c9600d",
+  "strategy_version": "1.0.0",
+  "crate_version": "0.1.0",
+  "timestamp_utc": "2025-12-28T21:29:30.723981132Z",
+  "dataset_id": null,
+  "seed": null,
+  "costs": {
+    "trading_fee_pct": 0.0,
+    "slippage_pct": 0.0,
+    "min_trade_brl": null
+  },
+  "mode": "full",
+  "execution_mode": "compiled",
+  "config_path": "/tmp/.tmpsj11Ry/scg_gen20_e6c9600d.toml",
+  "duration_ms": 0,
+  "dividends_enabled": true,
+  "dividend_policy": {
+    "signals_price": "adjusted",
+    "valuation_price": "raw",
+    "dividends_as_cashflow": true
+  },
+  "mode_fallback_reason": "Fast mode does not support dividend cashflow tracking"
+}

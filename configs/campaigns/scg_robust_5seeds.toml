@@ -1,0 +1,78 @@
+# Strategy Factory Campaign Configuration - ROBUST 5 SEEDS
+# Generated for: scg_robust_5seeds
+# Purpose: Production-grade campaign with 5 seeds for statistical robustness
+#
+# Expected runtime: ~15-30 minutes depending on hardware
+# Recommended: RAYON_NUM_THREADS=8 or higher
+
+[campaign]
+name = "scg_robust_5seeds"
+tag = "production"
+owner = "quant_team"
+notes = "Production campaign with 5 seeds for robust strategy discovery"
+
+[dataset]
+market = "BR"
+start_date = "2020-01-01"
+end_date = "2024-12-01"
+universe = "ibov"
+# data_path = "cache/ohlcv"  # Enable for dataset hash validation
+
+[evolution]
+# Moderate population for thorough exploration
+population_size = 100
+max_generations = 50
+convergence_generations = 10  # Early stopping if no improvement
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+delay_bars = 1  # Required for lookahead prevention
+
+[seeds]
+# 5 seeds for statistical robustness
+# Strategies that perform well across multiple seeds are more likely to be robust
+count = 5
+base_seed = 42  # Seeds: 42, 43, 44, 45, 46
+
+[budget]
+max_runs = 5
+top_k = 10                  # Validate top 10 per run
+timeout_per_run_secs = 600  # 10 minutes max per run
+stress_enabled = true       # Enable execution stress testing
+
+[promotion]
+# Conservative thresholds for institutional quality
+min_oos_sharpe_net = 0.5    # Minimum out-of-sample Sharpe (after costs)
+max_pbo = 0.15              # Maximum probability of backtest overfitting
+min_stress_passed = 4       # At least 4/5 stress scenarios must pass
+gates_required = true       # All institutional gates must pass
+
+[data_integrity]
+mode = "fast"               # Use "strict" for production runs
+max_gap_days = 10           # Max allowed gap in data
+jump_threshold_pct = 30.0   # Detect suspicious price jumps
+price_adjustment = "adjusted"
+universe_type = "static"    # Acknowledge static universe limitation
+enabled = true
+
+# =============================================================================
+# EXPECTED OUTPUTS
+# =============================================================================
+# After running this campaign:
+#
+# 1. Registry entries:
+#    - 1 campaign in scg_campaigns
+#    - 5 runs in scg_runs (one per seed)
+#    - ~50 candidates in scg_candidates (top 10 per run)
+#
+# 2. Artifacts:
+#    - artifacts/data_integrity/camp_XXXX/report.json
+#    - output/scg/run_XXXX/ (5 directories)
+#
+# 3. Commands to run after:
+#    combiner factory show camp_XXXX
+#    combiner factory export-top --run run_XXXX --top 1000
+#    combiner factory promote --campaign camp_XXXX --top 3
+#
+# =============================================================================
+
