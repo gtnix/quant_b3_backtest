@@ -322,18 +322,26 @@ function ProgressDisplay() {
     return `${mins}:${s.toString().padStart(2, '0')}`;
   };
   
+  // Safely access progress values with defaults
+  const percent = progress.percentComplete ?? 0;
+  const elapsed = progress.elapsedSeconds ?? 0;
+  const maxRuntime = progress.maxRuntimeSeconds ?? 0;
+  const currentGen = progress.currentGeneration ?? 0;
+  const maxGens = progress.maxGenerations ?? 0;
+  const candidates = progress.candidatesEvaluated ?? 0;
+  
   return (
     <div className="space-y-4">
       {/* Progress bar */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm">
           <span className="text-slate-400">Progresso</span>
-          <span className="text-cyan-400 font-mono">{progress.percentComplete.toFixed(1)}%</span>
+          <span className="text-cyan-400 font-mono">{percent.toFixed(1)}%</span>
         </div>
         <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500"
-            style={{ width: `${progress.percentComplete}%` }}
+            style={{ width: `${percent}%` }}
           />
         </div>
       </div>
@@ -343,14 +351,14 @@ function ProgressDisplay() {
         <div className="bg-slate-800 rounded p-3">
           <div className="text-xs text-slate-500 uppercase">Tempo</div>
           <div className="text-lg font-mono text-slate-200">
-            {formatTime(progress.elapsedSeconds)} / {formatTime(progress.maxRuntimeSeconds)}
+            {formatTime(elapsed)} / {formatTime(maxRuntime)}
           </div>
         </div>
         
         <div className="bg-slate-800 rounded p-3">
           <div className="text-xs text-slate-500 uppercase">Geração</div>
           <div className="text-lg font-mono text-slate-200">
-            {progress.currentGeneration} / {progress.maxGenerations}
+            {currentGen} / {maxGens}
           </div>
         </div>
         
@@ -364,7 +372,7 @@ function ProgressDisplay() {
         <div className="bg-slate-800 rounded p-3">
           <div className="text-xs text-slate-500 uppercase">Candidatos</div>
           <div className="text-lg font-mono text-slate-200">
-            {progress.candidatesEvaluated}
+            {candidates}
           </div>
         </div>
       </div>

@@ -1088,6 +1088,80 @@ fn get_artifacts_root(state: tauri::State<'_, ArtifactState>) -> Result<Option<S
 // COCKPIT COMMANDS - SCG Run Orchestration
 // =============================================================================
 
+/// Generate a campaign TOML config from CockpitRunConfig
+fn generate_campaign_toml(config: &CockpitRunConfig, run_id: &str) -> String {
+    let seed_count = if config.seeds.is_empty() { 1 } else { config.seeds.len() };
+    let base_seed = config.seeds.first().copied().unwrap_or(42);
+    
+    format!(
+        r#"# Cockpit-generated Campaign Configuration
+# Run ID: {run_id}
+# Preset: {preset}
+# Generated at: {timestamp}
+
+[campaign]
+name = "cockpit_{run_id}"
+tag = "{tag}"
+owner = "cockpit"
+notes = "Auto-generated from Cockpit UI with preset: {preset}"
+
+[dataset]
+market = "BR"
+start_date = "2018-01-01"
+end_date = "2024-12-01"
+universe = "ibov"
+
+[evolution]
+population_size = {population_size}
+max_generations = {max_generations}
+convergence_generations = {convergence_generations}
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+delay_bars = 1
+
+[seeds]
+count = {seed_count}
+base_seed = {base_seed}
+
+[budget]
+max_runs = {seed_count}
+top_k = 50
+persist_stage_a_top_n = 100
+timeout_per_run_secs = {timeout}
+stress_enabled = {stress_enabled}
+
+[promotion]
+min_oos_sharpe_net = {min_sharpe}
+max_pbo = {max_pbo}
+min_stress_passed = {min_stress_passed}
+gates_required = true
+
+[data_integrity]
+mode = "fast"
+max_gap_days = 10
+jump_threshold_pct = 30.0
+price_adjustment = "adjusted"
+universe_type = "static"
+enabled = true
+"#,
+        run_id = run_id,
+        preset = config.preset,
+        tag = config.run_tag.as_deref().unwrap_or(&config.preset),
+        timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        population_size = config.population_size,
+        max_generations = config.max_generations,
+        convergence_generations = config.convergence_generations,
+        seed_count = seed_count,
+        base_seed = base_seed,
+        timeout = config.max_runtime_seconds,
+        stress_enabled = config.stress_testing_enabled,
+        min_sharpe = config.min_oos_sharpe_net,
+        max_pbo = config.max_pbo,
+        min_stress_passed = config.min_stress_passed,
+    )
+}
+
 /// Set workspace root for CLI execution
 #[tauri::command]
 fn set_workspace_root(
@@ -1136,7 +1210,7 @@ async fn start_scg_run(
         guard.clone().ok_or("Workspace root not set. Call set_workspace_root first.")?
     };
     
-    // Build the command
+    // Build the command path
     let combiner_path = workspace_root.join("target").join("release").join("combiner");
     
     if !combiner_path.exists() {
@@ -1146,71 +1220,44 @@ async fn start_scg_run(
         ));
     }
     
-    // Build CLI arguments
-    let mut args = vec![
+    // Generate campaign TOML config
+    let campaign_toml = generate_campaign_toml(&config, &run_id);
+    
+    // Create directory for cockpit runs
+    let cockpit_runs_dir = workspace_root.join("artifacts").join("cockpit_runs").join(&run_id);
+    fs::create_dir_all(&cockpit_runs_dir)
+        .map_err(|e| format!("Failed to create cockpit run directory: {}", e))?;
+    
+    // Write campaign config
+    let campaign_config_path = cockpit_runs_dir.join("campaign.toml");
+    fs::write(&campaign_config_path, &campaign_toml)
+        .map_err(|e| format!("Failed to write campaign config: {}", e))?;
+    
+    log::info!("Generated campaign config at: {}", campaign_config_path.display());
+    log::info!("Campaign TOML:\n{}", campaign_toml);
+    
+    // Build CLI arguments - the correct format: combiner factory run --campaign <path>
+    let args = vec![
         "factory".to_string(),
         "run".to_string(),
+        "--campaign".to_string(),
+        campaign_config_path.to_string_lossy().to_string(),
     ];
     
-    // Add config file if specified
-    if let Some(ref config_path) = config.campaign_config {
-        args.push("--config".to_string());
-        args.push(config_path.clone());
-    }
-    
-    // Add runtime limit
-    if config.max_runtime_seconds > 0 {
-        args.push("--max-runtime".to_string());
-        args.push(config.max_runtime_seconds.to_string());
-    }
-    
-    // Add population size
-    args.push("--population".to_string());
-    args.push(config.population_size.to_string());
-    
-    // Add max generations
-    args.push("--max-generations".to_string());
-    args.push(config.max_generations.to_string());
-    
-    // Add convergence threshold
-    args.push("--convergence".to_string());
-    args.push(config.convergence_generations.to_string());
-    
-    // Add workers
-    args.push("--workers".to_string());
-    args.push(config.workers.to_string());
-    
-    // Add seeds if specified
-    for seed in &config.seeds {
-        args.push("--seed".to_string());
-        args.push(seed.to_string());
-    }
-    
-    // Add stress testing flag
-    if config.stress_testing_enabled {
-        args.push("--stress".to_string());
-    }
-    
-    // Add gates
-    args.push("--min-sharpe".to_string());
-    args.push(format!("{:.2}", config.min_oos_sharpe_net));
-    args.push("--max-pbo".to_string());
-    args.push(format!("{:.2}", config.max_pbo));
-    
-    // Add run tag if specified
-    if let Some(ref tag) = config.run_tag {
-        args.push("--tag".to_string());
-        args.push(tag.clone());
-    }
+    log::info!("Spawning combiner with args: {:?}", args);
     
     // Spawn the process
-    let child = Command::new(&combiner_path)
+    let mut child = Command::new(&combiner_path)
         .args(&args)
         .current_dir(&workspace_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start combiner: {}", e))?;
+    
+    // Take stdout for monitoring thread
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
     
     let stop_flag = Arc::new(AtomicBool::new(false));
     
@@ -1227,7 +1274,7 @@ async fn start_scg_run(
         candidates_evaluated: 0,
         candidates_passing_gates: 0,
         pareto_size: 0,
-        latest_log: Some("Initializing SCG engine...".to_string()),
+        latest_log: Some(format!("Starting SCG run with {} preset...", config.preset)),
         percent_complete: 0.0,
         error_message: None,
     };
@@ -1239,7 +1286,7 @@ async fn start_scg_run(
         config: config.clone(),
         started_at: std::time::Instant::now(),
         progress: progress.clone(),
-        stop_requested: stop_flag.clone(),
+        stop_requested: stop_flag,
     };
     
     {
@@ -1247,13 +1294,137 @@ async fn start_scg_run(
         runs.insert(run_id.clone(), active_run);
     }
     
-    // Spawn monitoring thread (placeholder for future progress streaming)
-    let _run_id_clone = run_id.clone();
-    
     // Emit initial event
-    let _ = app.emit("scg-progress", progress);
+    let _ = app.emit("scg-progress", &progress);
+    
+    // Spawn stdout monitoring thread
+    let run_id_clone = run_id.clone();
+    let app_clone = app.clone();
+    let max_runtime = config.max_runtime_seconds;
+    let max_gens = config.max_generations;
+    
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        
+        let mut current_gen = 0u32;
+        let mut candidates_eval = 0u32;
+        let mut best_sharpe: Option<f64> = None;
+        let mut latest_log: String;
+        let started_at = std::time::Instant::now();
+        
+        // Read stdout
+        if let Some(stdout) = stdout {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    log::debug!("CLI stdout: {}", line);
+                    latest_log = line.clone();
+                    
+                    // Parse progress patterns
+                    // Pattern: "[00:01:23]" for elapsed time
+                    // Pattern: "1/3 seeds" for seed progress
+                    // Pattern: "Gen 10/50" for generation
+                    // Pattern: "Best: 0.85" for best Sharpe
+                    
+                    // Parse seed progress: "1/3 seeds"
+                    if let Some(caps) = parse_seed_progress(&line) {
+                        candidates_eval = caps;
+                    }
+                    
+                    // Parse generation: "Gen 10" or "Generation 10"
+                    if let Some(gen) = parse_generation(&line) {
+                        current_gen = gen;
+                    }
+                    
+                    // Parse best Sharpe
+                    if let Some(sharpe) = parse_best_sharpe(&line) {
+                        best_sharpe = Some(sharpe);
+                    }
+                    
+                    // Calculate percent complete based on elapsed time
+                    let elapsed = started_at.elapsed().as_secs();
+                    let percent = if max_runtime > 0 {
+                        (elapsed as f64 / max_runtime as f64 * 100.0).min(99.0)
+                    } else if max_gens > 0 {
+                        (current_gen as f64 / max_gens as f64 * 100.0).min(99.0)
+                    } else {
+                        0.0
+                    };
+                    
+                    // Emit progress event
+                    let progress = RunProgress {
+                        run_id: run_id_clone.clone(),
+                        status: RunStatus::Running,
+                        current_generation: current_gen,
+                        max_generations: max_gens,
+                        elapsed_seconds: elapsed,
+                        max_runtime_seconds: max_runtime,
+                        best_sharpe,
+                        best_cagr: None,
+                        candidates_evaluated: candidates_eval,
+                        candidates_passing_gates: 0,
+                        pareto_size: 0,
+                        latest_log: Some(latest_log.clone()),
+                        percent_complete: percent,
+                        error_message: None,
+                    };
+                    
+                    let _ = app_clone.emit("scg-progress", &progress);
+                }
+            }
+        }
+        
+        // Read stderr for errors
+        if let Some(stderr) = stderr {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    log::warn!("CLI stderr: {}", line);
+                }
+            }
+        }
+        
+        log::info!("Monitoring thread finished for run {}", run_id_clone);
+    });
     
     Ok(run_id)
+}
+
+/// Parse seed progress from CLI output (e.g., "1/3 seeds")
+fn parse_seed_progress(line: &str) -> Option<u32> {
+    // Look for pattern like "1/3 seeds" or "[1/3]"
+    let re_seeds = regex_lite::Regex::new(r"(\d+)/\d+\s*seeds?").ok()?;
+    if let Some(caps) = re_seeds.captures(line) {
+        return caps.get(1)?.as_str().parse().ok();
+    }
+    
+    // Look for evaluated count
+    let re_eval = regex_lite::Regex::new(r"(?i)evaluated[:\s]+(\d+)").ok()?;
+    if let Some(caps) = re_eval.captures(line) {
+        return caps.get(1)?.as_str().parse().ok();
+    }
+    
+    None
+}
+
+/// Parse generation number from CLI output
+fn parse_generation(line: &str) -> Option<u32> {
+    // Look for "Gen 10" or "Generation 10" or "gen=10"
+    let re = regex_lite::Regex::new(r"(?i)gen(?:eration)?[=:\s]+(\d+)").ok()?;
+    if let Some(caps) = re.captures(line) {
+        return caps.get(1)?.as_str().parse().ok();
+    }
+    None
+}
+
+/// Parse best Sharpe from CLI output
+fn parse_best_sharpe(line: &str) -> Option<f64> {
+    // Look for "Best: 0.85" or "Sharpe: 0.85" or "best_sharpe=0.85"
+    let re = regex_lite::Regex::new(r"(?i)(?:best|sharpe)[=:\s]+(-?\d+\.?\d*)").ok()?;
+    if let Some(caps) = re.captures(line) {
+        return caps.get(1)?.as_str().parse().ok();
+    }
+    None
 }
 
 /// Stop a running SCG job gracefully
@@ -1357,6 +1528,178 @@ fn list_active_runs(
 ) -> Result<Vec<RunProgress>, String> {
     let runs = runner_state.active_runs.lock();
     Ok(runs.values().map(|r| r.progress.clone()).collect())
+}
+
+/// Load candidates from a cockpit run's output directory
+/// This reads strategy_XXX.toml files and attempts to find metrics from backtest JSONs
+#[tauri::command]
+fn load_cockpit_candidates(
+    run_id: String,
+    runner_state: tauri::State<'_, RunnerState>,
+) -> Result<Vec<CandidateListItem>, String> {
+    // Get workspace root
+    let workspace_root = {
+        let guard = runner_state.workspace_root.lock();
+        guard.clone().ok_or("Workspace root not set")?
+    };
+    
+    // First check if this is a cockpit run with campaign output
+    // The campaign generates output in output/scg/<campaign_run_id>/ where run_id is generated by the CLI
+    // We need to find the actual CLI run_id from our cockpit run
+    
+    let mut candidates: Vec<CandidateListItem> = Vec::new();
+    
+    // Check cockpit run config for the campaign name
+    let cockpit_dir = workspace_root.join("artifacts").join("cockpit_runs").join(&run_id);
+    let campaign_toml_path = cockpit_dir.join("campaign.toml");
+    
+    if campaign_toml_path.exists() {
+        // Read the campaign name from the config
+        if fs::read_to_string(&campaign_toml_path).is_ok() {
+            // The campaign name follows the pattern "cockpit_<run_id>"
+            let campaign_name = format!("cockpit_{}", run_id);
+            
+            // Look for runs in output/scg/ that might be from this campaign
+            let scg_output_dir = workspace_root.join("output").join("scg");
+            if scg_output_dir.exists() {
+                // Get all run directories sorted by modification time (newest first)
+                let mut run_dirs: Vec<_> = fs::read_dir(&scg_output_dir)
+                    .map_err(|e| format!("Failed to read scg output dir: {}", e))?
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .collect();
+                
+                // Sort by modification time (newest first)
+                run_dirs.sort_by(|a, b| {
+                    let a_time = a.metadata().and_then(|m| m.modified()).ok();
+                    let b_time = b.metadata().and_then(|m| m.modified()).ok();
+                    b_time.cmp(&a_time)
+                });
+                
+                // Try to find strategies in the most recent run(s)
+                for run_dir in run_dirs.iter().take(3) {
+                    let run_path = run_dir.path();
+                    candidates = load_strategies_from_dir(&run_path, &workspace_root)?;
+                    if !candidates.is_empty() {
+                        log::info!("Found {} candidates in {}", candidates.len(), run_path.display());
+                        break;
+                    }
+                }
+            }
+            
+            // If still empty, log for debugging
+            if candidates.is_empty() {
+                log::warn!("No candidates found for cockpit run {} (campaign: {})", run_id, campaign_name);
+                log::warn!("Checked: {}", scg_output_dir.display());
+            }
+        }
+    } else {
+        log::warn!("Cockpit run config not found: {}", campaign_toml_path.display());
+    }
+    
+    Ok(candidates)
+}
+
+/// Load strategies from a run output directory
+fn load_strategies_from_dir(run_path: &PathBuf, workspace_root: &PathBuf) -> Result<Vec<CandidateListItem>, String> {
+    let mut candidates: Vec<CandidateListItem> = Vec::new();
+    
+    // List all strategy_XXX.toml files
+    let pattern = run_path.join("strategy_*.toml");
+    let pattern_str = pattern.to_string_lossy();
+    
+    let strategy_files: Vec<_> = glob::glob(&pattern_str)
+        .map_err(|e| format!("Glob error: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+    
+    for (rank, strategy_path) in strategy_files.iter().enumerate() {
+        let strategy_toml = fs::read_to_string(strategy_path)
+            .map_err(|e| format!("Failed to read strategy: {}", e))?;
+        
+        // Extract strategy ID from the TOML
+        let strategy_id = extract_strategy_id(&strategy_toml)
+            .unwrap_or_else(|| format!("strategy_{:03}", rank));
+        
+        // Generate display name from strategy blocks
+        let display_name = generate_display_name(&strategy_toml);
+        
+        // Try to find backtest metrics for this strategy
+        let backtest_dir = run_path.join("backtests").join(&strategy_id);
+        let (sharpe, cagr, max_dd) = if backtest_dir.exists() {
+            load_backtest_metrics(&backtest_dir).unwrap_or((0.0, 0.0, 0.0))
+        } else {
+            // Try looking in workspace backtests dir
+            let alt_backtest_dir = workspace_root.join("output").join("backtests").join(&strategy_id);
+            if alt_backtest_dir.exists() {
+                load_backtest_metrics(&alt_backtest_dir).unwrap_or((0.0, 0.0, 0.0))
+            } else {
+                // Use default values - metrics will be 0 until we run validation
+                (0.0, 0.0, 0.0)
+            }
+        };
+        
+        candidates.push(CandidateListItem {
+            rank: (rank + 1) as u32,
+            candidate_id: strategy_id.clone(),
+            candidate_class: "research".to_string(),
+            display_name,
+            oos_sharpe_net: sharpe,
+            oos_cagr_net: cagr,
+            max_drawdown_net: max_dd,
+            pbo: 0.5, // Default - will be calculated by validation
+            dsr: 0.0,
+            gates_passed: false,
+            stress_passed: false,
+            data_integrity_ok: true,
+        });
+    }
+    
+    // Sort by rank
+    candidates.sort_by_key(|c| c.rank);
+    
+    Ok(candidates)
+}
+
+/// Extract strategy ID from TOML content
+fn extract_strategy_id(toml_content: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(toml_content).ok()?;
+    value.get("strategy")?.get("id")?.as_str().map(|s| s.to_string())
+}
+
+/// Load backtest metrics from a backtest directory
+fn load_backtest_metrics(backtest_dir: &PathBuf) -> Option<(f64, f64, f64)> {
+    // Look for metrics.json or summary.json
+    let metrics_path = backtest_dir.join("metrics.json");
+    if metrics_path.exists() {
+        if let Ok(content) = fs::read_to_string(&metrics_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                let sharpe = json["sharpe"].as_f64()
+                    .or_else(|| json["sharpe_ratio"].as_f64())
+                    .unwrap_or(0.0);
+                let cagr = json["cagr"].as_f64().unwrap_or(0.0);
+                let max_dd = json["max_drawdown"].as_f64()
+                    .or_else(|| json["mdd"].as_f64())
+                    .unwrap_or(0.0);
+                return Some((sharpe, cagr, max_dd));
+            }
+        }
+    }
+    
+    // Try summary.json
+    let summary_path = backtest_dir.join("summary.json");
+    if summary_path.exists() {
+        if let Ok(content) = fs::read_to_string(&summary_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                let sharpe = json["sharpe"].as_f64().unwrap_or(0.0);
+                let cagr = json["cagr"].as_f64().unwrap_or(0.0);
+                let max_dd = json["max_drawdown"].as_f64().unwrap_or(0.0);
+                return Some((sharpe, cagr, max_dd));
+            }
+        }
+    }
+    
+    None
 }
 
 /// Update progress for a run (internal, called from watcher)
@@ -1521,6 +1864,7 @@ pub fn run() {
             stop_scg_run,
             get_run_status,
             list_active_runs,
+            load_cockpit_candidates,
             // Legacy commands
             list_experiments,
             load_scg_report,

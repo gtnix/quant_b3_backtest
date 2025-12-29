@@ -275,6 +275,32 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
     const { config } = get();
     set({ runStatus: 'starting', progress: null, topCandidates: [] });
     
+    // Check if we're in Tauri environment
+    const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+    if (!isTauri) {
+      console.warn('[Browser Mode] Cannot start SCG run - Tauri commands not available');
+      set({ 
+        runStatus: 'error',
+        progress: {
+          runId: 'browser-mode',
+          status: 'failed',
+          percentComplete: 0,
+          elapsedSeconds: 0,
+          maxRuntimeSeconds: config.maxRuntimeSeconds,
+          currentGeneration: 0,
+          maxGenerations: config.maxGenerations,
+          candidatesEvaluated: 0,
+          candidatesPassingGates: 0,
+          paretoSize: 0,
+          bestSharpe: null,
+          bestCagr: null,
+          latestLog: null,
+          errorMessage: 'Cannot start SCG run in browser mode. Please run inside Tauri app.',
+        }
+      });
+      return;
+    }
+    
     try {
       const tauriConfig = toTauriConfig(config);
       const runId = await invoke<string>('start_scg_run', { config: tauriConfig });
@@ -338,19 +364,35 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
         runStatus: progress.status as RunStatus,
       });
       
-      // If completed, load candidates
+      // If completed, load candidates from cockpit output
       if (progress.status === 'completed') {
-        const candidatesData = await invoke<any[]>('list_candidates_v2', {
-          runId: currentRunId,
-          search: null,
-          candidateClass: null,
-          maxPbo: null,
-          limit: 100,
-        });
-        
-        const candidates = parseCandidateList(candidatesData);
-        const ranked = rankCandidates(candidates, rankingMethod);
-        set({ topCandidates: ranked });
+        try {
+          // Use the cockpit-specific candidate loader
+          const candidatesData = await invoke<any[]>('load_cockpit_candidates', {
+            runId: currentRunId,
+          });
+          
+          const candidates = parseCandidateList(candidatesData);
+          const ranked = rankCandidates(candidates, rankingMethod);
+          set({ topCandidates: ranked });
+        } catch (loadError) {
+          console.warn('Failed to load cockpit candidates, trying fallback:', loadError);
+          // Fallback to list_candidates_v2 if cockpit loader fails
+          try {
+            const fallbackData = await invoke<any[]>('list_candidates_v2', {
+              runId: currentRunId,
+              search: null,
+              candidateClass: null,
+              maxPbo: null,
+              limit: 100,
+            });
+            const candidates = parseCandidateList(fallbackData);
+            const ranked = rankCandidates(candidates, rankingMethod);
+            set({ topCandidates: ranked });
+          } catch (fallbackError) {
+            console.error('Both candidate loaders failed:', fallbackError);
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to poll progress:', error);
@@ -362,19 +404,28 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
     const { rankingMethod } = get();
     
     try {
-      const data = await invoke<any[]>('list_candidates_v2', {
-        runId,
-        search: null,
-        candidateClass: null,
-        maxPbo: null,
-        limit: 100,
-      });
-      
+      // Try cockpit-specific loader first
+      const data = await invoke<any[]>('load_cockpit_candidates', { runId });
       const candidates = parseCandidateList(data);
       const ranked = rankCandidates(candidates, rankingMethod);
       set({ topCandidates: ranked });
     } catch (error) {
-      console.error('Failed to load candidates:', error);
+      console.warn('Cockpit loader failed, trying fallback:', error);
+      // Fallback to list_candidates_v2
+      try {
+        const fallbackData = await invoke<any[]>('list_candidates_v2', {
+          runId,
+          search: null,
+          candidateClass: null,
+          maxPbo: null,
+          limit: 100,
+        });
+        const candidates = parseCandidateList(fallbackData);
+        const ranked = rankCandidates(candidates, rankingMethod);
+        set({ topCandidates: ranked });
+      } catch (fallbackError) {
+        console.error('Failed to load candidates:', fallbackError);
+      }
     }
   },
   
@@ -386,6 +437,10 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
   // Subscriptions
   subscribeToProgress: () => {
     let intervalId: number | null = null;
+    let unlistenPromise: Promise<() => void> | null = null;
+    
+    // Check if we're in Tauri environment
+    const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
     
     // Poll every 2 seconds while running
     const checkAndPoll = () => {
@@ -400,16 +455,20 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
     
     intervalId = window.setInterval(checkAndPoll, 2000);
     
-    // Also listen for Tauri events
-    const unlisten = listen('scg-progress', (event) => {
-      const progress = parseRunProgress(event.payload);
-      set({ progress, runStatus: progress.status as RunStatus });
-    });
+    // Only listen for Tauri events if in Tauri environment
+    if (isTauri) {
+      unlistenPromise = listen('scg-progress', (event) => {
+        const progress = parseRunProgress(event.payload);
+        set({ progress, runStatus: progress.status as RunStatus });
+      });
+    }
     
     // Return cleanup function
     return () => {
       if (intervalId) clearInterval(intervalId);
-      unlisten.then((fn) => fn());
+      if (unlistenPromise) {
+        unlistenPromise.then((fn) => fn());
+      }
     };
   },
 }));
