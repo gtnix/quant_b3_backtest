@@ -385,16 +385,13 @@ mod tests {
     fn test_report_save_load() {
         let report = DataIntegrityReport::new("hash123", "BR");
         
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_integrity_report.json");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("test_integrity_report.json");
         
         report.save(&path).unwrap();
         
         let loaded = DataIntegrityReport::load(&path).unwrap();
         assert_eq!(loaded.dataset_hash, "hash123");
         assert_eq!(loaded.market, "BR");
-        
-        // Cleanup
-        let _ = fs::remove_file(&path);
     }
 }
