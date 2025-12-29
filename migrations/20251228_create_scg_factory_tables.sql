@@ -134,3 +134,4 @@ BEGIN
     RAISE NOTICE 'Tables: scg_campaigns, scg_runs, scg_candidates, scg_promotions';
 END $$;
 
+

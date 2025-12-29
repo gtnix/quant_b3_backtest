@@ -95,3 +95,4 @@ export function EquityChart({ data }: EquityChartProps) {
   return <div ref={chartContainerRef} className="w-full h-full" />;
 }
 
+

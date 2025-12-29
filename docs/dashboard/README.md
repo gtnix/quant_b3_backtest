@@ -453,3 +453,4 @@ await listen<{ paths: string[] }>('artifacts_changed', (event) => {
 - [ ] Keyboard shortcuts
 - [ ] Strategy replay com visualização tick-by-tick
 
+

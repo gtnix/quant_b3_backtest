@@ -446,3 +446,4 @@ min_trades_oos = 30
 2. Bailey, D. H., et al. (2017). *Probability of Backtest Overfitting*
 3. López de Prado, M. (2018). *Advances in Financial Machine Learning*
 
+

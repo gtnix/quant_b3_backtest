@@ -1100,7 +1100,7 @@ fn generate_campaign_toml(config: &CockpitRunConfig, run_id: &str) -> String {
 # Generated at: {timestamp}
 
 [campaign]
-name = "cockpit_{run_id}"
+name = "{run_id}"
 tag = "{tag}"
 owner = "cockpit"
 notes = "Auto-generated from Cockpit UI with preset: {preset}"

@@ -538,3 +538,4 @@ A desktop dashboard (Tauri + React) with 10 analytical pages enables candidate v
 - Número de campanhas executadas em produção
 - Métricas de estratégias descobertas (Sharpe, CAGR reais)
 
+

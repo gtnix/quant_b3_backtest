@@ -234,3 +234,4 @@ output/scg/<experiment_id>/
 2. [Framework de Validação](validation-framework.md)
 3. [Referência CLI](cli-reference.md)
 
+

@@ -145,6 +145,10 @@ enum FactoryAction {
         /// Path to campaign config file
         #[arg(short, long)]
         campaign: String,
+
+        /// Dry run mode - validate and show plan without executing
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Resume an interrupted campaign
@@ -206,6 +210,17 @@ enum FactoryAction {
         /// Run ID (optional, builds single run detail)
         #[arg(short, long)]
         run: Option<String>,
+    },
+
+    /// Validate campaign config without executing (for debugging Cockpit)
+    Validate {
+        /// Path to campaign config file
+        #[arg(short, long)]
+        campaign: String,
+
+        /// Verbose output (show full parsed config)
+        #[arg(short, long)]
+        verbose: bool,
     },
 
     /// Compare candidates across multiple runs
@@ -327,8 +342,12 @@ fn main() -> Result<()> {
                 commands::factory::execute_init(&name)
             }
 
-            FactoryAction::Run { campaign } => {
-                commands::factory::execute_run(&campaign)
+            FactoryAction::Run { campaign, dry_run } => {
+                if dry_run {
+                    commands::factory::execute_validate(&campaign, true)
+                } else {
+                    commands::factory::execute_run(&campaign)
+                }
             }
 
             FactoryAction::Resume { campaign } => {
@@ -368,6 +387,10 @@ fn main() -> Result<()> {
 
             FactoryAction::BuildSite { campaign, run } => {
                 commands::factory::execute_build_site(campaign.as_deref(), run.as_deref())
+            }
+
+            FactoryAction::Validate { campaign, verbose } => {
+                commands::factory::execute_validate(&campaign, verbose)
             }
         },
     }

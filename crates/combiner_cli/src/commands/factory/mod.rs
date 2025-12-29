@@ -23,6 +23,7 @@ mod bundle;
 mod audit;
 mod export_top;
 mod build_site;
+mod validate_config;
 
 pub use init::execute_init;
 pub use list::{execute_list, execute_show};
@@ -32,4 +33,5 @@ pub use promote::execute_promote;
 pub use audit::execute_audit;
 pub use export_top::{execute_export_top, CandidateClassFilter};
 pub use build_site::execute_build_site;
+pub use validate_config::execute_validate;
 

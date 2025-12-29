@@ -39,3 +39,4 @@ BEGIN
     RAISE NOTICE 'Migration 20251229_add_candidate_class completed';
 END $$;
 
+
