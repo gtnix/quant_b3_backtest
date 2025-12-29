@@ -1,0 +1,44 @@
+# Netlify Configuration for Quant B3 Dashboard
+# Frontend: Vite/React SPA
+# Backend: Netlify Functions (serverless API)
+
+[build]
+  # Build command for production
+  command = "npm run build"
+  # Directory with static files to deploy
+  publish = "dist"
+  # Directory with Netlify Functions
+  functions = "netlify/functions"
+
+[build.environment]
+  # Node version for build
+  NODE_VERSION = "20"
+
+# Redirect all API calls to Netlify Functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# SPA fallback - serve index.html for all routes
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and caching
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Environment variables (set in Netlify UI for secrets)
+# DATABASE_URL = "postgresql://..." (set in Netlify dashboard)
+

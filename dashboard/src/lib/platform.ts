@@ -57,12 +57,30 @@ export const capabilities = {
 // API CONFIGURATION
 // =============================================================================
 
+// Determine API base URL based on environment
+const getApiBase = (): string => {
+  // In production (Netlify), API is served from same domain via Functions
+  if (platform.isProd) {
+    return '/api';
+  }
+  // In development, use local Express server
+  return 'http://localhost:3001/api';
+};
+
+const getSseEndpoint = (): string => {
+  if (platform.isProd) {
+    // SSE not supported in serverless - use polling
+    return '';
+  }
+  return 'http://localhost:3001/api/events';
+};
+
 export const config = {
   /** Base URL for API calls (browser mode) */
-  apiBase: 'http://localhost:3001/api',
+  apiBase: getApiBase(),
   
-  /** SSE endpoint for real-time updates */
-  sseEndpoint: 'http://localhost:3001/api/events',
+  /** SSE endpoint for real-time updates (empty in production = use polling) */
+  sseEndpoint: getSseEndpoint(),
   
   /** Polling interval for changes (browser mode fallback) */
   pollIntervalMs: 5000,
