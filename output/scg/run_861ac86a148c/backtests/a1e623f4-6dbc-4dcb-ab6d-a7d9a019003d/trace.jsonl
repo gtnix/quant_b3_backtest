@@ -1,8 +1,0 @@
-{"header":true,"run_id":"a1e623f4-6dbc-4dcb-ab6d-a7d9a019003d","strategy_id":"scg_gen24_01ea1d9e","execution_mode":"compiled","schema_version":"1.0"}
-{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"dividends_as_cashflow":true,"signals_price":"adjusted","valuation_price":"raw"}}
-{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"requested":"auto","reason":"Fast mode does not support dividend cashflow tracking","resolved":"compiled"}}
-{"step":0,"block_id":"value","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766961897593,"params_effective":{"max_pb":7.5,"top_pct":15.0,"max_pe":50.0}}
-{"step":1,"block_id":"value","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766961897593,"params_effective":{"max_pb":7.5,"top_pct":15.0,"max_pe":50.0}}
-{"step":2,"block_id":"zscore","block_type":"entry","message":"0 oversold (z<-2), 0 overbought (z>2) from 5 candidates","timestamp_ms":1766961897593,"params_effective":{"threshold":2.0,"period":20}}
-{"step":3,"block_id":"rsi","block_type":"entry","message":"0 oversold, 5 overbought from 5 candidates","timestamp_ms":1766961897593,"params_effective":{"oversold":15.0,"overbought":90.0,"period":5}}
-{"step":4,"block_id":"risk_parity","block_type":"sizing","message":"1 symbols, avg 100.0% weight","timestamp_ms":1766961897593,"params_effective":{"min_weight":0.060000000000000005,"max_positions":5,"fallback_vol":0.15000000000000002,"max_weight":0.45}}

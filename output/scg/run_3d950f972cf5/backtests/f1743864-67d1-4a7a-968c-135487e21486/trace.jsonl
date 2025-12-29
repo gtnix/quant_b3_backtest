@@ -1,7 +1,0 @@
-{"header":true,"run_id":"f1743864-67d1-4a7a-968c-135487e21486","strategy_id":"scg_gen45_d0a065cc","execution_mode":"compiled","schema_version":"1.0"}
-{"step":0,"block_id":"policy","block_type":"dividend_policy","message":"Anti-double-count policy applied","timestamp_ms":0,"params_effective":{"valuation_price":"raw","signals_price":"adjusted","dividends_as_cashflow":true}}
-{"step":0,"block_id":"execution","block_type":"mode_fallback","message":"Execution mode fallback: auto -> compiled","timestamp_ms":0,"params_effective":{"requested":"auto","resolved":"compiled","reason":"Fast mode does not support dividend cashflow tracking"}}
-{"step":0,"block_id":"momentum","block_type":"selection","message":"Selected 2 assets","timestamp_ms":1766962838488,"params_effective":{"lookback_days":147,"min_return":-0.19999999999999996,"skip_last_days":56,"top_pct":40.0}}
-{"step":1,"block_id":"quality","block_type":"selection","message":"Selected 1 assets","timestamp_ms":1766962838488,"params_effective":{"max_debt_equity":0.8,"min_roe":0.3,"top_pct":20.0}}
-{"step":2,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962838488,"params_effective":{"activation_pct":0.2,"trailing_pct":0.18}}
-{"step":3,"block_id":"trailing_stop","block_type":"exit","message":"0 trailing stop exits triggered","timestamp_ms":1766962838488,"params_effective":{"activation_pct":0.2,"trailing_pct":0.18}}
