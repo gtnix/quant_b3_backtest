@@ -269,3 +269,5 @@ Em strict mode, validações adicionais:
 | Exit blocks | `backtester_strategy/src/blocks/exit/` |
 | Sizing blocks | `backtester_strategy/src/blocks/sizing/` |
 
+
+

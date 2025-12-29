@@ -241,3 +241,5 @@ Este documento descreve o fluxo de dados end-to-end do backtester, desde a confi
 | Metrics | `backtester_strategy` | `src/experiment/metrics.rs` |
 | Artifacts | `backtester_strategy` | `src/experiment/writer.rs` |
 
+
+

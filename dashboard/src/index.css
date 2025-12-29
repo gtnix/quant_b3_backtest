@@ -1,0 +1,154 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-surface: #12121a;
+  --bg-elevated: #1a1a24;
+  --border-color: #1e1e2e;
+  --text-primary: #e4e4e7;
+  --text-secondary: #71717a;
+  --profit-color: #00ff88;
+  --loss-color: #ff3366;
+  --accent-cyan: #00d4ff;
+  --accent-purple: #8b5cf6;
+  --glow-color: var(--profit-color);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a3a;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+/* Custom utility classes */
+@layer components {
+  .card {
+    @apply bg-terminal-surface border border-terminal-border rounded-lg p-4;
+  }
+  
+  .card-elevated {
+    @apply bg-[#1a1a24] border border-terminal-border rounded-lg p-4 shadow-lg;
+  }
+  
+  /* profit and loss text colors are provided by Tailwind via tailwind.config.js */
+  
+  .metric-value {
+    @apply font-mono text-2xl font-bold tracking-tight;
+  }
+  
+  .metric-label {
+    @apply text-xs uppercase tracking-wider text-terminal-muted;
+  }
+  
+  .glow-profit {
+    box-shadow: 0 0 20px var(--profit-color), 0 0 40px rgba(0, 255, 136, 0.3);
+  }
+  
+  .glow-loss {
+    box-shadow: 0 0 20px var(--loss-color), 0 0 40px rgba(255, 51, 102, 0.3);
+  }
+  
+  .grid-bg {
+    background-image: 
+      linear-gradient(to right, rgba(30, 30, 46, 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(30, 30, 46, 0.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  
+  .ticker-up {
+    animation: tickerUp 0.3s ease-out;
+  }
+  
+  .ticker-down {
+    animation: tickerDown 0.3s ease-out;
+  }
+}
+
+@keyframes tickerUp {
+  0% { 
+    transform: translateY(10px); 
+    opacity: 0;
+    color: var(--profit-color);
+  }
+  100% { 
+    transform: translateY(0); 
+    opacity: 1;
+  }
+}
+
+@keyframes tickerDown {
+  0% { 
+    transform: translateY(-10px); 
+    opacity: 0;
+    color: var(--loss-color);
+  }
+  100% { 
+    transform: translateY(0); 
+    opacity: 1;
+  }
+}
+
+/* Table styles */
+.data-table {
+  @apply w-full text-sm;
+}
+
+.data-table th {
+  @apply text-left font-mono text-xs uppercase tracking-wider text-terminal-muted p-3 border-b border-terminal-border;
+}
+
+.data-table td {
+  @apply p-3 border-b border-terminal-border font-mono;
+}
+
+.data-table tr:hover td {
+  @apply bg-terminal-surface/50;
+}
+
+/* Chart container */
+.chart-container {
+  @apply w-full h-full min-h-[300px];
+}

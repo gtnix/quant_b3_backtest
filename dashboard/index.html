@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quant B3 Dashboard</title>
+    <meta name="description" content="Terminal-style dashboard for quantitative trading strategies" />
+    <style>
+      /* Prevent flash of unstyled content */
+      html {
+        background-color: #0a0a0f;
+      }
+      
+      /* Loading screen */
+      .loading-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #0a0a0f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.3s ease-out;
+      }
+      
+      .loading-screen.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .loading-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #00ff88, #00d4ff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 24px;
+        animation: pulse 2s infinite;
+      }
+      
+      .loading-logo svg {
+        width: 40px;
+        height: 40px;
+        color: #0a0a0f;
+      }
+      
+      .loading-text {
+        color: #71717a;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        letter-spacing: 0.1em;
+      }
+      
+      .loading-bar {
+        width: 200px;
+        height: 2px;
+        background-color: #1e1e2e;
+        border-radius: 2px;
+        margin-top: 16px;
+        overflow: hidden;
+      }
+      
+      .loading-bar-inner {
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(90deg, #00ff88, #00d4ff);
+        border-radius: 2px;
+        animation: loading 1.5s infinite ease-in-out;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.8; }
+      }
+      
+      @keyframes loading {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loading screen -->
+    <div class="loading-screen" id="loading-screen">
+      <div class="loading-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+          <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+          <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+        </svg>
+      </div>
+      <div class="loading-text">INITIALIZING SYSTEMS</div>
+      <div class="loading-bar">
+        <div class="loading-bar-inner"></div>
+      </div>
+    </div>
+    
+    <!-- React root -->
+    <div id="root"></div>
+    
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Hide loading screen when app is ready
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loadingScreen = document.getElementById('loading-screen');
+          if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+            setTimeout(() => loadingScreen.remove(), 300);
+          }
+        }, 500);
+      });
+    </script>
+  </body>
+</html>

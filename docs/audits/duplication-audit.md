@@ -178,3 +178,5 @@ docs/
 
 A auditoria identificou e resolveu todas as duplicações lógicas encontradas. A documentação foi consolidada em uma estrutura única e rastreável, seguindo padrões de quant firms institucionais.
 
+
+

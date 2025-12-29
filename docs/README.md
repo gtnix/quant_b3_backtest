@@ -1,17 +1,83 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 2.0.0  
+**Versão**: 3.0.0  
 **Última Atualização**: 2025-12-28  
 **Status**: Produção
 
+---
+
 ## Visão Geral
 
-Sistema de backtesting institucional para o mercado B3 (Brasil) construído em Rust, projetado para:
+Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído em Rust, com dois subsistemas principais:
 
-- **Determinismo**: Mesmos inputs produzem outputs bit-identical
-- **Performance**: Hot path com zero alocações, até 124x speedup via SoA
-- **Precisão**: Cálculos financeiros com `rust_decimal`
-- **Auditabilidade**: Rastreabilidade total de decisões e cálculos
+1. **Backtester Engine** - Motor de simulação determinístico de alta performance
+2. **Sistema Combinador Generativo (SCG)** - Descoberta evolutiva de estratégias via algoritmos genéticos
+
+### Princípios Fundamentais
+
+| Princípio | Descrição |
+|-----------|-----------|
+| **Determinismo** | Mesmos inputs → outputs bit-identical |
+| **Performance** | Hot path zero-alloc, até 124x speedup via SoA |
+| **Precisão** | Cálculos financeiros com `rust_decimal` |
+| **Auditabilidade** | Rastreabilidade total de decisões e artefatos |
+| **Rigor Anti-Overfitting** | Walk-Forward, PBO, DSR integrados |
+
+---
+
+## Arquitetura do Sistema
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          QUANT B3 BACKTESTER                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                   CAMADA DE ORQUESTRAÇÃO                        │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │   │
+│  │  │  backtester_cli │  │  combiner_cli   │  │ Strategy Factory│  │   │
+│  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │   │
+│  └───────────┼────────────────────┼────────────────────┼───────────┘   │
+│              │                    │                    │               │
+│  ┌───────────┼────────────────────┼────────────────────┼───────────┐   │
+│  │           │     MOTOR DE EVOLUÇÃO (SCG)             │           │   │
+│  │           │    ┌────────────────────────────────────┴──┐        │   │
+│  │           │    │  combiner_engine                      │        │   │
+│  │           │    │  - Population Generator               │        │   │
+│  │           │    │  - Evolution Engine (GA + Pareto)     │        │   │
+│  │           │    │  - Hall of Fame                       │        │   │
+│  │           │    └───────────────┬───────────────────────┘        │   │
+│  │           │                    │                                │   │
+│  │           │    ┌───────────────┴───────────────────────┐        │   │
+│  │           │    │  combiner_core                        │        │   │
+│  │           │    │  - StrategyGenome, BlockGene          │        │   │
+│  │           │    │  - MultiObjectiveFitness (SIMD)       │        │   │
+│  │           │    │  - PopulationFitnessSoA               │        │   │
+│  │           │    └───────────────────────────────────────┘        │   │
+│  └───────────┼─────────────────────────────────────────────────────┘   │
+│              │                                                         │
+│  ┌───────────┼─────────────────────────────────────────────────────┐   │
+│  │           │         MOTOR DE BACKTESTING                        │   │
+│  │  ┌────────┴────────┐  ┌─────────────────┐  ┌─────────────────┐  │   │
+│  │  │backtester_engine│  │backtester_strat │  │backtester_intel │  │   │
+│  │  │  UnifiedEngine  │  │  Strategy DSL   │  │  Entry/Exit     │  │   │
+│  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │   │
+│  │           │                    │                    │           │   │
+│  │  ┌────────┴────────┐  ┌────────┴────────┐  ┌────────┴────────┐  │   │
+│  │  │backtester_exec  │  │backtester_portf │  │backtester_reports│ │   │
+│  │  │  Cost Models    │  │  Portfolio      │  │  Metrics (SIMD) │  │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      CAMADA DE DADOS                            │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │   │
+│  │  │   market_data   │  │   datahub_b3    │  │   datahub_us    │  │   │
+│  │  │   Calendar/FX   │  │   Scraper B3    │  │   US Provider   │  │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -21,13 +87,16 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) construído em R
 
 1. [Visão Geral do Sistema](architecture/system-overview.md)
 2. [Mapa de Crates](architecture/crate-map.md)
-3. [Referência CLI](operations/cli-reference.md)
+3. [Referência CLI - Backtester](operations/cli-reference.md)
+4. [Referência CLI - Combiner](scg/cli-reference.md)
 
 ### Para Quants/Pesquisadores
 
 1. [Catálogo de Blocos](strategies/block-catalog.md)
 2. [Execução de Pipeline](strategies/pipeline-execution.md)
-3. [Modos de Execução](strategies/execution-modes.md)
+3. [SCG Overview](scg/overview.md)
+4. [Estrutura do Genoma](scg/genome-structure.md)
+5. [Framework de Validação](scg/validation-framework.md)
 
 ### Para Engenheiros de Performance
 
@@ -40,6 +109,162 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) construído em R
 1. [Política de Dividendos](policies/dividend-policy.md)
 2. [Survivorship Bias](policies/survivorship-bias.md)
 3. [Convenções FX](policies/fx-conventions.md)
+4. [Data Integrity](data_integrity.md)
+
+### Para Engenheiros de Dados
+
+1. [Documentação de Dados](data/README.md)
+2. [Provider Due Diligence](data/provider-due-diligence.md)
+3. [US DataHub Status](data/us-datahub-status.md)
+
+### Para Operações
+
+1. [Strategy Factory](strategy_factory.md)
+2. [Artefatos de Output](operations/artifacts.md)
+3. [Dashboard](dashboard/README.md)
+
+---
+
+## Dashboard Interativo
+
+O sistema inclui um **dashboard desktop institucional** construído com Tauri (Rust + React):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    QUANT B3 DASHBOARD                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  CORE                          ANALYTICS                        │
+│  ├── Campaigns                 ├── Risk Analytics               │
+│  ├── Candidates                ├── Strategy Comparison          │
+│  └── Backtest                  ├── Walk-Forward Analysis        │
+│                                ├── Monte Carlo Simulation       │
+│  SYSTEM                        └── Regime Analysis              │
+│  ├── Evolution Monitor                                          │
+│  └── Overview                                                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Funcionalidades Principais
+
+| Feature | Descrição |
+|---------|-----------|
+| **Campaign Browser** | Navegue por campanhas e runs do SCG |
+| **Candidate Explorer** | Tabela interativa com filtros, multi-select |
+| **Backtest Drilldown** | Equity curve, drawdown, trade log |
+| **Risk Analytics** | VaR, CVaR, rolling Sharpe, distribuição de retornos |
+| **Strategy Comparison** | Comparação lado-a-lado, matriz de correlação |
+| **Walk-Forward** | Validação out-of-sample visual |
+| **Monte Carlo** | Bootstrap simulation, bandas de confiança |
+| **Regime Analysis** | Performance por regime de mercado |
+
+### Tecnologia
+
+| Stack | Tecnologia |
+|-------|------------|
+| Framework | Tauri 2.x (Rust backend) |
+| Frontend | React 18 + TypeScript + Vite |
+| Styling | Tailwind CSS (terminal theme) |
+| State | Zustand |
+| Charts | Recharts + D3 |
+
+### Executar
+
+```bash
+cd dashboard
+npm install
+npm run tauri dev
+```
+
+Ver [Dashboard README](../dashboard/README.md) para documentação completa
+
+---
+
+## Sistema Combinador Generativo (SCG)
+
+O SCG é uma plataforma de descoberta evolutiva de estratégias que utiliza:
+
+- **Algoritmos Genéticos** - Populações de estratégias evoluem via seleção, crossover e mutação
+- **Otimização Multi-Objetivo** - Fronteira de Pareto para CAGR, Sharpe, MaxDD
+- **SIMD Acceleration** - Cálculo de fitness vetorizado para milhares de estratégias
+- **Walk-Forward Validation** - Validação out-of-sample obrigatória
+- **Anti-Overfitting** - PBO (Probability of Backtest Overfitting) e DSR (Deflated Sharpe Ratio)
+
+### Componentes SCG
+
+| Crate | Responsabilidade |
+|-------|------------------|
+| `combiner_core` | Tipos: StrategyGenome, BlockGene, MultiObjectiveFitness, SIMD metrics |
+| `combiner_engine` | Evolution Engine, Pareto selection, Hall of Fame |
+| `combiner_runner` | Executor paralelo de backtests (rayon) |
+| `combiner_cli` | CLI: run, validate, factory commands |
+
+### Fluxo de Evolução
+
+```
+População Inicial (N genomas)
+         │
+         ▼
+┌─────────────────────────────────────┐
+│     Avaliação Paralela (rayon)      │
+│  - Converter genoma → TOML          │
+│  - Executar backtest                │
+│  - Calcular fitness multi-objetivo  │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│     Seleção por Torneio             │
+│  - Tournament selection (k=3)       │
+│  - Dominância de Pareto             │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│     Reprodução                       │
+│  - Crossover (block-level, uniform) │
+│  - Mutação (parameter, block swap)  │
+└─────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│     Elitismo                        │
+│  - Top genomas → Hall of Fame       │
+│  - Elite transferida para próxima   │
+└─────────────────────────────────────┘
+         │
+         ▼
+    Nova Geração
+```
+
+### Comandos Principais
+
+```bash
+# Executar evolução
+combiner run --config configs/scg.toml --ultra --top-k 10
+
+# Validar top candidatos com Walk-Forward
+combiner validate scg_20251228_123456 --top-k 10 --full
+
+# Strategy Factory - Campanhas multi-seed
+combiner factory run --campaign configs/campaigns/momentum.toml
+combiner factory promote --run run_abc123 --top 3
+```
+
+---
+
+## Strategy Factory
+
+Sistema de orquestração para campanhas de descoberta de estratégias:
+
+- **Multi-seed campaigns** - Múltiplas execuções com seeds diferentes para robustez
+- **Experiment registry** - Tracking em PostgreSQL (Neon)
+- **Resume capability** - Retomar campanhas interrompidas
+- **Promotion pipeline** - Research → Candidate → Paper Trading
+- **Reproducibility** - Provenance completa com hashes de config/dataset
+
+Ver [Strategy Factory Runbook](strategy_factory.md) para detalhes.
 
 ---
 
@@ -53,15 +278,24 @@ docs/
 │   ├── crate-map.md            # Crates e responsabilidades
 │   ├── data-flow.md            # Fluxo de dados end-to-end
 │   └── design-decisions.md     # ADRs
+├── scg/                         # Sistema Combinador Generativo
+│   ├── overview.md             # Visão geral do SCG
+│   ├── genome-structure.md     # Estrutura do genoma
+│   ├── validation-framework.md # WFA, PBO, DSR
+│   └── cli-reference.md        # Comandos combiner
+├── dashboard/                   # Dashboard Tauri
+│   └── README.md               # Arquitetura e componentes
+├── data/                        # Documentação de dados
+│   ├── README.md               # Índice e overview
+│   ├── provider-due-diligence.md  # Avaliação de providers
+│   └── us-datahub-status.md    # Status do DataHub US
 ├── components/                  # Especificações técnicas
 │   ├── engines.md              # UnifiedEngine
-│   ├── entry-exit-pipeline.md  # Entry/Exit engines
 │   ├── strategy-compositor.md  # DSL de estratégias
 │   └── performance-engine.md   # Métricas e atribuição
 ├── operations/                  # Manual de operações
-│   ├── cli-reference.md        # Comandos CLI
-│   ├── configuration.md        # Formato TOML
-│   └── artifacts.md            # Artefatos de output
+│   ├── cli-reference.md        # Comandos backtester_cli
+│   └── artifacts.md            # Estrutura de output/artifacts
 ├── validation/                  # Relatório de validação
 │   ├── determinism.md          # Invariantes
 │   ├── test-coverage.md        # Cobertura de testes
@@ -76,43 +310,11 @@ docs/
 │   └── fx-conventions.md       # Multi-currency
 ├── audits/                      # Audit trail
 │   └── duplication-audit.md    # Relatório de auditoria
-└── reference/                   # Referência rápida
-    └── glossary.md             # Glossário
-```
-
----
-
-## Convenções de Documentação
-
-### Rastreabilidade
-
-Toda seção deve apontar para localização no código:
-
-```markdown
-## Localização no Código
-- Crate: `backtester_xxx`
-- Arquivo: `src/xxx.rs`
-- Símbolos: `Foo`, `bar()`, `BAZ_CONST`
-```
-
-### Comandos Reproduzíveis
-
-Todos os comandos devem ser copy-paste funcionais:
-
-```bash
-# CORRETO: Comando exato
-cargo test --package backtester_strategy --test runner_e2e
-
-# INCORRETO: Comando genérico
-cargo test <seu_teste>
-```
-
-### Marcação de Incertezas
-
-Se algo não pode ser confirmado no código, marcar explicitamente:
-
-```markdown
-**DESCONHECIDO**: A razão para X não está documentada no código.
+├── reference/                   # Referência rápida
+│   └── glossary.md             # Glossário
+├── data_integrity.md           # Data integrity framework
+├── strategy_factory.md         # Factory runbook
+└── generative_combiner_architecture.md  # Spec completa SCG
 ```
 
 ---
@@ -126,10 +328,14 @@ Se algo não pode ser confirmado no código, marcar explicitamente:
 | Volatilidade | Population std (N) | `metrics.rs:VolatilityType::Population` |
 | Taxa livre de risco | 5% a.a. default | `metrics.rs:DEFAULT_RISK_FREE_RATE` |
 | Precisão monetária | rust_decimal | `UnifiedEngine` usa `Decimal` |
+| Fitness objectives | CAGR, Sharpe, MaxDD | `combiner_core::MultiObjectiveFitness` |
+| PBO threshold | ≤ 0.15 | `factory_campaign.toml:max_pbo` |
 
 ---
 
 ## Comandos Essenciais
+
+### Backtester
 
 ```bash
 # Build
@@ -151,11 +357,50 @@ cargo run -p backtester_cli -- run --config configs/strategies/golden_momentum.t
 cargo run -p backtester_cli -- generate-catalog --output docs/strategies/block-catalog.md
 ```
 
+### Combiner (SCG)
+
+```bash
+# Executar evolução
+cargo run -p combiner_cli -- run --config configs/scg.toml
+
+# Com modo ultra-performance
+cargo run -p combiner_cli -- run --config configs/scg.toml --ultra --top-k 25
+
+# Validar candidatos
+cargo run -p combiner_cli -- validate scg_20251228 --top-k 10 --full
+
+# Strategy Factory
+cargo run -p combiner_cli -- factory run --campaign configs/campaigns/momentum.toml
+cargo run -p combiner_cli -- factory list
+cargo run -p combiner_cli -- factory show run_abc123
+cargo run -p combiner_cli -- factory promote --run run_abc123 --top 3
+```
+
 ---
 
-## Links Externos
+## Workspace Structure
 
-- Repositório: `quant_b3_backtest`
-- Workspace Rust: 12 crates
-- Versão Rust: 1.75+
+| Grupo | Crate | Responsabilidade |
+|-------|-------|------------------|
+| **Core** | `backtester_core` | Tipos fundamentais, traits, eventos |
+| **Core** | `backtester_io` | Data ingestion, mmap |
+| **Engine** | `backtester_engine` | UnifiedEngine (simulação) |
+| **Engine** | `backtester_portfolio` | Estado do portfólio |
+| **Engine** | `backtester_execution` | Cost models, slippage |
+| **Engine** | `backtester_reports` | Métricas SIMD |
+| **Strategy** | `backtester_strategy` | Strategy Factory (DSL) |
+| **Strategy** | `backtester_intelligence` | Entry/Exit engines, performance |
+| **SCG** | `combiner_core` | Genome, Fitness, SIMD metrics |
+| **SCG** | `combiner_engine` | Evolution, Pareto, Hall of Fame |
+| **SCG** | `combiner_runner` | Parallel executor |
+| **SCG** | `combiner_cli` | CLI + Factory commands |
+| **Data** | `market_data` | Calendar, FX, universe |
+| **Tests** | `backtester_tests` | Integration, determinism |
 
+---
+
+## Links
+
+- **Versão Rust**: 1.75+
+- **Workspace**: 14 crates
+- **Arquitetura Detalhada**: [generative_combiner_architecture.md](generative_combiner_architecture.md)

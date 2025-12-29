@@ -205,3 +205,5 @@ Ao comparar benchmarks, garantir:
 | Fast functions | `crates/backtester_strategy/src/fast_context.rs` |
 | SoA structures | `crates/backtester_strategy/src/compiled.rs` |
 
+
+

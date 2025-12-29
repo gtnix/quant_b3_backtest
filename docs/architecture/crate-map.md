@@ -1,47 +1,58 @@
 # Mapa de Crates
 
-**Versão**: 2.0.0  
+**Versão**: 3.0.0  
 **Última Atualização**: 2025-12-28
 
 ## Workspace Overview
 
-O backtester é organizado em um workspace Rust com crates especializados.
+O sistema é organizado em um workspace Rust com 14 crates especializados, divididos em dois subsistemas:
+
+1. **Backtester** - Motor de simulação de estratégias
+2. **Combiner (SCG)** - Sistema Combinador Generativo para descoberta evolutiva
 
 ---
 
 ## Diagrama de Dependências
 
 ```
-                           backtester_cli
-                                 │
-                    ┌────────────┼────────────┐
-                    │            │            │
-                    ▼            ▼            ▼
-           backtester_strategy   │   backtester_tests
-                    │            │            │
-                    │            │            │
-                    └────────────┼────────────┘
-                                 │
-                                 ▼
-                      backtester_intelligence
-                                 │
-                    ┌────────────┼────────────┐
-                    │            │            │
-                    ▼            ▼            ▼
-          backtester_engine  backtester_portfolio  backtester_reports
-                    │            │            │
-                    └────────────┼────────────┘
-                                 │
-                                 ▼
-                         backtester_core
-                                 │
-                                 ▼
-                          backtester_io
+                                    ORQUESTRAÇÃO
+                    ┌─────────────────────┬─────────────────────┐
+                    │                     │                     │
+                    ▼                     ▼                     ▼
+            backtester_cli          combiner_cli         market_data
+                    │                     │                     │
+                    │                     │                     │
+        ┌───────────┼───────────┐         │                     │
+        │           │           │         │                     │
+        ▼           ▼           ▼         ▼                     │
+backtester_strategy │  backtester_tests   │                     │
+        │           │           │         │                     │
+        │           │           │         │                     │
+        └───────────┼───────────┘         │                     │
+                    │                     │                     │
+                    ▼                     ▼                     │
+        backtester_intelligence    combiner_runner              │
+                    │                     │                     │
+        ┌───────────┼───────────┐         │                     │
+        │           │           │         ▼                     │
+        ▼           ▼           ▼   combiner_engine             │
+backtester_engine   │   backtester_reports    │                 │
+        │  backtester_portfolio   │           │                 │
+        │           │             │           ▼                 │
+        │  backtester_execution   │     combiner_core           │
+        │           │             │           │                 │
+        └───────────┼─────────────┘           │                 │
+                    │                         │                 │
+                    ▼                         │                 │
+            backtester_core ◄─────────────────┘                 │
+                    │                                           │
+                    ▼                                           │
+             backtester_io ◄────────────────────────────────────┘
 ```
 
 ---
 
-## Crates do Workspace
+## Crates do Backtester
 
 ### `backtester_core`
 
@@ -54,6 +65,7 @@ O backtester é organizado em um workspace Rust com crates especializados.
 - `Strategy` trait
 - `ExecutionModel` trait
 - `BacktestConfig`, `ExecutionConfig`
+- `simd` - Módulo com funções SIMD otimizadas
 
 **Localização**: `crates/backtester_core/src/lib.rs`
 
@@ -64,6 +76,7 @@ O backtester é organizado em um workspace Rust com crates especializados.
 **Responsabilidade**: Data ingestion e normalização.
 
 **Símbolos Principais**:
+- `MmapLoader` - Memory-mapped file loading
 - Data loaders (CSV, API)
 - Cache management
 - Normalização de datas/preços
@@ -78,7 +91,8 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 **Símbolos Principais**:
 - `UnifiedEngine` (CANÔNICO)
-- `SimulationEngine` (DEPRECATED)
+- `ParallelEngine` - Execução paralela multi-asset
+- `Rebalancer` - Lógica de rebalanceamento
 - `MarketState`, `OrderRouter`
 - `DualPriceBar`, `PriceType`
 - `DividendEvent`, `DividendIndex`
@@ -105,12 +119,22 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 ### `backtester_execution`
 
-**Responsabilidade**: Modelos de execução.
+**Responsabilidade**: Modelos de execução e custos.
 
 **Símbolos Principais**:
 - `SlippageModel` (Constant, VolumeLinear, Volatility)
 - `CostModel` (fixed, commission, emolument B3)
 - `LiquidityModel` (max participation, partial fills)
+- `ExecutionGates` - Controles institucionais
+- `StressTest` - Testes de stress de execução
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `config.rs` | Configuração de execução |
+| `cost_report.rs` | Relatório detalhado de custos |
+| `gates.rs` | Gates institucionais |
+| `stress.rs` | Stress testing |
 
 **Localização**: `crates/backtester_execution/src/`
 
@@ -118,12 +142,14 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 ### `backtester_reports`
 
-**Responsabilidade**: Geração de reports.
+**Responsabilidade**: Geração de reports e métricas.
 
 **Símbolos Principais**:
-- `NavHistory`
-- `BacktestResult`
-- SIMD-optimized metrics
+- `NavHistory` - Histórico de NAV com drawdowns
+- `BacktestResult` - Resultado completo com todas as métricas
+- `BacktestReport` - Sumário do backtest
+- `RunManifest` - Audit trail
+- `ResultsCalculator` - Cálculo de métricas SIMD
 
 **Localização**: `crates/backtester_reports/src/`
 
@@ -131,7 +157,7 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 ### `backtester_intelligence`
 
-**Responsabilidade**: Lógica de inteligência de seleção.
+**Responsabilidade**: Lógica de inteligência de seleção e decisão.
 
 **Módulos**:
 | Módulo | Responsabilidade |
@@ -140,9 +166,14 @@ O backtester é organizado em um workspace Rust com crates especializados.
 | `exit/` | ExitEngine, stop-loss, take-profit, trailing |
 | `orchestrator/` | RebalanceOrchestrator, order netting |
 | `performance/` | PerformanceEngine, métricas, atribuição |
+| `monitoring/` | Monitoring e alertas |
+| `walkforward/` | Walk-Forward Analysis |
 | `dividends/` | Dividend processing |
 | `fx/` | FxProvider, multi-currency |
 | `currency/` | Currency, Money, FxPair types |
+| `filters/` | Filtros de universo |
+| `risk_free.rs` | Taxa livre de risco |
+| `scorer.rs` | Scoring de ativos |
 
 **Localização**: `crates/backtester_intelligence/src/`
 
@@ -155,12 +186,13 @@ O backtester é organizado em um workspace Rust com crates especializados.
 **Módulos**:
 | Módulo | Responsabilidade |
 |--------|------------------|
-| `blocks/` | 19 blocos de estratégia |
+| `blocks/` | 19 blocos de estratégia (selection, entry, exit, sizing) |
 | `compositor.rs` | Executor de pipeline |
 | `registry.rs` | BlockRegistry |
 | `compiled.rs` | CompiledStrategy, SymbolTable |
 | `fast_context.rs` | CandidatesSoA, PreallocBuffers |
 | `experiment/` | Runner, Metrics, Artifacts, Comparator |
+| `config/` | Configuração de estratégias |
 
 **Localização**: `crates/backtester_strategy/src/`
 
@@ -168,7 +200,7 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 ### `backtester_cli`
 
-**Responsabilidade**: Interface de linha de comando.
+**Responsabilidade**: Interface de linha de comando do backtester.
 
 **Comandos**:
 - `run` - Executar estratégia única
@@ -186,12 +218,160 @@ O backtester é organizado em um workspace Rust com crates especializados.
 **Responsabilidade**: Testes de integração e invariantes.
 
 **Suites**:
-- `determinism` - Testes de determinismo
+- `determinism` - Testes de determinismo (bit-identical)
 - `invariants` - Invariantes do sistema
 - `anti_look_ahead` - Prevenção de look-ahead bias
+- `real_data_integration` - Testes com dados reais
 - `scenarios_bench` - Benchmarks de cenários
 
 **Localização**: `crates/backtester_tests/`
+
+---
+
+## Crates do SCG (Sistema Combinador Generativo)
+
+### `combiner_core`
+
+**Responsabilidade**: Tipos fundamentais para descoberta evolutiva de estratégias.
+
+**Símbolos Principais**:
+- `StrategyGenome` - Genoma completo de uma estratégia
+- `BlockGene` - Gene individual (bloco + parâmetros)
+- `BlockType` - Selection, Entry, Exit, Sizing
+- `ParamValue` - Valores de parâmetros com ranges
+- `MultiObjectiveFitness` - Fitness multi-objetivo (CAGR, Sharpe, MaxDD)
+- `PopulationFitnessSoA` - Layout SoA para batch processing SIMD
+- `GenomeConverter` - Genoma → TOML
+- `GenomeValidator` - Validação de genomas
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `genome.rs` | StrategyGenome, BlockGene, ParamValue |
+| `fitness.rs` | MultiObjectiveFitness, FitnessConfig |
+| `fitness_soa.rs` | PopulationFitnessSoA, AlignedVec |
+| `simd_metrics.rs` | Sharpe, MaxDD, Sortino vetorizados |
+| `converter.rs` | Genoma → TOML |
+| `validator.rs` | Validação de genomas |
+| `param_ranges.rs` | Ranges de parâmetros |
+
+**Localização**: `crates/combiner_core/src/`
+
+---
+
+### `combiner_engine`
+
+**Responsabilidade**: Motor de evolução genética.
+
+**Símbolos Principais**:
+- `EvolutionEngine` - Motor principal de evolução
+- `EvolutionConfig` - Configuração do AG
+- `Population` - Gerenciamento de população
+- `ParetoFrontier` - Fronteira de Pareto (NSGA-II)
+- `HallOfFame` - Melhores estratégias
+- `ValidatedHallOfFame` - Hall of Fame com validação institucional
+- `Selection`, `Crossover`, `Mutation` - Operadores genéticos
+- `GenerationStats` - Estatísticas por geração
+- `StageABatchEvaluator` - Avaliação rápida em batch
+- `StageBParallelValidator` - Validação paralela completa
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `engine.rs` | EvolutionEngine, UltraEvolutionResult |
+| `config.rs` | EvolutionConfig |
+| `population.rs` | Population management |
+| `operators.rs` | Selection, Crossover, Mutation |
+| `pareto.rs` | ParetoFrontier |
+| `pareto_simd.rs` | Pareto ranks SIMD |
+| `hall_of_fame.rs` | HallOfFame |
+| `hall_of_fame_validated.rs` | ValidatedHallOfFame |
+| `validation.rs` | WFA, CPCV, PBO/DSR |
+| `evaluation/` | Stage A/B evaluation |
+| `persistence.rs` | Persistência de experimentos |
+| `report.rs` | Geração de relatórios |
+| `performance_metrics.rs` | Métricas de performance do AG |
+
+**Localização**: `crates/combiner_engine/src/`
+
+---
+
+### `combiner_runner`
+
+**Responsabilidade**: Executor paralelo de backtests.
+
+**Símbolos Principais**:
+- `BatchExecutor` - Execução paralela via rayon
+- `DataLoader` - Carregamento de dados para backtests
+- `MetricsCollector` - Coleta de métricas
+- `CacheManager` - Cache de resultados
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `executor.rs` | BatchExecutor |
+| `data_loader.rs` | Carregamento de dados |
+| `metrics.rs` | Coleta de métricas |
+| `cache.rs` | Cache de resultados |
+
+**Localização**: `crates/combiner_runner/src/`
+
+---
+
+### `combiner_cli`
+
+**Responsabilidade**: Interface de linha de comando do SCG.
+
+**Comandos Principais**:
+| Comando | Descrição |
+|---------|-----------|
+| `run` | Executar evolução |
+| `status` | Verificar status de experimento |
+| `export-top` | Exportar top estratégias |
+| `validate` | Validar com Walk-Forward |
+
+**Subcomandos Factory**:
+| Comando | Descrição |
+|---------|-----------|
+| `factory init` | Inicializar campanha |
+| `factory run` | Executar campanha multi-seed |
+| `factory resume` | Retomar campanha |
+| `factory list` | Listar campanhas |
+| `factory show` | Detalhes de campanha/run |
+| `factory compare` | Comparar candidatos |
+| `factory promote` | Promover candidatos |
+| `factory audit-data` | Auditoria de integridade |
+| `factory export-top` | Exportar top N candidatos |
+
+**Localização**: `crates/combiner_cli/src/`
+
+---
+
+## Crate de Dados
+
+### `market_data`
+
+**Responsabilidade**: Acesso a dados de mercado, calendários e FX.
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `calendar/` | Calendários de trading (B3, US) |
+| `fx_loader.rs` | Carregamento de taxas FX |
+| `interest_rates.rs` | Taxas de juros |
+| `universe_gate.rs` | Filtros de universo |
+| `inventory.rs` | Inventário de dados |
+| `validator.rs` | Validação de dados |
+| `audit_integrity.rs` | Auditoria de integridade |
+| `ingest.rs` | Ingestão de dados |
+| `reports.rs` | Relatórios de dados |
+
+**Binários**:
+- `market_data` - CLI para gestão de dados
+- `calendar_builder` - Construtor de calendários
+- `integrity_checker` - Verificador de integridade
+
+**Localização**: `crates/market_data/src/`
 
 ---
 
@@ -199,13 +379,23 @@ O backtester é organizado em um workspace Rust com crates especializados.
 
 ```toml
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
+lto = "fat"           # Full LTO para máxima otimização
+codegen-units = 1     # Single codegen unit
+panic = "abort"       # Sem overhead de unwinding
+strip = "symbols"     # Binário menor
+opt-level = 3         # Otimização máxima
 
 [profile.bench]
 inherits = "release"
-debug = true
+debug = true          # Símbolos para profiling
+
+[profile.ultra]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
 ```
 
 ---
@@ -218,6 +408,10 @@ cargo build --release
 
 # Build crate específico
 cargo build -p backtester_engine --release
+cargo build -p combiner_engine --release
+
+# Build ultra-otimizado
+cargo build --profile ultra
 
 # Check sem compilar
 cargo check --workspace
@@ -225,5 +419,91 @@ cargo check --workspace
 # Testes
 cargo test --workspace
 cargo test -p backtester_strategy
+cargo test -p combiner_engine
+
+# Benchmarks
+cargo bench --bench strategy_bench
+cargo bench --bench performance_bench
 ```
 
+---
+
+## Dashboard (Tauri Application)
+
+### `dashboard`
+
+**Responsabilidade**: Interface gráfica desktop para visualização de estratégias.
+
+**Stack**:
+- **Framework**: Tauri 2.x (Rust backend + Web frontend)
+- **Frontend**: React 18 + TypeScript + Vite
+- **Styling**: Tailwind CSS (terminal theme)
+- **State**: Zustand
+- **Charts**: Recharts
+
+**Estrutura**:
+```
+dashboard/
+├── src/                    # React frontend
+│   ├── pages/              # 10 páginas (Campaigns, Candidates, etc)
+│   ├── components/         # Charts, layout, UI
+│   ├── stores/             # Zustand dataStore
+│   └── lib/                # Utilities
+├── src-tauri/              # Rust backend
+│   └── src/lib.rs          # Tauri commands (~1080 lines)
+└── index.html
+```
+
+**Tauri Commands**:
+| Command | Descrição |
+|---------|-----------|
+| `set_artifacts_root` | Inicializa pasta de artefatos |
+| `load_index` | Carrega índice de campanhas |
+| `load_campaign` | Carrega detalhes da campanha |
+| `load_run` | Carrega detalhes do run |
+| `list_candidates_v2` | Lista candidatos com filtros |
+| `load_candidate_detail` | Carrega candidato completo |
+| `load_backtest_series` | Carrega timeseries |
+| `watch_artifacts` | File watcher para hot-reload |
+| `invalidate_cache` | Limpa cache |
+
+**Páginas**:
+| Página | Descrição |
+|--------|-----------|
+| Campaigns | Browser de campanhas e runs |
+| Candidates | Tabela de candidatos com filtros |
+| Backtest | Drilldown de backtest |
+| Risk Analytics | VaR, CVaR, rolling metrics |
+| Comparison | Comparação multi-estratégia |
+| Walk-Forward | Validação OOS |
+| Monte Carlo | Simulação bootstrap |
+| Regimes | Análise por regime de mercado |
+
+**Localização**: `dashboard/`
+
+Ver [Dashboard README](../dashboard/README.md) para documentação completa.
+
+---
+
+## Resumo do Workspace
+
+| Grupo | Crate | LOC (aprox) | Responsabilidade |
+|-------|-------|-------------|------------------|
+| Core | `backtester_core` | ~800 | Tipos, traits, SIMD |
+| Core | `backtester_io` | ~400 | I/O, mmap |
+| Engine | `backtester_engine` | ~1200 | Simulação |
+| Engine | `backtester_portfolio` | ~600 | Portfolio |
+| Engine | `backtester_execution` | ~800 | Custos, gates |
+| Engine | `backtester_reports` | ~700 | Métricas |
+| Strategy | `backtester_strategy` | ~2500 | DSL, blocos |
+| Strategy | `backtester_intelligence` | ~4000 | Entry/Exit, WFA |
+| CLI | `backtester_cli` | ~400 | CLI backtester |
+| Tests | `backtester_tests` | ~800 | Testes |
+| **SCG** | `combiner_core` | ~1500 | Genome, fitness |
+| **SCG** | `combiner_engine` | ~3000 | Evolução, Pareto |
+| **SCG** | `combiner_runner` | ~600 | Executor paralelo |
+| **SCG** | `combiner_cli` | ~1200 | CLI + Factory |
+| Data | `market_data` | ~2000 | Calendars, FX |
+| **Dashboard** | `dashboard` | ~3500 | UI Tauri (Rust+React) |
+
+**Total**: ~24.000 linhas de código (Rust + TypeScript)

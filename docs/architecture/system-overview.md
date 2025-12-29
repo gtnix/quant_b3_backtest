@@ -172,3 +172,5 @@ TOML Config → Compositor → Pipeline Blocks → Candidates
 | PerformanceEngine | `backtester_intelligence` | `src/performance/engine.rs` |
 | CLI | `backtester_cli` | `src/main.rs` |
 
+
+

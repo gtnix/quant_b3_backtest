@@ -251,3 +251,5 @@ Config → CompiledStrategy + SymbolTable + CandidatesSoA + PreallocBuffers
 | fast_* functions | `src/fast_context.rs` |
 | ExecutionMode enum | `src/experiment/types.rs` |
 
+
+
