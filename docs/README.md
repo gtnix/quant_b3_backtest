@@ -312,6 +312,8 @@ docs/
 │   └── duplication-audit.md    # Relatório de auditoria
 ├── reference/                   # Referência rápida
 │   └── glossary.md             # Glossário
+├── portfolio/                   # Especificação de experiência
+│   └── experience-specification.md  # Documentação técnica de portfólio
 ├── data_integrity.md           # Data integrity framework
 ├── strategy_factory.md         # Factory runbook
 └── generative_combiner_architecture.md  # Spec completa SCG
