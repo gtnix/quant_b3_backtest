@@ -1,8 +1,8 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.1.0  
+**Versão**: 3.2.0  
 **Última Atualização**: 2025-12-29  
-**Status**: Produção
+**Status**: Produção (VPS + Neon)
 
 ---
 
@@ -117,22 +117,24 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 2. [Provider Due Diligence](data/provider-due-diligence.md)
 3. [US DataHub Status](data/us-datahub-status.md)
 
-### Para Operações
+### Para Operações/DevOps
 
 1. [Strategy Factory](strategy_factory.md)
 2. [Artefatos de Output](operations/artifacts.md)
 3. [Dashboard](dashboard/README.md)
 4. [Cockpit - Controle SCG](dashboard/cockpit.md)
 5. [API Server (Browser Mode)](dashboard/api-server.md)
+6. **[VPS Deployment](dashboard/vps-deployment.md)** ← NOVO
 
 ---
 
 ## Dashboard Interativo
 
-O sistema inclui um **dashboard institucional** com suporte a dois modos de execução:
+O sistema inclui um **dashboard institucional** com suporte a três modos de execução:
 
 - **Desktop Mode (Tauri)**: Aplicação nativa com acesso direto ao filesystem
-- **Browser Mode**: Funciona em qualquer navegador via API Server + Neon DB
+- **Browser Mode (Local)**: Funciona em qualquer navegador via API Server + Neon DB
+- **VPS Mode (Production)**: Deploy em VPS com nginx reverse proxy + PM2
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -140,7 +142,7 @@ O sistema inclui um **dashboard institucional** com suporte a dois modos de exec
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  CORE                          ANALYTICS                        │
-│  ├── Cockpit (NEW!)            ├── Risk Analytics               │
+│  ├── Cockpit                   ├── Risk Analytics               │
 │  ├── Campaigns                 ├── Strategy Comparison          │
 │  ├── Candidates                ├── Walk-Forward Analysis        │
 │  └── Backtest                  ├── Monte Carlo Simulation       │
@@ -148,6 +150,9 @@ O sistema inclui um **dashboard institucional** com suporte a dois modos de exec
 │  SYSTEM                                                         │
 │  ├── Evolution Monitor                                          │
 │  └── Overview                                                   │
+│                                                                  │
+│  STATUS                                                         │
+│  └── [Live] ou [Offline] badge com status SSE                   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -162,8 +167,9 @@ O **Cockpit** é o painel central para orquestração de runs do SCG:
 | **Compute Budget** | Time slider, workers/intensidade configurável |
 | **Risk Gates** | Sharpe mínimo, PBO máximo, stress tests |
 | **Ranking Methods** | Institutional, Pareto, Sharpe, Risk-Adjusted |
-| **Live Progress** | Geração atual, melhor Sharpe, candidatos avaliados |
+| **Live Progress** | SSE real-time com fallback para polling |
 | **Top Strategies** | Tabela rankeada com drilldown para backtest |
+| **Status Badge** | "Live" (verde) ou "Offline" (vermelho) |
 
 Ver [Cockpit Documentation](dashboard/cockpit.md) para detalhes.
 
@@ -185,13 +191,14 @@ Ver [Cockpit Documentation](dashboard/cockpit.md) para detalhes.
 
 | Stack | Tecnologia |
 |-------|------------|
-| Framework | Tauri 2.x (Desktop) / Express (Browser) |
+| Framework | Tauri 2.x (Desktop) / Express (Browser/VPS) |
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS (terminal theme) |
 | State | Zustand |
 | Charts | Recharts + D3 |
-| Database | Neon PostgreSQL (Browser Mode) |
-| Real-time | Tauri Events / SSE |
+| Database | Neon PostgreSQL (cloud) |
+| Real-time | Tauri Events / SSE + Polling fallback |
+| Deploy VPS | nginx + PM2 |
 
 ### Executar
 
@@ -201,14 +208,72 @@ cd dashboard
 npm install
 npm run tauri dev
 
-# Browser Mode (API Server)
+# Browser Mode (Local)
 cd dashboard
 npm install
 node server.js &       # API em http://localhost:3001
 npm run dev            # Frontend em http://localhost:5173
+
+# VPS Mode (Production)
+# Ver docs/dashboard/vps-deployment.md
 ```
 
 Ver [Dashboard README](dashboard/README.md) para documentação completa
+
+---
+
+## Ambiente de Produção (VPS)
+
+### Infraestrutura
+
+| Componente | Tecnologia |
+|------------|------------|
+| VPS | Vultr vc2-1c-1gb (Ubuntu 24.04) |
+| Reverse Proxy | nginx |
+| Process Manager | PM2 |
+| Database | Neon PostgreSQL (cloud) |
+| Auth | HTTP Basic Auth (nginx) |
+
+### Acesso
+
+```
+URL: http://149.28.39.194
+User: admin
+Pass: quant123
+```
+
+### Arquitetura VPS
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        INTERNET                               │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     NGINX (port 80)                           │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  location / → proxy_pass 5173 (vite preview)           │  │
+│  │  location /api/ → proxy_pass 3001 (no auth)            │  │
+│  │  location /api/events → SSE proxy                      │  │
+│  └────────────────────────────────────────────────────────┘  │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          │                               │
+          ▼                               ▼
+┌─────────────────────┐         ┌─────────────────────┐
+│  alpha-dashboard    │         │    api-server       │
+│  PM2: vite preview  │         │  PM2: node server   │
+│  port: 5173         │         │  port: 3001         │
+└─────────────────────┘         └──────────┬──────────┘
+                                           │
+                                           ▼
+                                ┌─────────────────────┐
+                                │   Neon PostgreSQL   │
+                                │   (cloud database)  │
+                                └─────────────────────┘
+```
 
 ---
 
@@ -314,10 +379,11 @@ docs/
 │   ├── genome-structure.md     # Estrutura do genoma
 │   ├── validation-framework.md # WFA, PBO, DSR
 │   └── cli-reference.md        # Comandos combiner
-├── dashboard/                   # Dashboard Tauri/Browser
+├── dashboard/                   # Dashboard Tauri/Browser/VPS
 │   ├── README.md               # Arquitetura e componentes
 │   ├── cockpit.md              # Cockpit - Controle SCG
-│   └── api-server.md           # API Server (Browser Mode)
+│   ├── api-server.md           # API Server (Browser Mode)
+│   └── vps-deployment.md       # Deploy VPS (nginx + PM2) ← NOVO
 ├── data/                        # Documentação de dados
 │   ├── README.md               # Índice e overview
 │   ├── provider-due-diligence.md  # Avaliação de providers
@@ -439,3 +505,4 @@ cargo run -p combiner_cli -- factory promote --run run_abc123 --top 3
 - **Versão Rust**: 1.75+
 - **Workspace**: 14 crates
 - **Arquitetura Detalhada**: [generative_combiner_architecture.md](generative_combiner_architecture.md)
+- **Produção VPS**: http://149.28.39.194 (admin/quant123)

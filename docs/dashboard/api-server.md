@@ -1,19 +1,20 @@
 # API Server - Referência
 
-**Versão**: 1.0.0  
+**Versão**: 2.0.0  
 **Última Atualização**: 2025-12-29
 
 ---
 
 ## Visão Geral
 
-O API Server (`server.js`) fornece uma API REST para o Dashboard funcionar em Browser Mode, sem necessidade do Tauri desktop app.
+O API Server (`server.js`) fornece uma API REST para o Dashboard funcionar em Browser Mode e VPS, sem necessidade do Tauri desktop app.
 
 ### Características
 
 - **Express.js** - Server HTTP leve e rápido
 - **Neon PostgreSQL** - Banco de dados na nuvem para persistência
-- **SSE (Server-Sent Events)** - Atualizações em tempo real
+- **SSE (Server-Sent Events)** - Atualizações em tempo real com reconnection
+- **Event Buffering** - Últimos 100 eventos armazenados para replay
 - **Fallback gracioso** - Tenta local artifacts, depois Neon
 - **CORS habilitado** - Para desenvolvimento local
 
@@ -27,7 +28,7 @@ O API Server (`server.js`) fornece uma API REST para o Dashboard funcionar em Br
 DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 ```
 
-### Executar
+### Executar Local
 
 ```bash
 cd dashboard
@@ -36,7 +37,7 @@ node server.js
 
 Server inicia em `http://localhost:3001`.
 
-### Com Frontend
+### Com Frontend (Dev)
 
 ```bash
 # Terminal 1
@@ -47,6 +48,10 @@ npm run dev
 ```
 
 Frontend em `http://localhost:5173` conecta automaticamente à API.
+
+### Produção (VPS)
+
+Ver [VPS Deployment](vps-deployment.md) para configuração com nginx + PM2.
 
 ---
 
@@ -88,6 +93,7 @@ Frontend em `http://localhost:5173` conecta automaticamente à API.
 | `/api/candidate/:id/wfa` | GET | Walk-Forward Analysis |
 | `/api/candidate/:id/stress` | GET | Stress test results |
 | `/api/candidate/:id/simulated-equity` | GET | Equity curve simulada |
+| `/api/cockpit-candidates/:runId` | GET | Candidatos formatados para Cockpit |
 
 ---
 
@@ -107,7 +113,6 @@ Frontend em `http://localhost:5173` conecta automaticamente à API.
 | `/api/scg/progress/:runId` | GET | Progresso do run |
 | `/api/scg/stop/:runId` | POST | Parar run |
 | `/api/scg/active-runs` | GET | Listar runs ativos |
-| `/api/cockpit-candidates/:runId` | GET | Candidatos do cockpit |
 
 ---
 
@@ -115,8 +120,8 @@ Frontend em `http://localhost:5173` conecta automaticamente à API.
 
 | Endpoint | Método | Descrição |
 |----------|--------|-----------|
-| `/api/events` | GET | Stream SSE |
-| `/api/poll-changes` | GET | Polling de mudanças |
+| `/api/events` | GET | Stream SSE com reconnection support |
+| `/api/poll-changes` | GET | Polling de mudanças (fallback) |
 
 ---
 
@@ -147,17 +152,14 @@ Retorna índice de campanhas. Tenta local primeiro, depois Neon.
 
 ---
 
-### GET /api/candidates/:runId
+### GET /api/cockpit-candidates/:runId
 
-Lista candidatos de um run com filtros opcionais.
+Lista candidatos formatados para o Cockpit com display_name calculado.
 
 **Query Parameters:**
 | Param | Tipo | Default | Descrição |
 |-------|------|---------|-----------|
 | `limit` | number | 100 | Máximo de resultados |
-| `search` | string | - | Busca por ID/nome |
-| `candidate_class` | string | - | Filtrar por classe |
-| `max_pbo` | number | - | PBO máximo |
 
 **Response:**
 ```json
@@ -173,8 +175,7 @@ Lista candidatos de um run com filtros opcionais.
     "pbo": 0.08,
     "dsr": 1.65,
     "gates_passed": true,
-    "stress_passed": true,
-    "data_integrity_ok": true
+    "stress_passed": true
   }
 ]
 ```
@@ -209,11 +210,7 @@ Detalhes completos de um candidato.
     "campaign_id": "camp_001",
     "seed": 42,
     "git_sha": "abc123"
-  },
-  
-  "strategy": { ... },
-  "strategy_toml": "...",
-  "execution": { ... }
+  }
 }
 ```
 
@@ -221,7 +218,7 @@ Detalhes completos de um candidato.
 
 ### POST /api/scg/start
 
-Inicia um SCG run.
+Inicia um SCG run e retorna imediatamente (assíncrono).
 
 **Request Body:**
 ```json
@@ -269,20 +266,37 @@ Retorna progresso de um run.
 
 ### GET /api/events (SSE)
 
-Stream de Server-Sent Events para atualizações em tempo real.
+Stream de Server-Sent Events com suporte a reconexão.
+
+**Headers de Resposta:**
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+**Suporte a Reconnection:**
+```
+Last-Event-ID: 123
+```
+
+O servidor replay eventos perdidos desde o último ID recebido (buffer de 100 eventos).
 
 **Event Types:**
 | Type | Descrição |
 |------|-----------|
 | `connected` | Conexão estabelecida |
-| `ping` | Keep-alive (30s) |
+| `ping` | Keep-alive (15s) |
 | `scg-progress` | Progresso de SCG run |
+| `scg-completed` | Run finalizado |
+| `scg-error` | Erro no run |
 | `artifact-change` | Arquivo modificado |
 | `cache-invalidated` | Cache limpo |
 
 **Exemplo de Evento:**
 ```
-data: {"type":"scg-progress","run_id":"run_001","percent_complete":50,"timestamp":1703851200000}
+id: 42
+data: {"type":"scg-progress","runId":"run_001","percentComplete":50,"currentGeneration":25,"bestSharpe":0.85,"candidatesEvaluated":2500,"timestamp":1703851200000}
 ```
 
 **Cliente JavaScript:**
@@ -291,45 +305,94 @@ const sse = new EventSource('/api/events');
 
 sse.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  console.log(data.type, data);
+  if (data.type === 'scg-progress') {
+    updateProgress(data);
+  }
+};
+
+sse.onerror = (e) => {
+  console.log('SSE error, will auto-reconnect');
 };
 ```
 
 ---
 
-### GET /api/candidate/:id/simulated-equity
+## SSE Implementation
 
-Gera equity curve simulada para candidatos sem backtest local.
+### Event Buffering
 
-**Query Parameters:**
-| Param | Tipo | Default | Descrição |
-|-------|------|---------|-----------|
-| `days` | number | 252 | Dias de simulação |
-| `startCapital` | number | 100000 | Capital inicial |
+O servidor mantém os últimos 100 eventos para replay:
 
-**Response:**
-```json
-{
-  "candidate_id": "cand_abc123",
-  "data_source": "simulated",
-  "simulation_params": {
-    "target_cagr": 0.15,
-    "target_sharpe": 1.23,
-    "target_max_dd": 0.08,
-    "days": 252,
-    "start_capital": 100000
-  },
-  "realized_metrics": {
-    "total_return": 0.14,
-    "max_drawdown": 0.07,
-    "final_equity": 114000
-  },
-  "timeseries": [
-    { "date": "2025-01-02", "equity": 100000, "drawdown": 0 },
-    { "date": "2025-01-03", "equity": 100234, "drawdown": 0 },
-    ...
-  ]
+```javascript
+const sseEventBuffer = [];
+const MAX_BUFFER_SIZE = 100;
+let sseEventId = 0;
+
+function broadcastSSE(type, data) {
+  const eventId = ++sseEventId;
+  const event = { id: eventId, type, ...data, timestamp: Date.now() };
+  
+  // Buffer for reconnection
+  sseEventBuffer.push({ id: eventId, data: event });
+  if (sseEventBuffer.length > MAX_BUFFER_SIZE) {
+    sseEventBuffer.shift();
+  }
+  
+  // Broadcast to all clients
+  sseClients.forEach(res => {
+    res.write(`id: ${eventId}\ndata: ${JSON.stringify(event)}\n\n`);
+  });
 }
+```
+
+### Reconnection Support
+
+```javascript
+app.get('/api/events', (req, res) => {
+  // Check for Last-Event-ID header
+  const lastEventId = req.headers['last-event-id'];
+  if (lastEventId) {
+    const missedEvents = sseEventBuffer.filter(e => e.id > parseInt(lastEventId));
+    missedEvents.forEach(e => {
+      res.write(`id: ${e.id}\ndata: ${JSON.stringify(e.data)}\n\n`);
+    });
+  }
+  
+  // Add to clients
+  sseClients.add(res);
+});
+```
+
+### SCG Progress Broadcasting
+
+Durante execução do SCG, o servidor:
+
+1. Parseia stdout do processo combiner
+2. Extrai métricas (geração, sharpe, candidatos)
+3. Broadcast via SSE a cada segundo
+
+```javascript
+// Parse and broadcast progress
+scgProcess.stdout.on('data', (data) => {
+  const line = data.toString();
+  
+  // Extract metrics from output
+  const genMatch = line.match(/Generation (\d+)/);
+  const sharpeMatch = line.match(/best_sharpe[=:]\s*([\d.]+)/i);
+  
+  if (genMatch) runState.currentGeneration = parseInt(genMatch[1]);
+  if (sharpeMatch) runState.bestSharpe = parseFloat(sharpeMatch[1]);
+  
+  // Broadcast every second
+  broadcastSSE('scg-progress', {
+    runId,
+    status: 'running',
+    currentGeneration: runState.currentGeneration,
+    bestSharpe: runState.bestSharpe,
+    candidatesEvaluated: runState.candidatesEvaluated,
+    percentComplete: calculateProgress(runState),
+  });
+});
 ```
 
 ---
@@ -440,6 +503,14 @@ scgRuns.set(runId, { process, status: 'running', ... });
 scgRuns.get(runId).process.kill('SIGTERM');
 ```
 
+### State Machine
+
+```
+idle → starting → running → completed
+                         ↘ failed
+                         ↘ cancelled (via stop)
+```
+
 ---
 
 ## Errors
@@ -467,7 +538,7 @@ CORS habilitado para todos os origins em desenvolvimento:
 app.use(cors());
 ```
 
-Em produção (Netlify Functions), CORS é gerenciado pelo Netlify.
+Em produção (VPS), nginx gerencia o proxy reverso.
 
 ---
 
@@ -478,4 +549,4 @@ Em produção (Netlify Functions), CORS é gerenciado pelo Netlify.
 | Server | `dashboard/server.js` |
 | Commands | `dashboard/src/lib/commands.ts` |
 | Platform | `dashboard/src/lib/platform.ts` |
-
+| Cockpit Store | `dashboard/src/stores/cockpitStore.ts` |

@@ -1,6 +1,6 @@
 # Dashboard - Documentação Técnica
 
-**Versão**: 3.0.0  
+**Versão**: 3.2.0  
 **Última Atualização**: 2025-12-29  
 **Framework**: Tauri 2.x / Express + React 18 + TypeScript
 
@@ -12,19 +12,22 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
 
 ### Modos de Execução
 
-| Modo | Framework | Backend | Uso |
-|------|-----------|---------|-----|
-| **Desktop** | Tauri 2.x | Rust + Filesystem | Produção local |
-| **Browser** | Express | Node.js + Neon DB | Desenvolvimento/Demo |
+| Modo | Framework | Backend | Real-time | Uso |
+|------|-----------|---------|-----------|-----|
+| **Desktop** | Tauri 2.x | Rust + Filesystem | Tauri Events | Produção local |
+| **Browser** | Express | Node.js + Neon DB | SSE + Polling | Desenvolvimento |
+| **VPS** | Express + nginx | Node.js + Neon DB | SSE + Polling | Produção cloud |
 
 ### Características
 
 - **Terminal Theme** - Background escuro, cores neon, tipografia monospace
-- **Dual Mode** - Funciona em Tauri (desktop) ou Browser (API server)
-- **Unified Command Layer** - Abstração única para ambos os modos
+- **Tri-Mode** - Funciona em Tauri (desktop), Browser (local) ou VPS (production)
+- **Unified Command Layer** - Abstração única para todos os modos
 - **State Management** - Zustand com cache LRU
-- **Real-time Updates** - Tauri Events ou SSE (Server-Sent Events)
-- **Neon Integration** - PostgreSQL na nuvem para browser mode
+- **Real-time Updates** - SSE com fallback para polling
+- **Status Badge** - Indicador "Live" ou "Offline"
+- **Neon Integration** - PostgreSQL na nuvem para persistência
+- **SSE Reconnection** - Suporte a Last-Event-ID para replay
 
 ---
 
@@ -59,11 +62,11 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
                     Local Filesystem (artifacts/)
 ```
 
-### Browser Mode (Express + Neon)
+### Browser/VPS Mode (Express + Neon)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    BROWSER APPLICATION                          │
+│                    BROWSER / VPS APPLICATION                    │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │                    REACT FRONTEND                           ││
@@ -84,6 +87,7 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
 │                       server.js                                  │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
 │  │  REST Endpoints │  │  SSE Events     │  │  SCG Control    │  │
+│  │                 │  │  + Reconnection │  │                 │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
 └──────────────────────────────┼──────────────────────────────────┘
                                │
@@ -91,6 +95,38 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
           ▼                                         ▼
    Local Filesystem                          Neon PostgreSQL
     (artifacts/)                               (cloud DB)
+```
+
+### VPS Production (nginx + PM2)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        INTERNET                               │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     NGINX (port 80)                           │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  location / → proxy_pass 5173 (auth required)          │  │
+│  │  location /api/ → proxy_pass 3001 (no auth)            │  │
+│  │  location /api/events → SSE with buffering off         │  │
+│  └────────────────────────────────────────────────────────┘  │
+└─────────────────────────┬────────────────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          │                               │
+          ▼                               ▼
+┌─────────────────────┐         ┌─────────────────────┐
+│  alpha-dashboard    │         │    api-server       │
+│  PM2: vite preview  │         │  PM2: node server   │
+│  port: 5173         │         │  port: 3001         │
+└─────────────────────┘         └──────────┬──────────┘
+                                           │
+                                           ▼
+                                ┌─────────────────────┐
+                                │   Neon PostgreSQL   │
+                                └─────────────────────┘
 ```
 
 ---
@@ -107,7 +143,7 @@ dashboard/
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── Sidebar.tsx       # Navegação agrupada
-│   │   │   └── Header.tsx        # Clock, refresh, alerts
+│   │   │   └── Header.tsx        # Clock, refresh, status badge
 │   │   │
 │   │   ├── charts/               # Recharts + D3
 │   │   │   ├── EquityChart.tsx
@@ -123,10 +159,12 @@ dashboard/
 │   │   │
 │   │   ├── GlossaryOverlay.tsx   # Glossário de termos
 │   │   ├── StrategyPipeline.tsx  # Visualização de blocos
+│   │   ├── WFAAnalysis.tsx       # Walk-Forward Analysis
+│   │   ├── StressAnalysis.tsx    # Stress test results
 │   │   └── ...
 │   │
 │   ├── pages/
-│   │   ├── Cockpit.tsx           # SCG control panel (NEW)
+│   │   ├── Cockpit.tsx           # SCG control panel
 │   │   ├── Campaigns.tsx         # Campaign browser
 │   │   ├── Candidates.tsx        # Candidate table
 │   │   ├── Backtest.tsx          # Backtest drilldown
@@ -139,27 +177,24 @@ dashboard/
 │   │   └── Dashboard.tsx         # System overview
 │   │
 │   ├── stores/
-│   │   ├── cockpitStore.ts       # SCG run control (NEW)
+│   │   ├── cockpitStore.ts       # SCG run control + SSE status
 │   │   └── dataStore.ts          # Artifact navigation
 │   │
 │   ├── config/
 │   │   └── defaults.ts           # Cockpit presets/gates
 │   │
 │   └── lib/
-│       ├── commands.ts           # Unified command layer
-│       ├── platform.ts           # Mode detection
+│       ├── commands.ts           # Unified command layer + SSE
+│       ├── platform.ts           # Mode detection + config
 │       ├── ranking.ts            # Candidate ranking
 │       └── utils.ts              # Formatters
 │
-├── server.js                     # Express API server (Browser Mode)
+├── server.js                     # Express API server (Browser/VPS Mode)
 │
 ├── src-tauri/                    # Rust backend (Desktop Mode)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
 │   └── src/lib.rs
-│
-├── netlify/                      # Netlify deployment
-│   └── functions/
 │
 ├── index.html
 ├── tailwind.config.js
@@ -199,6 +234,37 @@ dashboard/
 
 ---
 
+## Status Badge & Real-time
+
+### SSE Connection Status
+
+O header exibe um badge de status:
+
+| Badge | Cor | Significado |
+|-------|-----|-------------|
+| **Live** | Verde | SSE conectado |
+| **Offline** | Vermelho | SSE desconectado |
+
+### SSE Features
+
+- **Event Buffering**: Últimos 100 eventos armazenados
+- **Reconnection**: Suporte a Last-Event-ID para replay
+- **Health Tracking**: Contador de erros consecutivos
+- **Fallback**: Polling automático após 3 falhas SSE
+
+```typescript
+// cockpitStore.ts
+const sse = createSSEConnection(
+  (event) => handleEvent(event),
+  (error) => {
+    if (failCount >= 3) activatePolling();
+  },
+  () => set({ sseConnected: true })
+);
+```
+
+---
+
 ## Cockpit - Controle SCG
 
 O Cockpit é o painel central para orquestração de runs do SCG. Ver [cockpit.md](cockpit.md) para documentação completa.
@@ -209,7 +275,9 @@ O Cockpit é o painel central para orquestração de runs do SCG. Ver [cockpit.m
 - **Compute Budget**: Time slider, workers/intensidade
 - **Risk Gates**: Sharpe mínimo, PBO máximo, stress tests
 - **Ranking Methods**: Institutional, Pareto, Sharpe, Risk-Adjusted
-- **Live Progress**: Geração, Sharpe, candidatos
+- **Live Progress**: SSE com fallback para polling
+- **Status Badge**: "Live" (verde) ou "Offline" (vermelho)
+- **Error Handling**: Estados de erro com retry
 - **Top Strategies**: Tabela rankeada com drilldown
 
 ### cockpitStore
@@ -230,11 +298,16 @@ interface CockpitState {
   topCandidates: RankedCandidate[];
   selectedCandidateId: string | null;
   
+  // SSE status
+  sseConnected: boolean;
+  
   // Actions
   setPreset: (preset: PresetKey) => void;
   startRun: () => Promise<void>;
   stopRun: () => Promise<void>;
   loadTopCandidates: (runId: string) => Promise<void>;
+  subscribeToProgress: () => () => void;
+  setSseConnected: (connected: boolean) => void;
 }
 ```
 
@@ -242,12 +315,12 @@ interface CockpitState {
 
 ## Unified Command Layer
 
-A camada `lib/commands.ts` abstrai diferenças entre Tauri e Browser:
+A camada `lib/commands.ts` abstrai diferenças entre Tauri, Browser e VPS:
 
 ```typescript
 import { cmd } from './lib/commands';
 
-// Funciona igual em ambos os modos
+// Funciona igual em todos os modos
 const index = await cmd.loadIndex();
 const candidates = await cmd.listCandidates(runId);
 await cmd.startScgRun(config);
@@ -267,22 +340,34 @@ await cmd.startScgRun(config);
 | `stopScgRun(runId)` | Para SCG run |
 | `getRunStatus(runId)` | Obtém progresso do run |
 
+### SSE Connection
+
+```typescript
+import { createSSEConnection } from './lib/commands';
+
+const sse = createSSEConnection(
+  (event) => console.log('Event:', event),
+  (error) => console.error('Error:', error),
+  () => console.log('Reconnected!')
+);
+```
+
 ---
 
 ## Platform Detection
 
 ```typescript
-import { platform, capabilities } from './lib/platform';
+import { platform, config } from './lib/platform';
 
 // Detecção
 platform.isTauri    // true se Tauri desktop
 platform.isBrowser  // true se browser mode
 platform.isDev      // true se desenvolvimento
+platform.isProd     // true se produção (VPS)
 
-// Capabilities
-capabilities.nativeDialog   // Diálogos nativos
-capabilities.directFS       // Acesso ao filesystem
-capabilities.realTimeUpdates // Updates em tempo real
+// Endpoints (auto-configurados)
+config.apiBase      // "/api" (prod) ou "http://localhost:3001/api" (dev)
+config.sseEndpoint  // "/api/events" (prod) ou "http://localhost:3001/api/events" (dev)
 ```
 
 ---
@@ -298,6 +383,7 @@ O `server.js` fornece uma API REST para browser mode. Ver [api-server.md](api-se
 | `/api/index` | GET | Índice de campanhas |
 | `/api/campaign/:id` | GET | Detalhes da campanha |
 | `/api/candidates/:runId` | GET | Lista candidatos |
+| `/api/cockpit-candidates/:runId` | GET | Candidatos para Cockpit |
 | `/api/candidate/:id` | GET | Detalhes do candidato |
 | `/api/backtest/:id` | GET | Timeseries do backtest |
 | `/api/scg/start` | POST | Inicia SCG run |
@@ -314,29 +400,24 @@ npm run dev         # Frontend em http://localhost:5173
 
 ---
 
-## Real-time Updates
+## VPS Deployment
 
-### Tauri Mode
+Ver [vps-deployment.md](vps-deployment.md) para guia completo de deploy em produção.
 
-```typescript
-import { listen } from '@tauri-apps/api/event';
+### Acesso VPS
 
-await listen('scg-progress', (event) => {
-  console.log('Progress:', event.payload);
-});
+```
+URL:  http://149.28.39.194
+User: admin
+Pass: quant123
 ```
 
-### Browser Mode (SSE)
+### PM2 Services
 
-```typescript
-import { createSSEConnection } from './lib/commands';
-
-const sse = createSSEConnection((event) => {
-  if (event.type === 'scg-progress') {
-    console.log('Progress:', event);
-  }
-});
-```
+| Service | Port | Descrição |
+|---------|------|-----------|
+| `alpha-dashboard` | 5173 | Vite preview (frontend) |
+| `api-server` | 3001 | Express API |
 
 ---
 
@@ -346,7 +427,7 @@ const sse = createSSEConnection((event) => {
 
 | Store | Arquivo | Responsabilidade |
 |-------|---------|------------------|
-| `cockpitStore` | `cockpitStore.ts` | SCG run control |
+| `cockpitStore` | `cockpitStore.ts` | SCG run control + SSE status |
 | `dataStore` | `dataStore.ts` | Artifact navigation |
 
 ### dataStore
@@ -426,18 +507,17 @@ npm run dev          # Terminal 2: Frontend
 npm run tauri build
 ```
 
-### Deploy Netlify
+### Build VPS
 
 ```bash
-npm run build
-netlify deploy --prod
+NODE_OPTIONS='--max-old-space-size=768' npm run build
 ```
 
 ---
 
 ## Integração com Neon DB
 
-O browser mode usa Neon PostgreSQL para persistência:
+O browser/VPS mode usa Neon PostgreSQL para persistência:
 
 ### Variável de Ambiente
 
@@ -459,4 +539,5 @@ DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
 
 - [Cockpit](cockpit.md) - Painel de controle SCG
 - [API Server](api-server.md) - Referência da API REST
+- [VPS Deployment](vps-deployment.md) - Deploy em produção
 - [Artefatos](../operations/artifacts.md) - Estrutura de output

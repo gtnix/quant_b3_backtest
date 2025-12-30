@@ -1,6 +1,6 @@
 # Cockpit - Painel de Controle SCG
 
-**Versão**: 1.0.0  
+**Versão**: 2.0.0  
 **Última Atualização**: 2025-12-29
 
 ---
@@ -15,8 +15,47 @@ O Cockpit é o painel central para orquestração de runs do Sistema Combinador 
 - **Compute Budget** - Controle de tempo e intensidade de CPU
 - **Risk & Robustness Gates** - Thresholds configuráveis para validação
 - **Ranking Methods** - Métodos de ordenação de candidatos
-- **Live Progress** - Monitoramento em tempo real
+- **Live Progress** - Monitoramento em tempo real via SSE
+- **Status Badge** - Indicador "Live" (verde) ou "Offline" (vermelho)
 - **Top Strategies Table** - Resultados rankeados com drilldown
+- **Error Handling** - Estados de erro com opção de retry
+
+---
+
+## Status Badge
+
+O header do Cockpit exibe um badge de status de conexão:
+
+| Badge | Cor | Significado |
+|-------|-----|-------------|
+| **Live** | Verde | SSE conectado, updates em tempo real |
+| **Offline** | Vermelho | SSE desconectado, usando polling |
+
+### Funcionamento
+
+1. **SSE Primeiro**: Tenta conectar via Server-Sent Events
+2. **Fallback para Polling**: Se SSE falhar 3x, ativa polling automático
+3. **Reconexão Automática**: SSE reconecta com Last-Event-ID para replay
+
+```typescript
+// cockpitStore.ts
+subscribeToProgress: () => {
+  const sse = createSSEConnection(
+    (event) => {
+      if (event.type === 'scg-progress') {
+        set({ progress: parseProgress(event) });
+      }
+    },
+    (error) => {
+      // Fallback to polling after 3 failures
+      if (sseFailCount >= 3) {
+        startPolling();
+      }
+    },
+    () => set({ sseConnected: true }) // On reconnect
+  );
+}
+```
 
 ---
 
@@ -86,22 +125,28 @@ Uso: Exploração completa do espaço de estratégias.
 
 ---
 
+## Time Presets
+
+Além dos presets completos, há presets de tempo rápido:
+
+| Preset | Segundos | Uso |
+|--------|----------|-----|
+| 30s | 30 | Debug rápido |
+| 1 min | 60 | Smoke test |
+| 3 min | 180 | Rapid |
+| 10 min | 600 | Análise básica |
+| 15 min | 900 | Institutional |
+| 30 min | 1800 | Análise profunda |
+| 1 hora | 3600 | Exhaustive |
+| 2 horas | 7200 | Overnight |
+
+---
+
 ## Compute Budget
 
 ### Time Slider
 
-Controla o tempo máximo de execução:
-
-| Preset | Tempo | Descrição |
-|--------|-------|-----------|
-| 30s | Debug rápido | Teste de configuração |
-| 1 min | Smoke test | Verificação básica |
-| 3 min | Exploração rápida | Preset Rapid |
-| 10 min | Análise básica | Runs curtos |
-| 15 min | Produção | Preset Institutional |
-| 30 min | Análise profunda | Exploração extensa |
-| 1 hora | Exploração completa | Preset Exhaustive |
-| 2 horas | Overnight | Máxima cobertura |
+Controla o tempo máximo de execução.
 
 ### Intensity (Workers)
 
@@ -220,6 +265,37 @@ Barra animada com:
 
 ---
 
+## Error Handling
+
+### Estados de Erro
+
+O Cockpit exibe mensagens claras quando ocorrem erros:
+
+| Estado | UI | Ação |
+|--------|----|----- |
+| `failed` | Badge vermelho + mensagem | Botão "Tentar Novamente" |
+| SSE disconnect | Badge "Offline" | Polling automático |
+| API error | Toast notification | Retry automático |
+
+### StatusBadge Component
+
+```typescript
+function StatusBadge({ status }: { status: RunStatus }) {
+  const config = {
+    idle: { text: 'Parado', color: 'slate' },
+    starting: { text: 'Iniciando...', color: 'amber' },
+    running: { text: 'Executando', color: 'emerald' },
+    stopping: { text: 'Parando...', color: 'amber' },
+    completed: { text: 'Concluído', color: 'cyan' },
+    failed: { text: 'Falhou', color: 'red' },
+    cancelled: { text: 'Cancelado', color: 'slate' },
+  };
+  return <Badge {...config[status]} />;
+}
+```
+
+---
+
 ## Top Strategies Table
 
 Tabela de resultados com colunas:
@@ -246,6 +322,57 @@ Cada candidato mostra até 3 razões:
 - "Passou todos os gates"
 - "Drawdown controlado (<15%)"
 - "DSR forte (>1.0)"
+
+---
+
+## Real-time Updates
+
+### SSE Connection
+
+O Cockpit usa Server-Sent Events para updates em tempo real:
+
+```typescript
+// commands.ts
+export function createSSEConnection(
+  onEvent: (event: SSEEvent) => void,
+  onError?: (error: Event) => void,
+  onReconnect?: () => void
+): EventSource | null {
+  const eventSource = new EventSource(config.sseEndpoint);
+  
+  eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    onEvent(data);
+    
+    // Track successful events
+    sseHealthy = true;
+    consecutiveErrors = 0;
+  };
+  
+  eventSource.onerror = () => {
+    consecutiveErrors++;
+    if (consecutiveErrors >= 3) {
+      sseHealthy = false;
+    }
+    onError?.(error);
+  };
+  
+  return eventSource;
+}
+```
+
+### Polling Fallback
+
+Se SSE falhar, ativa polling automático:
+
+```typescript
+// cockpitStore.ts
+const pollInterval = window.setInterval(() => {
+  if (!sseHealthy && runStatus === 'running') {
+    pollProgress();
+  }
+}, 2000); // Poll every 2 seconds
+```
 
 ---
 
@@ -340,6 +467,9 @@ selectCandidate: (candidateId: string | null) => void;
 
 // Subscriptions
 subscribeToProgress: () => () => void;
+
+// SSE status
+setSseConnected: (connected: boolean) => void;
 ```
 
 ---
@@ -360,6 +490,7 @@ await listen('scg-progress', handler);
 await fetch('/api/scg/start', { method: 'POST', body: JSON.stringify(config) });
 await fetch(`/api/scg/progress/${runId}`);
 // SSE para real-time updates
+const sse = new EventSource('/api/events');
 ```
 
 ---
@@ -381,5 +512,5 @@ await fetch(`/api/scg/progress/${runId}`);
 | Store | `src/stores/cockpitStore.ts` |
 | Config | `src/config/defaults.ts` |
 | Commands | `src/lib/commands.ts` |
+| Platform | `src/lib/platform.ts` |
 | Tooltips | `src/components/ui/TooltipInfo.tsx` |
-
