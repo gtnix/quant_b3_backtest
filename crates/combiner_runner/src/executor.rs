@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::{debug, error, info, warn};
 
 /// Errors during backtest execution.
 #[derive(Debug, Error)]
@@ -28,6 +28,16 @@ pub enum ExecutionError {
 
     #[error("TOML serialization error: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+}
+
+/// Source of backtest evaluation data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EvaluationSource {
+    /// Real backtest execution
+    #[default]
+    Real,
+    /// Mock data (for development only)
+    Mock,
 }
 
 /// Metrics from a backtest run.
@@ -55,10 +65,13 @@ pub struct BacktestOutput {
     pub run_id: Option<String>,
     pub output_path: Option<PathBuf>,
     pub duration_ms: u64,
+    /// Source of evaluation data (Real or Mock)
+    pub source: EvaluationSource,
 }
 
 impl BacktestOutput {
     /// Create a mock output for testing.
+    /// Warning: Mock data should only be used in development, never in production.
     pub fn mock() -> Self {
         Self {
             metrics: BacktestMetrics {
@@ -79,7 +92,13 @@ impl BacktestOutput {
             run_id: Some("mock-run".into()),
             output_path: None,
             duration_ms: 100,
+            source: EvaluationSource::Mock,
         }
+    }
+    
+    /// Check if this output is from mock data
+    pub fn is_mock(&self) -> bool {
+        self.source == EvaluationSource::Mock
     }
 }
 
@@ -144,15 +163,22 @@ pub struct CliExecutor {
 
 impl CliExecutor {
     pub fn new() -> Self {
+        let cli_path = std::env::var("BACKTEST_CLI_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("target/release/backtest"));
+        
+        info!("Backtester CLI configured at: {:?}", cli_path);
+        
         Self {
-            cli_path: PathBuf::from("target/release/backtest"),
+            cli_path,
             output_dir: PathBuf::from("output/scg/backtests"),
             timeout: Duration::from_secs(60),
         }
     }
 
-    pub fn with_cli_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.cli_path = path.into();
+    pub fn with_cli_path(mut self, path: &str) -> Self {
+        self.cli_path = PathBuf::from(path);
+        info!("Backtester CLI path set to: {:?}", self.cli_path);
         self
     }
 
@@ -164,6 +190,42 @@ impl CliExecutor {
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
+    }
+    
+    /// Validate backtester exists and is executable.
+    /// Returns the version string on success.
+    pub fn validate(&self) -> Result<String, ExecutionError> {
+        if !self.cli_path.exists() {
+            return Err(ExecutionError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Backtester not found at {:?}. Set BACKTEST_CLI_PATH correctly.", self.cli_path)
+            )));
+        }
+        
+        // Try --version to validate
+        let output = std::process::Command::new(&self.cli_path)
+            .arg("--version")
+            .output()
+            .map_err(|e| ExecutionError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to execute backtester: {}", e)
+            )))?;
+            
+        if !output.status.success() {
+            return Err(ExecutionError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Backtester --version failed with exit code {:?}", output.status.code())
+            )));
+        }
+        
+        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        info!("Backtester validated: {}", version);
+        Ok(version)
+    }
+    
+    /// Get the configured CLI path
+    pub fn cli_path(&self) -> &PathBuf {
+        &self.cli_path
     }
 
     /// Write config to a temporary TOML file.
@@ -206,6 +268,11 @@ impl Default for CliExecutor {
 impl BacktestExecutor for CliExecutor {
     fn execute(&self, config: &StrategyConfig) -> Result<BacktestOutput, ExecutionError> {
         let start = std::time::Instant::now();
+        
+        // Check if mock data is allowed (default: false in production)
+        let allow_mock = std::env::var("ALLOW_MOCK_DATA")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
 
         // Write temp TOML
         let toml_path = self.write_temp_toml(config)?;
@@ -225,10 +292,17 @@ impl BacktestExecutor for CliExecutor {
         let output = match output {
             Ok(o) => o,
             Err(e) => {
-                // If CLI doesn't exist, return mock data for development
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    warn!("CLI not found at {:?}, returning mock data", self.cli_path);
-                    return Ok(BacktestOutput::mock());
+                    if allow_mock {
+                        warn!("CLI not found at {:?}, ALLOW_MOCK_DATA=true, returning mock", self.cli_path);
+                        return Ok(BacktestOutput::mock());
+                    } else {
+                        error!("CLI not found at {:?}. Set BACKTEST_CLI_PATH correctly. ALLOW_MOCK_DATA=false", self.cli_path);
+                        return Err(ExecutionError::Failed(format!(
+                            "Backtester not found at {:?}. Set BACKTEST_CLI_PATH environment variable.",
+                            self.cli_path
+                        )));
+                    }
                 }
                 return Err(ExecutionError::Io(e));
             }
@@ -236,9 +310,21 @@ impl BacktestExecutor for CliExecutor {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // For development, return mock data if execution fails
-            warn!("CLI execution failed: {}, returning mock data", stderr);
-            return Ok(BacktestOutput::mock());
+            // Classify error type for better diagnostics
+            if stderr.contains("Weight") || stderr.contains("Invalid pipeline") {
+                // Invalid genome error - should not use mock, return specific error
+                return Err(ExecutionError::InvalidConfig(format!(
+                    "Invalid genome constraints: {}", stderr.trim()
+                )));
+            }
+            
+            if allow_mock {
+                warn!("CLI execution failed: {}, ALLOW_MOCK_DATA=true, returning mock", stderr);
+                return Ok(BacktestOutput::mock());
+            } else {
+                error!("CLI execution failed: {}. ALLOW_MOCK_DATA=false, not returning mock.", stderr);
+                return Err(ExecutionError::Failed(stderr.to_string()));
+            }
         }
 
         // Parse output to find run directory
@@ -250,13 +336,23 @@ impl BacktestExecutor for CliExecutor {
             match self.parse_metrics(&output_path) {
                 Ok(m) => m,
                 Err(e) => {
-                    warn!("Failed to parse metrics: {}, using mock", e);
-                    BacktestMetrics::default()
+                    if allow_mock {
+                        warn!("Failed to parse metrics: {}, ALLOW_MOCK_DATA=true, using default", e);
+                        BacktestMetrics::default()
+                    } else {
+                        error!("Failed to parse metrics: {}. ALLOW_MOCK_DATA=false", e);
+                        return Err(e);
+                    }
                 }
             }
         } else {
-            warn!("Could not extract run_id, using mock metrics");
-            BacktestMetrics::default()
+            if allow_mock {
+                warn!("Could not extract run_id, ALLOW_MOCK_DATA=true, using default metrics");
+                BacktestMetrics::default()
+            } else {
+                error!("Could not extract run_id from stdout. ALLOW_MOCK_DATA=false");
+                return Err(ExecutionError::Parse("Could not extract run_id from backtest output".into()));
+            }
         };
 
         Ok(BacktestOutput {
@@ -264,6 +360,7 @@ impl BacktestExecutor for CliExecutor {
             run_id,
             output_path: None,
             duration_ms: start.elapsed().as_millis() as u64,
+            source: EvaluationSource::Real,
         })
     }
 }
@@ -291,6 +388,15 @@ mod tests {
         let output = BacktestOutput::mock();
         assert!(output.metrics.cagr > 0.0);
         assert!(output.metrics.sharpe_ratio > 0.0);
+        assert!(output.is_mock());
+        assert_eq!(output.source, EvaluationSource::Mock);
+    }
+    
+    #[test]
+    fn test_evaluation_source_default() {
+        let output = BacktestOutput::default();
+        assert_eq!(output.source, EvaluationSource::Real);
+        assert!(!output.is_mock());
     }
 
     #[test]

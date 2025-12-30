@@ -30,14 +30,35 @@ pub struct InstitutionalCriteria {
 
 impl Default for InstitutionalCriteria {
     fn default() -> Self {
+        // Aligned with OMP specification (docs/especificacao_orquestrador_completa.md:458-464)
+        // and InstitutionalThresholds defaults
+        Self {
+            min_oos_sharpe: 1.0,       // OMP spec: min_oos_sharpe_net = 1.0
+            max_pbo: 0.10,             // OMP spec: max_pbo = 0.10
+            min_dsr: 0.8,              // OMP spec: min_dsr = 0.8
+            max_degradation_pct: 50.0,
+            min_split_pass_rate: 0.5,  // 50% of splits must pass
+            max_oos_drawdown: -0.20,   // OMP spec: max_drawdown_net = 0.20
+        }
+    }
+}
+
+impl InstitutionalCriteria {
+    /// Create research-grade criteria (less strict for development)
+    pub fn research() -> Self {
         Self {
             min_oos_sharpe: 0.5,
-            max_pbo: 0.15,
-            min_dsr: 0.8,
-            max_degradation_pct: 40.0,
-            min_split_pass_rate: 0.6, // 60% of splits must pass
+            max_pbo: 0.20,
+            min_dsr: 0.5,
+            max_degradation_pct: 70.0,
+            min_split_pass_rate: 0.4,
             max_oos_drawdown: -0.35,
         }
+    }
+    
+    /// Create production-grade criteria (strictest, matches OMP spec)
+    pub fn production() -> Self {
+        Self::default()
     }
 }
 
@@ -347,18 +368,20 @@ mod tests {
     }
 
     fn create_passing_result(genome_hash: u64) -> ValidationResult {
+        // Values that pass OMP spec thresholds:
+        // min_oos_sharpe: 1.0, max_pbo: 0.10, min_dsr: 0.8, max_drawdown: -0.20
         ValidationResult {
             genome_index: 0,
             genome_hash,
-            oos_sharpe_median: 0.8,
-            oos_sharpe_mean: 0.75,
+            oos_sharpe_median: 1.2,      // > 1.0 (OMP spec)
+            oos_sharpe_mean: 1.15,
             oos_sharpe_std: 0.2,
-            oos_cagr_median: 0.12,
-            degradation_pct: 25.0,
-            pbo: 0.10,
-            dsr: 0.5,
+            oos_cagr_median: 0.15,
+            degradation_pct: 25.0,       // < 50%
+            pbo: 0.08,                   // < 0.10 (OMP spec)
+            dsr: 0.9,                    // > 0.8 (OMP spec)
             splits_evaluated: 6,
-            splits_passed: 5,
+            splits_passed: 5,            // 5/6 = 83% > 50%
             passed: true,
             early_exit: false,
             discard_reason: None,
@@ -445,7 +468,8 @@ mod tests {
             // Use different parameters to create unique genomes with different hashes
             let genome = create_test_genome_with_param(21 + (i as i64) * 21);
             let mut result = create_passing_result(genome.hash());
-            result.oos_sharpe_median = 0.5 + (i as f64) * 0.1;
+            // Start at 1.0 and increase (all passing OMP spec thresholds)
+            result.oos_sharpe_median = 1.0 + (i as f64) * 0.1;
             hof.try_add(&genome, &result, 0);
         }
 
@@ -453,7 +477,7 @@ mod tests {
         
         // Best should have highest OOS Sharpe
         let best = hof.best().unwrap();
-        assert!(best.validation.oos_sharpe_median > 0.8);
+        assert!(best.validation.oos_sharpe_median >= 1.4); // 1.0 + 4*0.1 = 1.4
         assert_eq!(best.rank, 0);
     }
 
@@ -465,7 +489,8 @@ mod tests {
             // Use different parameters to create unique genomes with different hashes
             let genome = create_test_genome_with_param(21 + (i as i64) * 21);
             let mut result = create_passing_result(genome.hash());
-            result.oos_sharpe_median = 0.3 + (i as f64) * 0.1;
+            // Start at 1.0 and increase (all passing OMP spec thresholds)
+            result.oos_sharpe_median = 1.0 + (i as f64) * 0.1;
             hof.try_add(&genome, &result, 0);
         }
 

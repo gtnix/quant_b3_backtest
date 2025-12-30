@@ -47,17 +47,56 @@ pub struct StageBConfig {
 
 impl Default for StageBConfig {
     fn default() -> Self {
+        // Aligned with OMP specification (docs/especificacao_orquestrador_completa.md:458-464)
+        // and InstitutionalThresholds defaults
         Self {
             max_failures_early_exit: 3,
-            min_oos_sharpe: 0.2,
-            max_oos_drawdown: -0.35,
+            min_oos_sharpe: 1.0,       // OMP spec: min_oos_sharpe_net = 1.0
+            max_oos_drawdown: -0.20,   // OMP spec: max_drawdown_net = 0.20
             min_oos_trades: 30,
             max_degradation_pct: 50.0,
-            max_pbo: 0.20,
-            min_dsr: 0.8,
+            max_pbo: 0.10,             // OMP spec: max_pbo = 0.10
+            min_dsr: 0.8,              // OMP spec: min_dsr = 0.8
             use_cache: true,
             generation: 0,
         }
+    }
+}
+
+impl StageBConfig {
+    /// Create a research-grade config with less strict thresholds
+    pub fn research() -> Self {
+        Self {
+            max_failures_early_exit: 3,
+            min_oos_sharpe: 0.5,
+            max_oos_drawdown: -0.35,
+            min_oos_trades: 20,
+            max_degradation_pct: 70.0,
+            max_pbo: 0.20,
+            min_dsr: 0.5,
+            use_cache: true,
+            generation: 0,
+        }
+    }
+    
+    /// Validate config thresholds are within acceptable ranges
+    pub fn validate(&self) -> Result<(), String> {
+        if self.min_oos_sharpe < 0.0 {
+            return Err("min_oos_sharpe must be >= 0".into());
+        }
+        if self.max_pbo < 0.0 || self.max_pbo > 1.0 {
+            return Err("max_pbo must be in [0, 1]".into());
+        }
+        if self.min_dsr < 0.0 || self.min_dsr > 3.0 {
+            return Err("min_dsr must be in [0, 3]".into());
+        }
+        if self.max_degradation_pct < 0.0 || self.max_degradation_pct > 100.0 {
+            return Err("max_degradation_pct must be in [0, 100]".into());
+        }
+        if self.max_oos_drawdown > 0.0 {
+            return Err("max_oos_drawdown must be <= 0".into());
+        }
+        Ok(())
     }
 }
 

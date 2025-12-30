@@ -33,6 +33,7 @@ pub mod validation;
 pub mod evaluation;
 pub mod performance_metrics;
 pub mod report;
+pub mod institutional_thresholds;
 
 pub use config::EvolutionConfig;
 pub use population::Population;
@@ -51,6 +52,7 @@ pub use evaluation::{
 };
 pub use pareto_simd::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
 pub use hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry, InstitutionalCriteria};
-pub use performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot};
+pub use performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot, IntegrityStatus};
 pub use report::{FinalReportGenerator, FinalReport};
+pub use institutional_thresholds::InstitutionalThresholds;
 

@@ -11,7 +11,7 @@ use tracing::{info, warn, debug};
 
 use combiner_core::{
     FitnessConfig, GenomeValidator, MultiObjectiveFitness, ParamRanges, StrategyGenome,
-    PopulationFitnessSoA,
+    PopulationFitnessSoA, repair_genome, RepairConfig, GenomeRepairStats,
 };
 use combiner_runner::{BacktestExecutor, BacktestOutput, ValidationCache};
 
@@ -68,6 +68,10 @@ pub struct EvolutionEngine<E: BacktestExecutor> {
     generation_stats: Vec<GenerationStats>,
     start_time: Option<Instant>,
     cache_hits: usize,
+    /// Repair statistics for observability
+    repair_stats: GenomeRepairStats,
+    /// Repair configuration
+    repair_config: RepairConfig,
 }
 
 impl<E: BacktestExecutor> EvolutionEngine<E> {
@@ -88,7 +92,20 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             generation_stats: Vec::new(),
             start_time: None,
             cache_hits: 0,
+            repair_stats: GenomeRepairStats::default(),
+            repair_config: RepairConfig::default(),
         }
+    }
+    
+    /// Set custom repair configuration
+    pub fn with_repair_config(mut self, config: RepairConfig) -> Self {
+        self.repair_config = config;
+        self
+    }
+    
+    /// Get repair statistics
+    pub fn repair_stats(&self) -> &GenomeRepairStats {
+        &self.repair_stats
     }
 
     /// Run the evolution process.
@@ -140,9 +157,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         }
 
         info!(
-            "Evolution complete. Hall of Fame size: {}, Total generations: {}",
+            "Evolution complete. Hall of Fame size: {}, Total generations: {}, Repaired genomes: {}",
             self.hall_of_fame.len(),
-            self.generation_stats.len()
+            self.generation_stats.len(),
+            self.repair_stats.repaired_count
         );
 
         Ok(())
@@ -267,6 +285,12 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 
             mutation.mutate(&mut child1, &mut self.rng);
             mutation.mutate(&mut child2, &mut self.rng);
+            
+            // Apply genome repair to ensure valid weight constraints
+            let stats1 = repair_genome(&mut child1, &self.repair_config);
+            let stats2 = repair_genome(&mut child2, &self.repair_config);
+            self.repair_stats.merge(&stats1);
+            self.repair_stats.merge(&stats2);
 
             new_genomes.push(child1);
             if new_genomes.len() < self.config.population_size {

@@ -35,6 +35,19 @@ impl AtomicDuration {
     }
 }
 
+/// System integrity status for observability
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrityStatus {
+    /// Number of mock data usages (should be 0 in production)
+    pub mock_data_used: usize,
+    /// Number of path-not-found failures
+    pub path_not_found_failures: usize,
+    /// Repair rate (fraction of genomes that needed repair)
+    pub repair_rate: f64,
+    /// Overall health status
+    pub is_healthy: bool,
+}
+
 /// Performance counters for a single generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationSnapshot {
@@ -124,6 +137,24 @@ pub struct PerformanceMetrics {
     total_early_exits: AtomicUsize,
     /// Total generations completed
     total_generations: AtomicUsize,
+    
+    // === Observability metrics (integrity monitoring) ===
+    /// Total backtest failures
+    total_backtest_failures: AtomicUsize,
+    /// Backtest failures by reason: path not found
+    backtest_fail_path_not_found: AtomicUsize,
+    /// Backtest failures by reason: invalid genome
+    backtest_fail_invalid_genome: AtomicUsize,
+    /// Backtest failures by reason: execution error
+    backtest_fail_execution_error: AtomicUsize,
+    /// Mock data used (should be 0 in production)
+    total_mock_data_used: AtomicUsize,
+    /// Genomes repaired
+    total_genomes_repaired: AtomicUsize,
+    /// Weight clamps applied during repair
+    total_weight_clamps: AtomicUsize,
+    /// Position adjustments during repair
+    total_position_adjustments: AtomicUsize,
 
     // === Timing accumulators ===
     /// Total Stage A time
@@ -170,6 +201,81 @@ impl PerformanceMetrics {
             total_evolution_time: AtomicDuration::new(),
             snapshots: RwLock::new(Vec::with_capacity(1000)),
             current_generation: AtomicUsize::new(0),
+            total_backtest_failures: AtomicUsize::new(0),
+            backtest_fail_path_not_found: AtomicUsize::new(0),
+            backtest_fail_invalid_genome: AtomicUsize::new(0),
+            backtest_fail_execution_error: AtomicUsize::new(0),
+            total_mock_data_used: AtomicUsize::new(0),
+            total_genomes_repaired: AtomicUsize::new(0),
+            total_weight_clamps: AtomicUsize::new(0),
+            total_position_adjustments: AtomicUsize::new(0),
+        }
+    }
+    
+    // === Observability metric recording ===
+    
+    /// Record a backtest failure
+    #[inline]
+    pub fn record_backtest_failure(&self, reason: &str) {
+        self.total_backtest_failures.fetch_add(1, Ordering::Relaxed);
+        if reason.contains("not found") || reason.contains("NotFound") {
+            self.backtest_fail_path_not_found.fetch_add(1, Ordering::Relaxed);
+        } else if reason.contains("Invalid") || reason.contains("Weight") {
+            self.backtest_fail_invalid_genome.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.backtest_fail_execution_error.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    
+    /// Record mock data usage
+    #[inline]
+    pub fn record_mock_data_used(&self) {
+        self.total_mock_data_used.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    /// Record genome repair
+    #[inline]
+    pub fn record_genome_repair(&self, weight_clamps: u32, position_adjustments: u32) {
+        self.total_genomes_repaired.fetch_add(1, Ordering::Relaxed);
+        self.total_weight_clamps.fetch_add(weight_clamps as usize, Ordering::Relaxed);
+        self.total_position_adjustments.fetch_add(position_adjustments as usize, Ordering::Relaxed);
+    }
+    
+    /// Get backtest failure count
+    pub fn backtest_failures(&self) -> usize {
+        self.total_backtest_failures.load(Ordering::Relaxed)
+    }
+    
+    /// Get mock data usage count (should be 0 in production)
+    pub fn mock_data_used(&self) -> usize {
+        self.total_mock_data_used.load(Ordering::Relaxed)
+    }
+    
+    /// Get genomes repaired count
+    pub fn genomes_repaired(&self) -> usize {
+        self.total_genomes_repaired.load(Ordering::Relaxed)
+    }
+    
+    /// Get repair rate (repaired / evaluated)
+    pub fn repair_rate(&self) -> f64 {
+        let evaluated = self.total_genomes_evaluated.load(Ordering::Relaxed);
+        if evaluated == 0 {
+            return 0.0;
+        }
+        self.total_genomes_repaired.load(Ordering::Relaxed) as f64 / evaluated as f64
+    }
+    
+    /// Check if system integrity is compromised
+    pub fn integrity_check(&self) -> IntegrityStatus {
+        let mock_used = self.mock_data_used();
+        let path_failures = self.backtest_fail_path_not_found.load(Ordering::Relaxed);
+        let repair_rate = self.repair_rate();
+        
+        IntegrityStatus {
+            mock_data_used: mock_used,
+            path_not_found_failures: path_failures,
+            repair_rate,
+            is_healthy: mock_used == 0 && path_failures == 0 && repair_rate < 0.5,
         }
     }
 
@@ -177,6 +283,14 @@ impl PerformanceMetrics {
     pub fn reset(&self) {
         self.total_genomes_evaluated.store(0, Ordering::Relaxed);
         self.total_stage_a_hits.store(0, Ordering::Relaxed);
+        self.total_backtest_failures.store(0, Ordering::Relaxed);
+        self.backtest_fail_path_not_found.store(0, Ordering::Relaxed);
+        self.backtest_fail_invalid_genome.store(0, Ordering::Relaxed);
+        self.backtest_fail_execution_error.store(0, Ordering::Relaxed);
+        self.total_mock_data_used.store(0, Ordering::Relaxed);
+        self.total_genomes_repaired.store(0, Ordering::Relaxed);
+        self.total_weight_clamps.store(0, Ordering::Relaxed);
+        self.total_position_adjustments.store(0, Ordering::Relaxed);
         self.total_stage_a_misses.store(0, Ordering::Relaxed);
         self.total_splits_evaluated.store(0, Ordering::Relaxed);
         self.total_splits_cached.store(0, Ordering::Relaxed);
