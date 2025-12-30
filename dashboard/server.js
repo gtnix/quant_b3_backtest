@@ -1928,9 +1928,9 @@ async function checkResources() {
   }
   
   const config = ompState.config?.resource_limits || {};
-  const maxCpu = config.max_cpu_util_pct || 85;
-  const minMem = config.min_mem_available_mb || 512;
-  const minDisk = config.min_disk_free_gb || 10;
+  const maxCpu = config.max_cpu_util_pct || 90;
+  const minMem = config.min_mem_available_mb || 400;
+  const minDisk = config.min_disk_free_gb || 5;
   const maxConcurrent = config.max_concurrent_campaigns || 1;
   
   const activeCampaigns = ompState.currentCampaign ? 1 : 0;
