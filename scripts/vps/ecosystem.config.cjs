@@ -17,6 +17,7 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3001,
         DATABASE_URL: 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require',
+        NEON_DATABASE_URL: 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require',
         BRAPI_API_KEY: 'gNJ4vTTpjG8TZJJHGBqoV5'
       },
       error_file: '/opt/alpha-forge/logs/api-error.log',
