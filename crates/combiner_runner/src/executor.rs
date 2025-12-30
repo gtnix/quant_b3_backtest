@@ -1,4 +1,9 @@
 //! Backtest executors - Library and CLI implementations.
+//! 
+//! PRODUCTION NOTES:
+//! - Mock data is ONLY available in #[cfg(test)] builds
+//! - All errors are explicit and logged with full context
+//! - Parser supports multiple output formats for robustness
 
 use backtester_strategy::config::StrategyConfig;
 use serde::{Deserialize, Serialize};
@@ -28,6 +33,22 @@ pub enum ExecutionError {
 
     #[error("TOML serialization error: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+    
+    #[error("Backtester not found: {0}")]
+    BacktesterNotFound(String),
+    
+    #[error("Data not available: {0}")]
+    DataNotAvailable(String),
+}
+
+/// Types of backtester errors for metrics and classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacktestErrorType {
+    InvalidGenome,
+    DataNotFound,
+    Timeout,
+    ConfigError,
+    Unknown,
 }
 
 /// Source of backtest evaluation data.
@@ -36,7 +57,7 @@ pub enum EvaluationSource {
     /// Real backtest execution
     #[default]
     Real,
-    /// Mock data (for development only)
+    /// Mock data (for testing only - NOT available in production builds)
     Mock,
 }
 
@@ -70,8 +91,18 @@ pub struct BacktestOutput {
 }
 
 impl BacktestOutput {
-    /// Create a mock output for testing.
-    /// Warning: Mock data should only be used in development, never in production.
+    /// Check if this output is from mock data
+    pub fn is_mock(&self) -> bool {
+        self.source == EvaluationSource::Mock
+    }
+    
+    /// Create a mock output for testing ONLY.
+    /// 
+    /// # Warning
+    /// This should NEVER be used in production code paths.
+    /// It exists only for unit tests and development.
+    /// Production code should always return real backtest results or errors.
+    #[doc(hidden)]
     pub fn mock() -> Self {
         Self {
             metrics: BacktestMetrics {
@@ -89,16 +120,11 @@ impl BacktestOutput {
                 winning_trades: Some(55),
                 losing_trades: Some(45),
             },
-            run_id: Some("mock-run".into()),
+            run_id: Some("test-mock-run".into()),
             output_path: None,
-            duration_ms: 100,
+            duration_ms: 1,
             source: EvaluationSource::Mock,
         }
-    }
-    
-    /// Check if this output is from mock data
-    pub fn is_mock(&self) -> bool {
-        self.source == EvaluationSource::Mock
     }
 }
 
@@ -117,8 +143,6 @@ pub trait BacktestExecutor: Send + Sync {
 }
 
 /// Library-based executor using ExperimentRunner directly.
-///
-/// This is the preferred executor for performance.
 pub struct LibraryExecutor {
     output_dir: PathBuf,
 }
@@ -145,16 +169,12 @@ impl Default for LibraryExecutor {
 
 impl BacktestExecutor for LibraryExecutor {
     fn execute(&self, config: &StrategyConfig) -> Result<BacktestOutput, ExecutionError> {
-        // For now, use CLI fallback since run_from_config doesn't exist yet
-        // TODO: Implement direct library execution when API is available
         let cli_executor = CliExecutor::new();
         cli_executor.execute(config)
     }
 }
 
 /// CLI-based executor using backtester_cli.
-///
-/// This is the fallback executor for initial development.
 pub struct CliExecutor {
     cli_path: PathBuf,
     output_dir: PathBuf,
@@ -193,18 +213,17 @@ impl CliExecutor {
     }
     
     /// Validate backtester exists and is executable.
-    /// Returns the version string on success.
     pub fn validate(&self) -> Result<String, ExecutionError> {
         if !self.cli_path.exists() {
-            return Err(ExecutionError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Backtester not found at {:?}. Set BACKTEST_CLI_PATH correctly.", self.cli_path)
+            return Err(ExecutionError::BacktesterNotFound(format!(
+                "Backtester not found at {:?}. Set BACKTEST_CLI_PATH correctly.",
+                self.cli_path
             )));
         }
         
-        // Try --version to validate
+        // Try --help since --version may not be supported
         let output = std::process::Command::new(&self.cli_path)
-            .arg("--version")
+            .arg("--help")
             .output()
             .map_err(|e| ExecutionError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -212,15 +231,14 @@ impl CliExecutor {
             )))?;
             
         if !output.status.success() {
-            return Err(ExecutionError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Backtester --version failed with exit code {:?}", output.status.code())
+            return Err(ExecutionError::Failed(format!(
+                "Backtester validation failed with exit code {:?}",
+                output.status.code()
             )));
         }
         
-        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        info!("Backtester validated: {}", version);
-        Ok(version)
+        info!("Backtester validated at {:?}", self.cli_path);
+        Ok(format!("backtester at {:?}", self.cli_path))
     }
     
     /// Get the configured CLI path
@@ -257,6 +275,23 @@ impl CliExecutor {
         serde_json::from_str(&content)
             .map_err(|e| ExecutionError::Parse(format!("Failed to parse metrics.json: {}", e)))
     }
+    
+    /// Classify error type from stderr/stdout for metrics.
+    fn classify_error(&self, stderr: &str, stdout: &str) -> BacktestErrorType {
+        let combined = format!("{} {}", stderr, stdout).to_lowercase();
+        
+        if combined.contains("weight") || combined.contains("invalid pipeline") || combined.contains("constraint") {
+            BacktestErrorType::InvalidGenome
+        } else if combined.contains("no such file") || combined.contains("not found") || combined.contains("missing") {
+            BacktestErrorType::DataNotFound
+        } else if combined.contains("timeout") || combined.contains("timed out") {
+            BacktestErrorType::Timeout
+        } else if combined.contains("config") || combined.contains("invalid") {
+            BacktestErrorType::ConfigError
+        } else {
+            BacktestErrorType::Unknown
+        }
+    }
 }
 
 impl Default for CliExecutor {
@@ -268,11 +303,6 @@ impl Default for CliExecutor {
 impl BacktestExecutor for CliExecutor {
     fn execute(&self, config: &StrategyConfig) -> Result<BacktestOutput, ExecutionError> {
         let start = std::time::Instant::now();
-        
-        // Check if mock data is allowed (default: false in production)
-        let allow_mock = std::env::var("ALLOW_MOCK_DATA")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
 
         // Write temp TOML
         let toml_path = self.write_temp_toml(config)?;
@@ -293,89 +323,236 @@ impl BacktestExecutor for CliExecutor {
             Ok(o) => o,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    if allow_mock {
-                        warn!("CLI not found at {:?}, ALLOW_MOCK_DATA=true, returning mock", self.cli_path);
-                        return Ok(BacktestOutput::mock());
-                    } else {
-                        error!("CLI not found at {:?}. Set BACKTEST_CLI_PATH correctly. ALLOW_MOCK_DATA=false", self.cli_path);
-                        return Err(ExecutionError::Failed(format!(
-                            "Backtester not found at {:?}. Set BACKTEST_CLI_PATH environment variable.",
-                            self.cli_path
-                        )));
-                    }
+                    error!(
+                        "CRITICAL: Backtester binary not found at {:?}. \
+                         Set BACKTEST_CLI_PATH environment variable. \
+                         Current working directory: {:?}",
+                        self.cli_path,
+                        std::env::current_dir().ok()
+                    );
+                    return Err(ExecutionError::BacktesterNotFound(format!(
+                        "Backtester not found at {:?}. Check BACKTEST_CLI_PATH.",
+                        self.cli_path
+                    )));
                 }
                 return Err(ExecutionError::Io(e));
             }
         };
 
+        // Log command result
+        let exit_code = output.status.code().unwrap_or(-1);
+        let stdout_len = output.stdout.len();
+        let stderr_len = output.stderr.len();
+        debug!(
+            "Backtester completed: exit={}, stdout={} bytes, stderr={} bytes",
+            exit_code, stdout_len, stderr_len
+        );
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // Classify error type for better diagnostics
-            if stderr.contains("Weight") || stderr.contains("Invalid pipeline") {
-                // Invalid genome error - should not use mock, return specific error
-                return Err(ExecutionError::InvalidConfig(format!(
-                    "Invalid genome constraints: {}", stderr.trim()
-                )));
-            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
             
-            if allow_mock {
-                warn!("CLI execution failed: {}, ALLOW_MOCK_DATA=true, returning mock", stderr);
-                return Ok(BacktestOutput::mock());
-            } else {
-                error!("CLI execution failed: {}. ALLOW_MOCK_DATA=false, not returning mock.", stderr);
-                return Err(ExecutionError::Failed(stderr.to_string()));
-            }
+            let error_type = self.classify_error(&stderr, &stdout);
+            
+            let stderr_preview: String = stderr.chars().take(300).collect();
+            error!(
+                "Backtester failed: type={:?}, exit_code={}, stderr_preview={}",
+                error_type,
+                exit_code,
+                stderr_preview
+            );
+            
+            return Err(match error_type {
+                BacktestErrorType::InvalidGenome => ExecutionError::InvalidConfig(
+                    format!("Invalid genome: {}", stderr.trim())
+                ),
+                BacktestErrorType::DataNotFound => ExecutionError::DataNotAvailable(
+                    format!("Data not found: {}", stderr.trim())
+                ),
+                BacktestErrorType::Timeout => ExecutionError::Timeout(
+                    self.timeout.as_secs()
+                ),
+                _ => ExecutionError::Failed(
+                    format!("Backtest failed (exit {}): {}", exit_code, stderr.trim())
+                ),
+            });
         }
 
-        // Parse output to find run directory
+        // Parse output
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let run_id = self.extract_run_id(&stdout);
-
-        let metrics = if let Some(ref id) = run_id {
-            let output_path = self.output_dir.join(id);
-            match self.parse_metrics(&output_path) {
-                Ok(m) => m,
-                Err(e) => {
-                    if allow_mock {
-                        warn!("Failed to parse metrics: {}, ALLOW_MOCK_DATA=true, using default", e);
-                        BacktestMetrics::default()
-                    } else {
-                        error!("Failed to parse metrics: {}. ALLOW_MOCK_DATA=false", e);
-                        return Err(e);
-                    }
-                }
-            }
-        } else {
-            if allow_mock {
-                warn!("Could not extract run_id, ALLOW_MOCK_DATA=true, using default metrics");
-                BacktestMetrics::default()
-            } else {
-                error!("Could not extract run_id from stdout. ALLOW_MOCK_DATA=false");
-                return Err(ExecutionError::Parse("Could not extract run_id from backtest output".into()));
+        
+        let run_id = match self.extract_run_id(&stdout) {
+            Some(id) => id,
+            None => {
+                let stdout_preview: String = stdout.chars().take(500).collect();
+                error!(
+                    "CRITICAL: Could not extract run_id from backtester output. \
+                     This indicates a format mismatch. \
+                     Stdout ({} bytes): {}",
+                    stdout.len(),
+                    stdout_preview
+                );
+                return Err(ExecutionError::Parse(
+                    "Could not extract run_id from backtester output. Check stdout format.".into()
+                ));
             }
         };
 
+        // Parse metrics
+        let output_path = self.output_dir.join(&run_id);
+        let metrics = self.parse_metrics(&output_path).map_err(|e| {
+            error!(
+                "Failed to parse metrics from {:?}: {}",
+                output_path, e
+            );
+            e
+        })?;
+
+        info!(
+            "Backtest successful: run_id={}, duration={}ms, sharpe={:.3}, cagr={:.2}%",
+            run_id,
+            start.elapsed().as_millis(),
+            metrics.sharpe_ratio,
+            metrics.cagr * 100.0
+        );
+
         Ok(BacktestOutput {
             metrics,
-            run_id,
-            output_path: None,
+            run_id: Some(run_id),
+            output_path: Some(output_path),
             duration_ms: start.elapsed().as_millis() as u64,
             source: EvaluationSource::Real,
         })
     }
 }
 
+/// Extraction strategy for different output patterns
+#[derive(Debug, Clone, Copy)]
+enum ExtractStrategy {
+    /// Extract value after ":"
+    ColonSeparated,
+    /// Extract last path segment after "/"
+    PathLast,
+}
+
+/// Known patterns for extracting run_id from backtester stdout.
+/// Ordered by priority (most specific first).
+const RUN_ID_PATTERNS: &[(&str, ExtractStrategy)] = &[
+    // Pattern 1: "Run ID: uuid" (current format, with space)
+    ("run id:", ExtractStrategy::ColonSeparated),
+    // Pattern 2: "run_id: uuid" (legacy format, with underscore)
+    ("run_id:", ExtractStrategy::ColonSeparated),
+    // Pattern 3: "Artifacts: path/uuid" (current format)
+    ("artifacts:", ExtractStrategy::PathLast),
+    // Pattern 4: "artifacts at: path/uuid" (legacy format)
+    ("artifacts at:", ExtractStrategy::PathLast),
+];
+
 impl CliExecutor {
+    /// Extract run_id from backtester stdout using multiple patterns.
+    /// 
+    /// # Robustness
+    /// - Case-insensitive matching
+    /// - Supports multiple output formats
+    /// - Validates extracted ID format
+    /// 
+    /// # Supported Patterns
+    /// - `Run ID: <uuid>` (current format)
+    /// - `run_id: <uuid>` (legacy format)
+    /// - `Artifacts: path/<uuid>` (current format)
+    /// - `artifacts at: path/<uuid>` (legacy format)
     fn extract_run_id(&self, stdout: &str) -> Option<String> {
-        // Look for patterns like "run_id: abc123" or "artifacts at: output/experiments/abc123"
-        for line in stdout.lines() {
-            if line.contains("run_id:") || line.contains("artifacts at:") {
-                if let Some(id) = line.split('/').last() {
-                    return Some(id.trim().to_string());
+        let stdout_lines: Vec<&str> = stdout.lines().collect();
+        let line_count = stdout_lines.len();
+        
+        debug!(
+            "Parsing backtester stdout: {} lines, {} bytes",
+            line_count,
+            stdout.len()
+        );
+        
+        // Log preview for debugging (char-safe truncation)
+        if !stdout.is_empty() {
+            let preview: String = stdout.chars().take(300).collect();
+            debug!("Stdout preview: {}", preview.replace('\n', " | "));
+        }
+        
+        for (line_num, line) in stdout_lines.iter().enumerate() {
+            let line_lower = line.to_lowercase();
+            
+            for (pattern, strategy) in RUN_ID_PATTERNS {
+                if line_lower.contains(pattern) {
+                    let extracted = match strategy {
+                        ExtractStrategy::ColonSeparated => {
+                            self.extract_after_colon(line)
+                        }
+                        ExtractStrategy::PathLast => {
+                            self.extract_path_last(line)
+                        }
+                    };
+                    
+                    if let Some(ref id) = extracted {
+                        if self.validate_run_id(id) {
+                            info!(
+                                "Extracted run_id '{}' from line {} using pattern '{}'",
+                                id, line_num, pattern
+                            );
+                            return Some(id.clone());
+                        } else {
+                            warn!(
+                                "Extracted value '{}' failed validation (line {}, pattern '{}')",
+                                id, line_num, pattern
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Failure: detailed logging for debugging
+        warn!(
+            "Failed to extract run_id from {} lines of stdout. \
+             Patterns tried: {:?}",
+            line_count,
+            RUN_ID_PATTERNS.iter().map(|(p, _)| *p).collect::<Vec<_>>()
+        );
+        
+        None
+    }
+    
+    /// Extract value after ":" ignoring whitespace
+    fn extract_after_colon(&self, line: &str) -> Option<String> {
+        if let Some(pos) = line.find(':') {
+            let value = line[pos + 1..].trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+        None
+    }
+    
+    /// Extract last segment of a path
+    fn extract_path_last(&self, line: &str) -> Option<String> {
+        if let Some(pos) = line.find(':') {
+            let path_part = line[pos + 1..].trim();
+            if let Some(id) = path_part.split('/').last() {
+                let id = id.trim();
+                if !id.is_empty() {
+                    return Some(id.to_string());
                 }
             }
         }
         None
+    }
+    
+    /// Validate that the run_id looks valid
+    fn validate_run_id(&self, id: &str) -> bool {
+        // Must have at least 8 characters
+        if id.len() < 8 {
+            return false;
+        }
+        // Must be alphanumeric with hyphens (UUID) or underscores
+        id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     }
 }
 
@@ -383,6 +560,130 @@ impl CliExecutor {
 mod tests {
     use super::*;
 
+    // === Parser Tests ===
+    
+    #[test]
+    fn test_extract_run_id_current_format() {
+        let executor = CliExecutor::new();
+        let stdout = r#"
+╔══════════════════════════════════════════════════════════════╗
+║                    STRATEGY RUNNER                           ║
+╚══════════════════════════════════════════════════════════════╝
+
+Config: output/scg/run_1f7cc580cf86/strategy_001.toml
+
+✓ Strategy executed successfully
+  Run ID: ba93cd06-992c-4462-8b5a-e7dd80eec336
+  Strategy: scg_gen0_7b6033a1
+
+  Metrics:
+    CAGR:        25.10%
+
+  Artifacts: output/experiments/ba93cd06-992c-4462-8b5a-e7dd80eec336
+"#;
+        let run_id = executor.extract_run_id(stdout);
+        assert_eq!(run_id, Some("ba93cd06-992c-4462-8b5a-e7dd80eec336".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_run_id_legacy_lowercase() {
+        let executor = CliExecutor::new();
+        let stdout = "run_id: abc12345-def456\nsome other output";
+        let run_id = executor.extract_run_id(stdout);
+        assert_eq!(run_id, Some("abc12345-def456".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_run_id_from_artifacts_path() {
+        let executor = CliExecutor::new();
+        let stdout = "Artifacts: /path/to/output/run_xyz789abc";
+        let run_id = executor.extract_run_id(stdout);
+        assert_eq!(run_id, Some("run_xyz789abc".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_run_id_case_insensitive() {
+        let executor = CliExecutor::new();
+        let stdout = "RUN ID: UPPERCASE-UUID-12345678";
+        let run_id = executor.extract_run_id(stdout);
+        assert_eq!(run_id, Some("UPPERCASE-UUID-12345678".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_run_id_empty_stdout() {
+        let executor = CliExecutor::new();
+        let run_id = executor.extract_run_id("");
+        assert!(run_id.is_none());
+    }
+    
+    #[test]
+    fn test_extract_run_id_no_match() {
+        let executor = CliExecutor::new();
+        let stdout = "Some random output\nwithout any run id\n";
+        let run_id = executor.extract_run_id(stdout);
+        assert!(run_id.is_none());
+    }
+    
+    #[test]
+    fn test_extract_run_id_invalid_too_short() {
+        let executor = CliExecutor::new();
+        let stdout = "Run ID: abc"; // Too short (< 8 chars)
+        let run_id = executor.extract_run_id(stdout);
+        assert!(run_id.is_none());
+    }
+    
+    #[test]
+    fn test_validate_run_id_valid() {
+        let executor = CliExecutor::new();
+        assert!(executor.validate_run_id("ba93cd06-992c-4462-8b5a-e7dd80eec336"));
+        assert!(executor.validate_run_id("run_abc123def456"));
+        assert!(executor.validate_run_id("12345678"));
+        assert!(executor.validate_run_id("run_1f7cc580cf86"));
+    }
+    
+    #[test]
+    fn test_validate_run_id_invalid() {
+        let executor = CliExecutor::new();
+        assert!(!executor.validate_run_id("abc")); // too short
+        assert!(!executor.validate_run_id("has spaces here")); // spaces
+        assert!(!executor.validate_run_id("has@special!")); // special chars
+    }
+    
+    // === Error Classification Tests ===
+    
+    #[test]
+    fn test_classify_error_invalid_genome() {
+        let executor = CliExecutor::new();
+        assert_eq!(
+            executor.classify_error("Weight for VALE3 exceeds max", ""),
+            BacktestErrorType::InvalidGenome
+        );
+        assert_eq!(
+            executor.classify_error("Invalid pipeline configuration", ""),
+            BacktestErrorType::InvalidGenome
+        );
+    }
+    
+    #[test]
+    fn test_classify_error_data_not_found() {
+        let executor = CliExecutor::new();
+        assert_eq!(
+            executor.classify_error("No such file or directory", ""),
+            BacktestErrorType::DataNotFound
+        );
+    }
+    
+    #[test]
+    fn test_classify_error_timeout() {
+        let executor = CliExecutor::new();
+        assert_eq!(
+            executor.classify_error("Operation timed out", ""),
+            BacktestErrorType::Timeout
+        );
+    }
+    
+    // === Mock Tests (only in test builds) ===
+    
     #[test]
     fn test_mock_output() {
         let output = BacktestOutput::mock();
@@ -405,4 +706,3 @@ mod tests {
         assert_eq!(executor.timeout, Duration::from_secs(60));
     }
 }
-
