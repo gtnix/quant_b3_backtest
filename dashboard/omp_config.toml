@@ -15,8 +15,8 @@ enabled = true
 # =============================================================================
 [resource_limits]
 max_cpu_util_pct = 85.0           # Don't start new campaigns if CPU > 85%
-min_mem_available_mb = 512        # Don't start if free memory < 512MB
-min_disk_free_gb = 10.0           # Pause mining if disk < 10GB
+min_mem_available_mb = 400        # Don't start if free memory < 400MB
+min_disk_free_gb = 5.0            # Pause mining if disk < 5GB
 max_concurrent_campaigns = 1      # Max simultaneous campaigns
 check_interval_secs = 30          # Resource check interval
 

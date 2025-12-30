@@ -1935,16 +1935,22 @@ async function checkResources() {
   
   const activeCampaigns = ompState.currentCampaign ? 1 : 0;
   
+  const canStart = cpuUsage < maxCpu && 
+      memoryAvailableMb > minMem && 
+      diskFreeGb > minDisk &&
+      activeCampaigns < maxConcurrent;
+  
+  // Debug log for canStartCampaign
+  if (!canStart) {
+    console.log(`[OMP DEBUG] canStart=false: cpu=${cpuUsage}<${maxCpu}? mem=${memoryAvailableMb}>${minMem}? disk=${diskFreeGb}>${minDisk}? active=${activeCampaigns}<${maxConcurrent}?`);
+  }
+  
   ompState.resources = {
     cpuUsage: Math.round(cpuUsage * 10) / 10,
     memoryUsagePct: Math.round(memoryUsagePct * 10) / 10,
     memoryAvailableMb: Math.round(memoryAvailableMb),
     diskFreeGb: Math.round(diskFreeGb * 10) / 10,
-    canStartCampaign: 
-      cpuUsage < maxCpu && 
-      memoryAvailableMb > minMem && 
-      diskFreeGb > minDisk &&
-      activeCampaigns < maxConcurrent,
+    canStartCampaign: canStart,
   };
   
   return ompState.resources;
