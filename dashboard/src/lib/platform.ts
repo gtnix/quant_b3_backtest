@@ -59,7 +59,7 @@ export const capabilities = {
 
 // Determine API base URL based on environment
 const getApiBase = (): string => {
-  // In production (Netlify), API is served from same domain via Functions
+  // In production, API is served from same domain via nginx proxy
   if (platform.isProd) {
     return '/api';
   }
@@ -68,9 +68,9 @@ const getApiBase = (): string => {
 };
 
 const getSseEndpoint = (): string => {
+  // In production, SSE is served via nginx proxy
   if (platform.isProd) {
-    // SSE not supported in serverless - use polling
-    return '';
+    return '/api/events';
   }
   return 'http://localhost:3001/api/events';
 };
