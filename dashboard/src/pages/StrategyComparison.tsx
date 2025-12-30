@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { MetricCard } from '../components/ui/MetricCard';
 import { CorrelationMatrix } from '../components/charts/CorrelationMatrix';
 import { EquityChart } from '../components/charts/EquityChart';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { useDataStore } from '../stores/dataStore';
 import {
   GitCompare,
@@ -129,29 +130,34 @@ export function StrategyComparison() {
 
       {/* Portfolio Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard
-          label="Strategies"
-          value={comparisonResult.candidates.length}
-          icon={<Layers className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Diversification Ratio"
-          value={comparisonResult.diversification_ratio}
-          format="ratio"
-          icon={<Shield className="w-4 h-4 text-profit" />}
-        />
-        <MetricCard
-          label="Best Sharpe"
-          value={Math.max(...comparisonResult.candidates.map(c => c.sharpe))}
-          format="ratio"
-          icon={<Target className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Best CAGR"
-          value={Math.max(...comparisonResult.candidates.map(c => c.cagr)) * 100}
-          format="percent"
-          icon={<TrendingUp className="w-4 h-4 text-profit" />}
-        />
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label">Strategies</span>
+            <Layers className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{comparisonResult.candidates.length}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Diversification<QuickTooltip termKey="diversification_ratio" /></span>
+            <Shield className="w-4 h-4 text-profit" />
+          </div>
+          <div className="font-mono font-bold text-2xl text-profit">{comparisonResult.diversification_ratio.toFixed(2)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Best Sharpe<QuickTooltip termKey="sharpe" /></span>
+            <Target className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{Math.max(...comparisonResult.candidates.map(c => c.sharpe)).toFixed(2)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Best CAGR<QuickTooltip termKey="cagr" /></span>
+            <TrendingUp className="w-4 h-4 text-profit" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{(Math.max(...comparisonResult.candidates.map(c => c.cagr)) * 100).toFixed(1)}%</div>
+        </div>
       </div>
 
       {/* Comparison Table */}
@@ -161,13 +167,13 @@ export function StrategyComparison() {
           <thead>
             <tr className="border-b border-terminal-border">
               <th className="text-left py-2 px-3 text-terminal-muted font-normal">Strategy</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">Sharpe</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">CAGR</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">Max DD</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">Volatility</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">Sortino</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">Calmar</th>
-              <th className="text-right py-2 px-3 text-terminal-muted font-normal">PBO</th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">Sharpe<QuickTooltip termKey="sharpe" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">CAGR<QuickTooltip termKey="cagr" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">Max DD<QuickTooltip termKey="max_drawdown" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">Volatility<QuickTooltip termKey="volatility" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">Sortino<QuickTooltip termKey="sortino" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">Calmar<QuickTooltip termKey="calmar" /></span></th>
+              <th className="text-right py-2 px-3 text-terminal-muted font-normal"><span className="inline-flex items-center">PBO<QuickTooltip termKey="pbo" /></span></th>
             </tr>
           </thead>
           <tbody>
@@ -216,7 +222,7 @@ export function StrategyComparison() {
 
       {/* Correlation Matrix */}
       <div className="card-elevated">
-        <h3 className="font-semibold text-lg mb-4">Return Correlation Matrix</h3>
+        <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Correlation Matrix<QuickTooltip termKey="correlation_matrix" /></h3>
         <CorrelationMatrix
           labels={comparisonResult.candidates.map(c => 
             c.display_name.length > 15 ? `${c.display_name.substring(0, 15)}...` : c.display_name

@@ -4,6 +4,7 @@ import { ReturnDistribution } from '../components/charts/ReturnDistribution';
 import { MonthlyHeatmap } from '../components/charts/MonthlyHeatmap';
 import { RollingMetrics } from '../components/charts/RollingMetrics';
 import { VaRGauge } from '../components/charts/VaRGauge';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { useDataStore } from '../stores/dataStore';
 import {
   Shield,
@@ -115,48 +116,54 @@ export function RiskAnalytics() {
 
       {/* Key Risk Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <MetricCard
-          label="VaR 95%"
-          value={Math.abs(riskMetrics.var_95 * 100)}
-          format="percent"
-          icon={<TrendingDown className="w-4 h-4 text-loss" />}
-        />
-        <MetricCard
-          label="CVaR 95%"
-          value={Math.abs(riskMetrics.cvar_95 * 100)}
-          format="percent"
-          icon={<TrendingDown className="w-4 h-4 text-loss" />}
-        />
-        <MetricCard
-          label="Sortino Ratio"
-          value={riskMetrics.sortino_ratio}
-          format="ratio"
-          icon={<Target className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Calmar Ratio"
-          value={riskMetrics.calmar_ratio}
-          format="ratio"
-          icon={<Zap className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Omega Ratio"
-          value={riskMetrics.omega_ratio}
-          format="ratio"
-          icon={<Activity className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Stability"
-          value={riskMetrics.stability_of_timeseries * 100}
-          format="percent"
-          icon={<BarChart3 className="w-4 h-4" />}
-        />
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">VaR 95%<QuickTooltip termKey="var_95" /></span>
+            <TrendingDown className="w-4 h-4 text-loss" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{Math.abs(riskMetrics.var_95 * 100).toFixed(2)}%</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">CVaR 95%<QuickTooltip termKey="cvar_95" /></span>
+            <TrendingDown className="w-4 h-4 text-loss" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{Math.abs(riskMetrics.cvar_95 * 100).toFixed(2)}%</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Sortino Ratio<QuickTooltip termKey="sortino" /></span>
+            <Target className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{riskMetrics.sortino_ratio.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Calmar Ratio<QuickTooltip termKey="calmar" /></span>
+            <Zap className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{riskMetrics.calmar_ratio.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Omega Ratio<QuickTooltip termKey="omega" /></span>
+            <Activity className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{riskMetrics.omega_ratio.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Stability<QuickTooltip termKey="stability" /></span>
+            <BarChart3 className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{(riskMetrics.stability_of_timeseries * 100).toFixed(2)}%</div>
+        </div>
       </div>
 
       {/* Tail Risk Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label">Skewness</div>
+          <div className="metric-label inline-flex items-center">Skewness<QuickTooltip termKey="skewness" /></div>
           <div className={`font-mono text-xl ${riskMetrics.skewness < 0 ? 'text-loss' : 'text-profit'}`}>
             {riskMetrics.skewness.toFixed(3)}
           </div>
@@ -165,7 +172,7 @@ export function RiskAnalytics() {
           </div>
         </div>
         <div className="card">
-          <div className="metric-label">Excess Kurtosis</div>
+          <div className="metric-label inline-flex items-center">Excess Kurtosis<QuickTooltip termKey="kurtosis" /></div>
           <div className={`font-mono text-xl ${riskMetrics.kurtosis > 3 ? 'text-accent-yellow' : ''}`}>
             {riskMetrics.kurtosis.toFixed(3)}
           </div>
@@ -174,12 +181,12 @@ export function RiskAnalytics() {
           </div>
         </div>
         <div className="card">
-          <div className="metric-label">Tail Ratio</div>
+          <div className="metric-label inline-flex items-center">Tail Ratio<QuickTooltip termKey="tail_ratio" /></div>
           <div className="font-mono text-xl">{riskMetrics.tail_ratio.toFixed(2)}</div>
           <div className="text-xs text-terminal-muted mt-1">P95 gain / P5 loss</div>
         </div>
         <div className="card">
-          <div className="metric-label">Gain-to-Pain</div>
+          <div className="metric-label inline-flex items-center">Gain-to-Pain<QuickTooltip termKey="gain_to_pain" /></div>
           <div className={`font-mono text-xl ${riskMetrics.gain_to_pain > 1 ? 'text-profit' : 'text-loss'}`}>
             {riskMetrics.gain_to_pain.toFixed(2)}
           </div>
@@ -190,19 +197,19 @@ export function RiskAnalytics() {
       {/* Best/Worst Analysis */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label">Best Day</div>
+          <div className="metric-label inline-flex items-center">Best Day<QuickTooltip termKey="best_day" /></div>
           <div className="font-mono text-xl text-profit">+{(riskMetrics.best_day * 100).toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label">Worst Day</div>
+          <div className="metric-label inline-flex items-center">Worst Day<QuickTooltip termKey="worst_day" /></div>
           <div className="font-mono text-xl text-loss">{(riskMetrics.worst_day * 100).toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label">Best Month</div>
+          <div className="metric-label inline-flex items-center">Best Month<QuickTooltip termKey="best_month" /></div>
           <div className="font-mono text-xl text-profit">+{riskMetrics.best_month.toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label">Worst Month</div>
+          <div className="metric-label inline-flex items-center">Worst Month<QuickTooltip termKey="worst_month" /></div>
           <div className="font-mono text-xl text-loss">{riskMetrics.worst_month.toFixed(2)}%</div>
         </div>
       </div>
@@ -210,21 +217,21 @@ export function RiskAnalytics() {
       {/* Drawdown Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label">Longest Drawdown</div>
+          <div className="metric-label inline-flex items-center">Longest Drawdown<QuickTooltip termKey="longest_dd" /></div>
           <div className="font-mono text-xl">{riskMetrics.longest_dd_days} days</div>
         </div>
         <div className="card">
-          <div className="metric-label">Avg Drawdown Duration</div>
+          <div className="metric-label inline-flex items-center">Avg DD Duration<QuickTooltip termKey="avg_dd_duration" /></div>
           <div className="font-mono text-xl">{riskMetrics.average_dd_days.toFixed(1)} days</div>
         </div>
         <div className="card">
-          <div className="metric-label">Time Underwater</div>
+          <div className="metric-label inline-flex items-center">Time Underwater<QuickTooltip termKey="time_underwater" /></div>
           <div className={`font-mono text-xl ${riskMetrics.time_underwater_pct > 50 ? 'text-loss' : ''}`}>
             {riskMetrics.time_underwater_pct.toFixed(1)}%
           </div>
         </div>
         <div className="card">
-          <div className="metric-label">Payoff Ratio</div>
+          <div className="metric-label inline-flex items-center">Payoff Ratio<QuickTooltip termKey="payoff_ratio" /></div>
           <div className={`font-mono text-xl ${riskMetrics.payoff_ratio > 1 ? 'text-profit' : 'text-loss'}`}>
             {riskMetrics.payoff_ratio.toFixed(2)}
           </div>
@@ -280,7 +287,7 @@ export function RiskAnalytics() {
       {activeTab === 'rolling' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card-elevated">
-            <h3 className="font-semibold text-lg mb-4">Rolling Sharpe (252-day)</h3>
+            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Rolling Sharpe (252-day)<QuickTooltip termKey="rolling_sharpe" /></h3>
             <div className="h-[300px]">
               <RollingMetrics
                 data={[
@@ -291,7 +298,7 @@ export function RiskAnalytics() {
             </div>
           </div>
           <div className="card-elevated">
-            <h3 className="font-semibold text-lg mb-4">Rolling Volatility (252-day)</h3>
+            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Rolling Volatility (252-day)<QuickTooltip termKey="rolling_volatility" /></h3>
             <div className="h-[300px]">
               <RollingMetrics
                 data={[

@@ -5,6 +5,7 @@ import { useDataStore } from '../stores/dataStore';
 import type { CandidateListItem, RecentRun } from '../stores/dataStore';
 import { platform } from '../lib/platform';
 import { FolderSelector } from '../components/FolderSelector';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { 
   Search, 
   Filter, 
@@ -171,7 +172,7 @@ export function Candidates() {
     },
     {
       key: 'candidate_class',
-      header: 'Status',
+      header: (<span className="inline-flex items-center">Status<QuickTooltip termKey="validated" /></span>),
       sortable: true,
       width: '100px',
       render: (value: unknown, row: Record<string, unknown>) => {
@@ -195,7 +196,7 @@ export function Candidates() {
     },
     {
       key: 'oos_sharpe_net',
-      header: 'Sharpe',
+      header: (<span className="inline-flex items-center">Sharpe<QuickTooltip termKey="sharpe_net" /></span>),
       sortable: true,
       align: 'right' as const,
       render: (value: unknown) => {
@@ -212,7 +213,7 @@ export function Candidates() {
     },
     {
       key: 'pbo',
-      header: 'PBO',
+      header: (<span className="inline-flex items-center">PBO<QuickTooltip termKey="pbo" /></span>),
       sortable: true,
       align: 'right' as const,
       width: '90px',
@@ -230,7 +231,7 @@ export function Candidates() {
     },
     {
       key: 'oos_cagr_net',
-      header: 'CAGR',
+      header: (<span className="inline-flex items-center">CAGR<QuickTooltip termKey="cagr" /></span>),
       sortable: true,
       align: 'right' as const,
       width: '80px',
@@ -242,7 +243,7 @@ export function Candidates() {
     },
     {
       key: 'dsr',
-      header: 'DSR',
+      header: (<span className="inline-flex items-center">DSR<QuickTooltip termKey="dsr" /></span>),
       sortable: true,
       align: 'right' as const,
       width: '70px',
@@ -254,7 +255,7 @@ export function Candidates() {
     },
     {
       key: 'stress_passed',
-      header: 'Stress',
+      header: (<span className="inline-flex items-center">Stress<QuickTooltip termKey="stress_test" /></span>),
       sortable: true,
       align: 'center' as const,
       width: '70px',

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { MetricCard } from '../components/ui/MetricCard';
 import { GenerationChart } from '../components/charts/GenerationChart';
 import { ParetoChart } from '../components/charts/ParetoChart';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { 
   Play, 
   Pause, 
@@ -53,7 +54,7 @@ export function Evolution() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Evolution Monitor</h1>
-          <p className="text-terminal-muted mt-1">Track genetic algorithm progress in real-time</p>
+          <p className="text-terminal-muted mt-1">Track <span className="inline-flex items-center">genetic algorithm<QuickTooltip termKey="genetic_algorithm" /></span> progress in real-time</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
@@ -79,8 +80,8 @@ export function Evolution() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${isRunning ? 'bg-profit animate-pulse' : 'bg-terminal-muted'}`} />
-            <span className="font-medium">
-              Generation {mockEvolutionStats.generation} of {mockEvolutionStats.maxGenerations}
+            <span className="font-medium inline-flex items-center">
+              <span className="inline-flex items-center">Generation<QuickTooltip termKey="generation" /></span> {mockEvolutionStats.generation} of {mockEvolutionStats.maxGenerations}
             </span>
           </div>
           <span className="font-mono text-sm text-terminal-muted">{progress.toFixed(1)}%</span>
@@ -104,26 +105,31 @@ export function Evolution() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard
-          label="Best Sharpe"
-          value={mockEvolutionStats.bestSharpe}
-          format="ratio"
-          icon={<Zap className="w-5 h-5 text-profit" />}
-        />
-        <MetricCard
-          label="Best CAGR"
-          value={mockEvolutionStats.bestCagr}
-          format="percent"
-        />
-        <MetricCard
-          label="Mean Sharpe"
-          value={mockEvolutionStats.meanSharpe}
-          format="ratio"
-        />
-        <MetricCard
-          label="Pareto Size"
-          value={mockEvolutionStats.paretoSize}
-        />
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Best Sharpe<QuickTooltip termKey="sharpe" /></span>
+            <Zap className="w-5 h-5 text-profit" />
+          </div>
+          <div className="font-mono font-bold text-2xl text-profit">{mockEvolutionStats.bestSharpe.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Best CAGR<QuickTooltip termKey="cagr" /></span>
+          </div>
+          <div className="font-mono font-bold text-2xl">{(mockEvolutionStats.bestCagr * 100).toFixed(1)}%</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label">Mean Sharpe</span>
+          </div>
+          <div className="font-mono font-bold text-2xl">{mockEvolutionStats.meanSharpe.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Pareto Size<QuickTooltip termKey="pareto_frontier" /></span>
+          </div>
+          <div className="font-mono font-bold text-2xl">{mockEvolutionStats.paretoSize}</div>
+        </div>
       </div>
 
       {/* Performance Stats */}
@@ -163,7 +169,7 @@ export function Evolution() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Generation Progress */}
         <div className="card-elevated">
-          <h2 className="font-semibold text-lg mb-4">Fitness Over Generations</h2>
+          <h2 className="font-semibold text-lg mb-4 inline-flex items-center">Fitness<QuickTooltip termKey="fitness" /> Over Generations</h2>
           <div className="h-[350px]">
             <GenerationChart data={mockGenerationData} />
           </div>
@@ -171,7 +177,7 @@ export function Evolution() {
 
         {/* Pareto Frontier */}
         <div className="card-elevated">
-          <h2 className="font-semibold text-lg mb-4">Pareto Frontier (CAGR vs Sharpe)</h2>
+          <h2 className="font-semibold text-lg mb-4 inline-flex items-center">Pareto Frontier<QuickTooltip termKey="pareto_frontier" /> (CAGR vs Sharpe)</h2>
           <div className="h-[350px]">
             <ParetoChart data={mockParetoData} />
           </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { config } from '../lib/platform';
+import { QuickTooltip } from './ui/TooltipInfo';
 import { 
   RefreshCw,
   AlertTriangle,
@@ -94,7 +95,7 @@ export function StressAnalysis({ candidateId }: Props) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <SummaryCard
           icon={<Shield className="w-5 h-5" />}
-          label="Overall"
+          label={<span className="inline-flex items-center">Stress Test<QuickTooltip termKey="stress_test" /></span>}
           value={data.summary.overall_status}
           passed={data.summary.overall_status === 'PASS'}
           isStatus
@@ -120,7 +121,7 @@ export function StressAnalysis({ candidateId }: Props) {
         />
         <SummaryCard
           icon={<TrendingDown className="w-5 h-5" />}
-          label="Worst Scenario"
+          label={<span className="inline-flex items-center">Worst<QuickTooltip termKey="stress_scenario" /></span>}
           value={data.summary.worst_scenario.split(' ')[0]}
           passed={false}
           small
@@ -141,9 +142,9 @@ export function StressAnalysis({ candidateId }: Props) {
             <tr>
               <th className="text-left text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Scenario</th>
               <th className="text-center text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Severity</th>
-              <th className="text-right text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Base Sharpe</th>
+              <th className="text-right text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3"><span className="inline-flex items-center">Base Sharpe<QuickTooltip termKey="sharpe" /></span></th>
               <th className="text-right text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Stressed</th>
-              <th className="text-right text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Degradation</th>
+              <th className="text-right text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3"><span className="inline-flex items-center">Degradation<QuickTooltip termKey="stress_degradation" /></span></th>
               <th className="text-center text-xs font-medium text-terminal-muted uppercase tracking-wider px-4 py-3">Status</th>
             </tr>
           </thead>
@@ -217,7 +218,7 @@ function SummaryCard({
   small 
 }: { 
   icon: React.ReactNode;
-  label: string; 
+  label: React.ReactNode; 
   value: string; 
   passed: boolean; 
   isStatus?: boolean;

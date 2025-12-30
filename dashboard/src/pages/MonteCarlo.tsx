@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { MetricCard } from '../components/ui/MetricCard';
 import { ReturnDistribution } from '../components/charts/ReturnDistribution';
 import { DistributionFan } from '../components/charts/DistributionFan';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { useDataStore } from '../stores/dataStore';
 import {
   Shuffle,
@@ -78,9 +79,9 @@ export function MonteCarlo() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Monte Carlo Simulation</h1>
+          <h1 className="text-2xl font-bold inline-flex items-center">Monte Carlo Simulation<QuickTooltip termKey="monte_carlo" size="md" /></h1>
           <p className="text-terminal-muted mt-1">
-            Bootstrap confidence intervals for{' '}
+            <span className="inline-flex items-center">Bootstrap<QuickTooltip termKey="bootstrap" /></span> confidence intervals for{' '}
             <span className="text-accent-cyan font-mono">
               {selectedCandidate.display_name}
             </span>
@@ -109,7 +110,7 @@ export function MonteCarlo() {
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-terminal-muted">Block Size:</label>
+          <label className="text-sm text-terminal-muted inline-flex items-center">Block Size<QuickTooltip termKey="block_size" /></label>
           <select
             value={blockSize}
             onChange={(e) => setBlockSize(Number(e.target.value))}
@@ -293,10 +294,10 @@ function ConfidenceIntervalCard({
 }) {
   return (
     <div className="card">
-      <div className="font-medium mb-3">{title}</div>
+      <div className="font-medium mb-3 inline-flex items-center">{title}<QuickTooltip termKey="confidence_interval" /></div>
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
-          <span className="text-terminal-muted">P5 (worst case)</span>
+          <span className="text-terminal-muted inline-flex items-center">P5<QuickTooltip termKey="percentile_p5" /> (worst case)</span>
           <span className="font-mono text-loss">{format(distribution.p5)}</span>
         </div>
         <div className="flex justify-between">
@@ -304,7 +305,7 @@ function ConfidenceIntervalCard({
           <span className="font-mono">{format(distribution.p25)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-terminal-muted">Median (P50)</span>
+          <span className="text-terminal-muted inline-flex items-center">Median<QuickTooltip termKey="percentile_p50" /> (P50)</span>
           <span className="font-mono font-bold">{format(distribution.p50)}</span>
         </div>
         <div className="flex justify-between">
@@ -312,7 +313,7 @@ function ConfidenceIntervalCard({
           <span className="font-mono">{format(distribution.p75)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-terminal-muted">P95 (best case)</span>
+          <span className="text-terminal-muted inline-flex items-center">P95<QuickTooltip termKey="percentile_p95" /> (best case)</span>
           <span className="font-mono text-profit">{format(distribution.p95)}</span>
         </div>
         <div className="pt-2 border-t border-terminal-border/50">

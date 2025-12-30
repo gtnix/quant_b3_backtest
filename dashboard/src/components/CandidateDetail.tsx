@@ -21,6 +21,7 @@ import {
   Settings,
   Database
 } from 'lucide-react';
+import { QuickTooltip } from './ui/TooltipInfo';
 import type { CandidateDetailFull, PipelineBlock } from '../stores/dataStore';
 
 interface CandidateDetailProps {
@@ -165,22 +166,22 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
             {expandedSections.has('scorecard') && (
               <div className="mt-3 space-y-3">
                 <ScoreBar 
-                  label="Risk-Adjusted Return (Sharpe)" 
+                  label={<span className="inline-flex items-center">Sharpe Ratio<QuickTooltip termKey="sharpe" /></span>} 
                   value={sharpeScore} 
-                  detail={`${candidate.oos_sharpe_net.toFixed(2)} Sharpe ratio - measures return per unit of risk`}
+                  detail={`${candidate.oos_sharpe_net.toFixed(2)} Sharpe - measures return per unit of risk`}
                 />
                 <ScoreBar 
-                  label="Overfitting Risk (PBO)" 
+                  label={<span className="inline-flex items-center">PBO<QuickTooltip termKey="pbo" /></span>} 
                   value={pboScore} 
-                  detail={`${(candidate.pbo * 100).toFixed(1)}% probability of backtest overfitting - lower is better`}
+                  detail={`${(candidate.pbo * 100).toFixed(1)}% probability of overfitting - lower is better`}
                 />
                 <ScoreBar 
-                  label="Statistical Confidence (DSR)" 
+                  label={<span className="inline-flex items-center">DSR<QuickTooltip termKey="dsr" /></span>} 
                   value={dsrScore} 
-                  detail={`${(candidate.dsr || 0).toFixed(2)} deflated Sharpe ratio - accounts for multiple testing`}
+                  detail={`${(candidate.dsr || 0).toFixed(2)} deflated Sharpe - accounts for multiple testing`}
                 />
                 <ScoreBar 
-                  label="Stress Resilience" 
+                  label={<span className="inline-flex items-center">Stress Resilience<QuickTooltip termKey="stress_test" /></span>} 
                   value={stressScore} 
                   detail={`${candidate.stress_passed}/${candidate.stress_total} stress scenarios passed`}
                 />
@@ -194,17 +195,17 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
             {expandedSections.has('validation') && (
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <ValidationGate 
-                  label="Walk-Forward Analysis" 
+                  label={<span className="inline-flex items-center">Walk-Forward<QuickTooltip termKey="wfa" /></span>}
                   passed={candidate.gates_passed} 
                   detail="Multi-period OOS testing"
                 />
                 <ValidationGate 
-                  label="CPCV Cross-Validation" 
+                  label={<span className="inline-flex items-center">CPCV<QuickTooltip termKey="cpcv" /></span>}
                   passed={candidate.gates_passed} 
                   detail="Combinatorial purged validation"
                 />
                 <ValidationGate 
-                  label="PBO < 15%" 
+                  label={<span className="inline-flex items-center">PBO<QuickTooltip termKey="pbo" /> &lt; 15%</span>}
                   passed={candidate.pbo <= 0.15} 
                   detail={`Actual: ${(candidate.pbo * 100).toFixed(1)}%`}
                 />
@@ -214,12 +215,12 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
                   detail="Market crash scenarios"
                 />
                 <ValidationGate 
-                  label="DSR > 0.5" 
+                  label={<span className="inline-flex items-center">DSR<QuickTooltip termKey="dsr" /> &gt; 0.5</span>}
                   passed={(candidate.dsr || 0) >= 0.5} 
                   detail={`Actual: ${(candidate.dsr || 0).toFixed(2)}`}
                 />
                 <ValidationGate 
-                  label="OOS Sharpe > 0.5" 
+                  label={<span className="inline-flex items-center">OOS Sharpe<QuickTooltip termKey="sharpe_oos" /> &gt; 0.5</span>}
                   passed={candidate.oos_sharpe_net >= 0.5} 
                   detail={`Actual: ${candidate.oos_sharpe_net.toFixed(2)}`}
                 />
@@ -309,7 +310,7 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
               {expandedSections.has('execution') && (
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <div className="flex justify-between py-1">
-                    <span className="text-terminal-muted">Delay Bars</span>
+                    <span className="text-terminal-muted inline-flex items-center">Delay Bars<QuickTooltip termKey="delay_bars" /></span>
                     <span className="font-mono">{candidate.execution.delay_bars}</span>
                   </div>
                   <div className="flex justify-between py-1">
@@ -317,7 +318,7 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
                     <span className="font-mono">{candidate.execution.fees?.tier ?? 'N/A'}</span>
                   </div>
                   <div className="flex justify-between py-1">
-                    <span className="text-terminal-muted">Slippage</span>
+                    <span className="text-terminal-muted inline-flex items-center">Slippage<QuickTooltip termKey="slippage" /></span>
                     <span className="font-mono">{candidate.execution.slippage?.bps ?? 'N/A'} bps</span>
                   </div>
                 </div>
@@ -330,14 +331,14 @@ export function CandidateDetail({ candidate, onClose }: CandidateDetailProps) {
             <SectionHeader title="All Metrics" section="metrics" icon={BarChart3} />
             {expandedSections.has('metrics') && (
               <div className="mt-3 grid grid-cols-3 gap-2">
-                <MetricTile label="OOS Sharpe NET" value={candidate.oos_sharpe_net.toFixed(3)} />
-                <MetricTile label="OOS Sharpe GROSS" value={(candidate.oos_sharpe_gross || candidate.oos_sharpe_net).toFixed(3)} />
-                <MetricTile label="OOS CAGR NET" value={candidate.oos_cagr_net ? `${(candidate.oos_cagr_net * 100).toFixed(2)}%` : 'N/A'} />
-                <MetricTile label="Max Drawdown NET" value={candidate.max_drawdown_net ? `${(candidate.max_drawdown_net * 100).toFixed(2)}%` : 'N/A'} />
-                <MetricTile label="PBO" value={`${(candidate.pbo * 100).toFixed(2)}%`} />
-                <MetricTile label="DSR" value={(candidate.dsr || 0).toFixed(3)} />
-                <MetricTile label="Turnover Annual" value={(candidate.turnover_annual || 0).toFixed(2)} />
-                <MetricTile label="Capacity USD" value={candidate.capacity_usd ? `$${(candidate.capacity_usd / 1e6).toFixed(1)}M` : 'N/A'} />
+                <MetricTile label={<span className="inline-flex items-center">Sharpe NET<QuickTooltip termKey="sharpe_net" /></span>} value={candidate.oos_sharpe_net.toFixed(3)} />
+                <MetricTile label={<span className="inline-flex items-center">Sharpe GROSS<QuickTooltip termKey="net_vs_gross" /></span>} value={(candidate.oos_sharpe_gross || candidate.oos_sharpe_net).toFixed(3)} />
+                <MetricTile label={<span className="inline-flex items-center">CAGR NET<QuickTooltip termKey="cagr" /></span>} value={candidate.oos_cagr_net ? `${(candidate.oos_cagr_net * 100).toFixed(2)}%` : 'N/A'} />
+                <MetricTile label={<span className="inline-flex items-center">Max DD NET<QuickTooltip termKey="max_drawdown" /></span>} value={candidate.max_drawdown_net ? `${(candidate.max_drawdown_net * 100).toFixed(2)}%` : 'N/A'} />
+                <MetricTile label={<span className="inline-flex items-center">PBO<QuickTooltip termKey="pbo" /></span>} value={`${(candidate.pbo * 100).toFixed(2)}%`} />
+                <MetricTile label={<span className="inline-flex items-center">DSR<QuickTooltip termKey="dsr" /></span>} value={(candidate.dsr || 0).toFixed(3)} />
+                <MetricTile label={<span className="inline-flex items-center">Turnover<QuickTooltip termKey="turnover" /></span>} value={(candidate.turnover_annual || 0).toFixed(2)} />
+                <MetricTile label={<span className="inline-flex items-center">Capacity<QuickTooltip termKey="capacity" /></span>} value={candidate.capacity_usd ? `$${(candidate.capacity_usd / 1e6).toFixed(1)}M` : 'N/A'} />
                 <MetricTile label="Stress Passed" value={`${candidate.stress_passed}/${candidate.stress_total}`} />
               </div>
             )}
@@ -386,7 +387,7 @@ function QuickStat({ icon: Icon, label, value, color }: { icon: React.ElementTyp
   );
 }
 
-function ScoreBar({ label, value, detail }: { label: string; value: number; detail: string }) {
+function ScoreBar({ label, value, detail }: { label: React.ReactNode; value: number; detail: string }) {
   const clampedValue = Math.max(0, Math.min(100, value));
   const barColor = clampedValue >= 70 ? 'bg-profit' : clampedValue >= 40 ? 'bg-accent-yellow' : 'bg-loss';
   
@@ -404,7 +405,7 @@ function ScoreBar({ label, value, detail }: { label: string; value: number; deta
   );
 }
 
-function ValidationGate({ label, passed, detail }: { label: string; passed: boolean; detail: string }) {
+function ValidationGate({ label, passed, detail }: { label: React.ReactNode; passed: boolean; detail: string }) {
   return (
     <div className={`p-2 rounded-lg border ${passed ? 'border-profit/30 bg-profit/5' : 'border-loss/30 bg-loss/5'}`}>
       <div className="flex items-center gap-2">
@@ -420,7 +421,7 @@ function ValidationGate({ label, passed, detail }: { label: string; passed: bool
   );
 }
 
-function MetricTile({ label, value }: { label: string; value: string }) {
+function MetricTile({ label, value }: { label: React.ReactNode; value: string }) {
   return (
     <div className="p-2 bg-terminal-bg rounded-lg text-center">
       <div className="text-xs text-terminal-muted mb-1">{label}</div>

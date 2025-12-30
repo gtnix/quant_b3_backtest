@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { config } from '../lib/platform';
+import { QuickTooltip } from './ui/TooltipInfo';
 import { 
   RefreshCw,
   TrendingUp,
@@ -93,7 +94,7 @@ export function WFAAnalysis({ candidateId }: Props) {
       {/* Summary Header */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <SummaryCard
-          label="Overall Status"
+          label={<span className="inline-flex items-center">WFA Status<QuickTooltip termKey="wfa" /></span>}
           value={data.summary.overall_status}
           isStatus
           passed={data.summary.overall_status === 'PASS'}
@@ -104,12 +105,12 @@ export function WFAAnalysis({ candidateId }: Props) {
           passed={data.summary.passed_folds >= Math.ceil(data.summary.total_folds * 0.6)}
         />
         <SummaryCard
-          label="Avg Degradation"
+          label={<span className="inline-flex items-center">Degradation<QuickTooltip termKey="degradation_ratio" /></span>}
           value={`${data.summary.avg_degradation.toFixed(1)}%`}
           passed={data.summary.avg_degradation < 40}
         />
         <SummaryCard
-          label="Consistency"
+          label={<span className="inline-flex items-center">Consistency<QuickTooltip termKey="consistency_score" /></span>}
           value={`${data.summary.consistency_score}%`}
           passed={data.summary.consistency_score >= 60}
         />
@@ -166,7 +167,7 @@ export function WFAAnalysis({ candidateId }: Props) {
   );
 }
 
-function SummaryCard({ label, value, passed, isStatus }: { label: string; value: string; passed: boolean; isStatus?: boolean }) {
+function SummaryCard({ label, value, passed, isStatus }: { label: React.ReactNode; value: string; passed: boolean; isStatus?: boolean }) {
   return (
     <div className={`p-4 rounded-xl border ${passed ? 'bg-profit/5 border-profit/30' : 'bg-loss/5 border-loss/30'}`}>
       <div className="text-xs text-terminal-muted uppercase tracking-wider mb-2">{label}</div>
@@ -217,7 +218,7 @@ function FoldCard({ fold }: { fold: WFAFold }) {
         <div className="p-3 rounded-lg bg-terminal-bg/50">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="w-4 h-4 text-accent-cyan" />
-            <span className="text-xs font-medium text-terminal-muted uppercase">In-Sample</span>
+            <span className="text-xs font-medium text-terminal-muted uppercase inline-flex items-center">In-Sample<QuickTooltip termKey="is_oos" /></span>
           </div>
           <div className="text-xs text-terminal-muted flex items-center gap-1 mb-2">
             <Calendar className="w-3 h-3" />

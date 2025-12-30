@@ -601,6 +601,110 @@ export const TOOLTIPS: Record<string, TooltipContent> = {
 // COMPONENTS
 // =============================================================================
 
+/**
+ * QuickTooltip - Compact inline tooltip for quant terms
+ * Shows definition, formula, benchmark on hover with (?) icon
+ */
+export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTooltipProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const content = QUANT_TOOLTIPS[termKey];
+  
+  if (!content) return null;
+  
+  const positionClasses = {
+    top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
+    bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+    left: 'right-full top-1/2 -translate-y-1/2 mr-2',
+    right: 'left-full top-1/2 -translate-y-1/2 ml-2',
+  };
+  
+  const arrowClasses = {
+    top: 'top-full left-1/2 -translate-x-1/2 border-l-transparent border-r-transparent border-b-transparent border-t-slate-800',
+    bottom: 'bottom-full left-1/2 -translate-x-1/2 border-l-transparent border-r-transparent border-t-transparent border-b-slate-800',
+    left: 'left-full top-1/2 -translate-y-1/2 border-t-transparent border-b-transparent border-r-transparent border-l-slate-800',
+    right: 'right-full top-1/2 -translate-y-1/2 border-t-transparent border-b-transparent border-l-transparent border-r-slate-800',
+  };
+  
+  const sizeClasses = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
+  
+  return (
+    <span className="relative inline-flex items-center ml-1">
+      <button
+        type="button"
+        className={`inline-flex items-center justify-center ${sizeClasses} text-cyan-400/70 hover:text-cyan-400 transition-colors`}
+        onMouseEnter={() => setIsOpen(true)}
+        onMouseLeave={() => setIsOpen(false)}
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        aria-label={`What is ${content.term}?`}
+      >
+        <Info className={sizeClasses} />
+      </button>
+      
+      {isOpen && (
+        <div className={`absolute z-[100] ${positionClasses[position]} w-72 pointer-events-none`}>
+          <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden">
+            {/* Header */}
+            <div className="px-3 py-2 bg-slate-700/50 border-b border-slate-600">
+              <div className="font-semibold text-sm text-white">{content.term}</div>
+            </div>
+            
+            {/* Content */}
+            <div className="px-3 py-2.5 space-y-2">
+              <p className="text-xs text-slate-300 leading-relaxed">{content.definition}</p>
+              
+              {content.formula && (
+                <div className="flex items-start gap-2 text-xs">
+                  <span className="text-slate-500 shrink-0">Formula:</span>
+                  <code className="text-cyan-400 font-mono text-[11px]">{content.formula}</code>
+                </div>
+              )}
+              
+              {content.benchmark && (
+                <div className="flex items-start gap-2 text-xs">
+                  <span className="text-slate-500 shrink-0">Benchmark:</span>
+                  <span className="text-emerald-400">{content.benchmark}</span>
+                </div>
+              )}
+              
+              {content.interpretation && (
+                <div className="pt-1.5 border-t border-slate-700">
+                  <p className="text-[11px] text-slate-400 italic leading-relaxed">
+                    💡 {content.interpretation}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* Arrow */}
+          <div className={`absolute w-0 h-0 border-[6px] ${arrowClasses[position]}`} />
+        </div>
+      )}
+    </span>
+  );
+}
+
+/**
+ * TermWithTooltip - Label text with inline tooltip
+ */
+interface TermWithTooltipProps {
+  termKey: keyof typeof QUANT_TOOLTIPS;
+  label?: string;
+  className?: string;
+}
+
+export function TermWithTooltip({ termKey, label, className = '' }: TermWithTooltipProps) {
+  const content = QUANT_TOOLTIPS[termKey];
+  const displayLabel = label || content?.term || termKey;
+  
+  return (
+    <span className={`inline-flex items-center ${className}`}>
+      {displayLabel}
+      <QuickTooltip termKey={termKey} />
+    </span>
+  );
+}
+
 export function TooltipInfo({ content, children }: TooltipInfoProps) {
   const [isOpen, setIsOpen] = useState(false);
   
@@ -612,7 +716,7 @@ export function TooltipInfo({ content, children }: TooltipInfoProps) {
         onMouseEnter={() => setIsOpen(true)}
         onMouseLeave={() => setIsOpen(false)}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="Mais informações"
+        aria-label="More info"
       >
         ?
       </button>
@@ -621,22 +725,22 @@ export function TooltipInfo({ content, children }: TooltipInfoProps) {
         <div className="absolute z-50 w-80 p-4 mt-2 left-0 bg-slate-900 border border-cyan-500/30 rounded-lg shadow-xl shadow-cyan-500/10">
           <div className="space-y-3 text-sm">
             <div>
-              <span className="text-cyan-400 font-mono text-xs uppercase tracking-wider">O que é</span>
+              <span className="text-cyan-400 font-mono text-xs uppercase tracking-wider">What</span>
               <p className="text-slate-200 mt-1">{content.what}</p>
             </div>
             
             <div>
-              <span className="text-amber-400 font-mono text-xs uppercase tracking-wider">Impacto</span>
+              <span className="text-amber-400 font-mono text-xs uppercase tracking-wider">Impact</span>
               <p className="text-slate-300 mt-1">{content.impact}</p>
             </div>
             
             <div>
-              <span className="text-emerald-400 font-mono text-xs uppercase tracking-wider">Quando ajustar</span>
+              <span className="text-emerald-400 font-mono text-xs uppercase tracking-wider">When to adjust</span>
               <p className="text-slate-300 mt-1">{content.when}</p>
             </div>
             
             <div className="pt-2 border-t border-slate-700">
-              <span className="text-slate-500 font-mono text-xs uppercase tracking-wider">Exemplo</span>
+              <span className="text-slate-500 font-mono text-xs uppercase tracking-wider">Example</span>
               <p className="text-slate-400 mt-1 italic">{content.example}</p>
             </div>
           </div>

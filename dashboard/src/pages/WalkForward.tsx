@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MetricCard } from '../components/ui/MetricCard';
 import { WalkForwardChart } from '../components/charts/WalkForwardChart';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { useDataStore } from '../stores/dataStore';
 import {
   BarChart3,
@@ -96,7 +97,7 @@ export function WalkForward() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Walk-Forward Analysis</h1>
+          <h1 className="text-2xl font-bold inline-flex items-center">Walk-Forward Analysis<QuickTooltip termKey="wfa" size="md" /></h1>
           <p className="text-terminal-muted mt-1">
             Validate strategy robustness for{' '}
             <span className="text-accent-cyan font-mono">
@@ -120,7 +121,7 @@ export function WalkForward() {
           <span className="text-sm text-terminal-muted">Parameters:</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-terminal-muted">Window:</label>
+          <label className="text-sm text-terminal-muted inline-flex items-center">Window<QuickTooltip termKey="wfa_window" /></label>
           <select
             value={windowMonths}
             onChange={(e) => setWindowMonths(Number(e.target.value))}
@@ -133,7 +134,7 @@ export function WalkForward() {
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-terminal-muted">Step:</label>
+          <label className="text-sm text-terminal-muted inline-flex items-center">Step<QuickTooltip termKey="wfa_step" /></label>
           <select
             value={stepMonths}
             onChange={(e) => setStepMonths(Number(e.target.value))}
@@ -180,28 +181,33 @@ export function WalkForward() {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard
-          label="Aggregate OOS Sharpe"
-          value={walkForwardResult.aggregate_sharpe}
-          format="ratio"
-          icon={<Target className="w-4 h-4" />}
-        />
-        <MetricCard
-          label="Degradation Ratio"
-          value={walkForwardResult.degradation_ratio * 100}
-          format="percent"
-          icon={<Activity className={`w-4 h-4 ${walkForwardResult.degradation_ratio >= 0.5 ? 'text-profit' : 'text-loss'}`} />}
-        />
-        <MetricCard
-          label="Consistency Score"
-          value={walkForwardResult.consistency_score * 100}
-          format="percent"
-          icon={<BarChart3 className={`w-4 h-4 ${walkForwardResult.consistency_score >= 0.6 ? 'text-profit' : 'text-loss'}`} />}
-        />
-        <MetricCard
-          label="Profit / Loss Periods"
-          value={`${walkForwardResult.profit_periods} / ${walkForwardResult.loss_periods}`}
-        />
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">OOS Sharpe<QuickTooltip termKey="sharpe_oos" /></span>
+            <Target className="w-4 h-4" />
+          </div>
+          <div className="font-mono font-bold text-2xl">{walkForwardResult.aggregate_sharpe.toFixed(3)}</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Degradation Ratio<QuickTooltip termKey="degradation_ratio" /></span>
+            <Activity className={`w-4 h-4 ${walkForwardResult.degradation_ratio >= 0.5 ? 'text-profit' : 'text-loss'}`} />
+          </div>
+          <div className={`font-mono font-bold text-2xl ${walkForwardResult.degradation_ratio >= 0.5 ? 'text-profit' : 'text-loss'}`}>{(walkForwardResult.degradation_ratio * 100).toFixed(1)}%</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label inline-flex items-center">Consistency<QuickTooltip termKey="consistency_score" /></span>
+            <BarChart3 className={`w-4 h-4 ${walkForwardResult.consistency_score >= 0.6 ? 'text-profit' : 'text-loss'}`} />
+          </div>
+          <div className={`font-mono font-bold text-2xl ${walkForwardResult.consistency_score >= 0.6 ? 'text-profit' : 'text-loss'}`}>{(walkForwardResult.consistency_score * 100).toFixed(1)}%</div>
+        </div>
+        <div className="card group hover:border-terminal-muted/50 transition-colors">
+          <div className="flex items-start justify-between mb-2">
+            <span className="metric-label">Profit / Loss Periods</span>
+          </div>
+          <div className="font-mono font-bold text-2xl">{walkForwardResult.profit_periods} / {walkForwardResult.loss_periods}</div>
+        </div>
       </div>
 
       {/* Walk-Forward Chart */}
@@ -216,7 +222,7 @@ export function WalkForward() {
 
       {/* Period Details Table */}
       <div className="card-elevated overflow-x-auto">
-        <h3 className="font-semibold text-lg mb-4">Period Details</h3>
+        <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Period Details<QuickTooltip termKey="is_oos" /></h3>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-terminal-border">
