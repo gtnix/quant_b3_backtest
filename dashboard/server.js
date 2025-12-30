@@ -1913,15 +1913,27 @@ async function startQueuedCampaign(campaign) {
   const configPath = path.join(PROJECT_ROOT, campaign.config_path);
   const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
   
+  console.log(`\n🔍 [OMP] Checking campaign prerequisites...`);
+  console.log(`   Combiner path: ${combinerPath}`);
+  console.log(`   Config path: ${configPath}`);
+  
   if (!fs.existsSync(combinerPath)) {
-    console.error('[OMP] Combiner binary not found');
+    const errorMsg = `Combiner binary not found at ${combinerPath}`;
+    console.error(`❌ [OMP] ${errorMsg}`);
+    broadcastSSE('omp-error', { type: 'binary-missing', message: errorMsg, campaignId: campaign.id });
+    ompState.stats.campaignsFailed++;
     return null;
   }
   
   if (!fs.existsSync(configPath)) {
-    console.error(`[OMP] Campaign config not found: ${configPath}`);
+    const errorMsg = `Campaign config not found: ${configPath}`;
+    console.error(`❌ [OMP] ${errorMsg}`);
+    broadcastSSE('omp-error', { type: 'config-missing', message: errorMsg, campaignId: campaign.id });
+    ompState.stats.campaignsFailed++;
     return null;
   }
+  
+  console.log(`✅ [OMP] Prerequisites OK`);
   
   const runId = `run_${Date.now().toString(36)}`;
   
@@ -2151,12 +2163,24 @@ async function ompLoop() {
     ompState.queueLength = enabledCampaigns.length;
     
     // 4. If can start and queue has items and no active campaign
+    console.log(`⏰ [OMP] Loop #${ompState.loopCount} - canStart: ${ompState.resources.canStartCampaign}, queue: ${enabledCampaigns.length}, active: ${!!ompState.currentCampaign}`);
+    
     if (ompState.resources.canStartCampaign && enabledCampaigns.length > 0 && !ompState.currentCampaign) {
       // Sort by priority (lower = higher priority)
       enabledCampaigns.sort((a, b) => (a.priority || 99) - (b.priority || 99));
       const nextCampaign = enabledCampaigns[0];
       
+      console.log(`🎯 [OMP] Attempting to start campaign: ${nextCampaign.name}`);
+      broadcastSSE('omp-campaign-starting', { campaign: nextCampaign });
+      
       ompState.currentCampaign = await startQueuedCampaign(nextCampaign);
+      
+      if (ompState.currentCampaign) {
+        console.log(`✅ [OMP] Campaign started successfully`);
+        broadcastSSE('omp-campaign-started', { campaign: ompState.currentCampaign });
+      } else {
+        console.log(`❌ [OMP] Campaign failed to start`);
+      }
     }
     
     // 5. Update current campaign metrics
