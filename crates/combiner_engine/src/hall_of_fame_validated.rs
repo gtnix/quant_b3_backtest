@@ -72,6 +72,8 @@ pub struct ValidationResultSummary {
     pub dsr: f64,
     pub splits_evaluated: u16,
     pub splits_passed: u16,
+    /// Whether all validation criteria passed (including DSR)
+    pub passed: bool,
 }
 
 impl From<&ValidationResult> for ValidationResultSummary {
@@ -86,6 +88,7 @@ impl From<&ValidationResult> for ValidationResultSummary {
             dsr: result.dsr,
             splits_evaluated: result.splits_evaluated,
             splits_passed: result.splits_passed,
+            passed: result.passed,
         }
     }
 }

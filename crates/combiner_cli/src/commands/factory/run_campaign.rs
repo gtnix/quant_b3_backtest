@@ -421,8 +421,8 @@ async fn execute_single_run(
             dsr: Some(entry.validation.dsr as f32),
             stress_passed: entry.validation.splits_passed as i32,
             stress_total: entry.validation.splits_evaluated as i32,
-            // Heuristic: gate passed if at least half of splits passed
-            gates_passed: entry.validation.splits_passed >= entry.validation.splits_evaluated / 2,
+            // Use actual validation.passed which checks all criteria including DSR
+            gates_passed: entry.validation.passed,
             turnover_annual: 0.0, // Not available in summary
             capacity_usd: None,   // Not available in summary
             oos_cagr_net: Some(entry.validation.oos_cagr_median as f32),
