@@ -382,8 +382,13 @@ async fn execute_single_run(
     let output_dir = format!("output/scg/{}", run_id);
     std::fs::create_dir_all(&output_dir)?;
 
-    // Create executor
+    // Create executor with configurable CLI path
+    let cli_path = std::env::var("BACKTEST_CLI_PATH")
+        .unwrap_or_else(|_| "target/release/backtest".to_string());
+    info!("Using backtest CLI at: {}", cli_path);
+    
     let executor = CliExecutor::new()
+        .with_cli_path(&cli_path)
         .with_output_dir(std::path::PathBuf::from(&output_dir).join("backtests"));
 
     // Create validation cache

@@ -18,7 +18,8 @@ module.exports = {
         PORT: 3001,
         DATABASE_URL: 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require',
         NEON_DATABASE_URL: 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require',
-        BRAPI_API_KEY: 'gNJ4vTTpjG8TZJJHGBqoV5'
+        BRAPI_API_KEY: 'gNJ4vTTpjG8TZJJHGBqoV5',
+        BACKTEST_CLI_PATH: '/opt/alpha-forge/quant_b3_backtest/target/release/backtest'
       },
       error_file: '/opt/alpha-forge/logs/api-error.log',
       out_file: '/opt/alpha-forge/logs/api-out.log',

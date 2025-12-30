@@ -37,6 +37,8 @@ pub struct StageBConfig {
     pub max_degradation_pct: f64,
     /// Maximum PBO to pass
     pub max_pbo: f64,
+    /// Minimum DSR (Deflated Sharpe Ratio) to pass
+    pub min_dsr: f64,
     /// Whether to use cache
     pub use_cache: bool,
     /// Current generation
@@ -52,6 +54,7 @@ impl Default for StageBConfig {
             min_oos_trades: 30,
             max_degradation_pct: 50.0,
             max_pbo: 0.20,
+            min_dsr: 0.8,
             use_cache: true,
             generation: 0,
         }
@@ -452,6 +455,7 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             oos_sharpe_median,
             degradation_pct,
             pbo,
+            dsr,
             splits_passed,
             n as u16,
         );
@@ -480,6 +484,7 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
         oos_sharpe_median: f64,
         degradation_pct: f64,
         pbo: f64,
+        dsr: f64,
         splits_passed: u16,
         splits_total: u16,
     ) -> (bool, Option<String>) {
@@ -501,6 +506,13 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             return (false, Some(format!(
                 "PBO {:.2} > {:.2}",
                 pbo, self.config.max_pbo
+            )));
+        }
+
+        if dsr < self.config.min_dsr {
+            return (false, Some(format!(
+                "DSR {:.2} < {:.2}",
+                dsr, self.config.min_dsr
             )));
         }
 
