@@ -204,7 +204,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   fetchStatus: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/status`);
+      const response = await fetch(`${platformConfig.apiBase}/omp/status`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch status');
       const data = await response.json();
       
@@ -227,7 +227,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   fetchStats: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/stats`);
+      const response = await fetch(`${platformConfig.apiBase}/omp/stats`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch stats');
       const data = await response.json();
       set({ stats: data, lastError: null });
@@ -238,7 +238,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   fetchQueue: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/queue`);
+      const response = await fetch(`${platformConfig.apiBase}/omp/queue`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch queue');
       const data = await response.json();
       set({ queue: data, queueLength: data.campaigns?.filter((c: QueuedCampaign) => c.enabled).length || 0, lastError: null });
@@ -253,7 +253,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       const params = new URLSearchParams({ limit: String(limit) });
       if (market) params.append('market', market);
       
-      const response = await fetch(`${platformConfig.apiBase}/omp/hall-of-fame?${params}`);
+      const response = await fetch(`${platformConfig.apiBase}/omp/hall-of-fame?${params}`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch hall of fame');
       const data = await response.json();
       set({ hallOfFame: data.entries || [], hallOfFameLoading: false, lastError: null });
@@ -264,7 +264,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   fetchConfig: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/config`);
+      const response = await fetch(`${platformConfig.apiBase}/omp/config`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch config');
       const data = await response.json();
       set({ config: data, lastError: null });
@@ -279,7 +279,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   start: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/start`, { method: 'POST' });
+      const response = await fetch(`${platformConfig.apiBase}/omp/start`, { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || 'Failed to start');
@@ -294,7 +294,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   stop: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/stop`, { method: 'POST' });
+      const response = await fetch(`${platformConfig.apiBase}/omp/stop`, { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || 'Failed to stop');
@@ -309,7 +309,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   pause: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/pause`, { method: 'POST' });
+      const response = await fetch(`${platformConfig.apiBase}/omp/pause`, { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || 'Failed to pause');
@@ -324,7 +324,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   
   resume: async () => {
     try {
-      const response = await fetch(`${platformConfig.apiBase}/omp/resume`, { method: 'POST' });
+      const response = await fetch(`${platformConfig.apiBase}/omp/resume`, { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || 'Failed to resume');
@@ -347,6 +347,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(campaign),
+        credentials: 'same-origin',
       });
       if (!response.ok) {
         const data = await response.json();
@@ -367,6 +368,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
+        credentials: 'same-origin',
       });
       if (!response.ok) {
         const data = await response.json();
@@ -384,6 +386,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     try {
       const response = await fetch(`${platformConfig.apiBase}/omp/queue/${id}`, {
         method: 'DELETE',
+        credentials: 'same-origin',
       });
       if (!response.ok) {
         const data = await response.json();
