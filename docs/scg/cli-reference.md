@@ -1,7 +1,7 @@
 # CLI Reference - Combiner
 
-**Versão**: 1.1.0  
-**Última Atualização**: 2025-12-29
+**Versão**: 1.2.0  
+**Última Atualização**: 2025-12-30
 
 ## Visão Geral
 

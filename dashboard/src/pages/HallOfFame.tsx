@@ -314,6 +314,27 @@ export function HallOfFame() {
               <p className="text-xs text-slate-500">Total Promoted</p>
             </div>
             <button
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/omp/promote-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ limit: 1000 }),
+                  });
+                  const data = await res.json();
+                  console.log('Promotion check:', data);
+                  if (data.promoted > 0) {
+                    fetchHallOfFame(filter.limit, filter.market === 'all' ? undefined : filter.market);
+                  }
+                } catch (err) {
+                  console.error('Promotion check failed:', err);
+                }
+              }}
+              className="px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              Scan for Promotions
+            </button>
+            <button
               onClick={() => fetchHallOfFame(filter.limit, filter.market === 'all' ? undefined : filter.market)}
               disabled={hallOfFameLoading}
               className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"

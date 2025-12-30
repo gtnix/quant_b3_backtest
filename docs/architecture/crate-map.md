@@ -1,7 +1,7 @@
 # Mapa de Crates
 
-**Versão**: 3.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 3.1.0  
+**Última Atualização**: 2025-12-30
 
 ## Workspace Overview
 

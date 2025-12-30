@@ -150,6 +150,24 @@ export interface PerformanceMetrics {
     backtests_executed: number;
     promotions: number;
   };
+  historical?: {
+    candidates_24h: number;
+    candidates_1h: number;
+    promotions_24h: number;
+    avg_throughput_per_min: number;
+    recent_runs?: Array<{
+      run_id: string;
+      campaign_name: string;
+      status: string;
+      duration_secs: number;
+      evaluations: number;
+    }>;
+    best_candidate_24h?: {
+      candidate_id: string;
+      sharpe: number;
+      cagr: number;
+    } | null;
+  } | null;
 }
 
 export interface OmpState {

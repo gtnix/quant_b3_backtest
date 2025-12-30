@@ -1,0 +1,43 @@
+# US Equities Quick Test Campaign
+# Uso: combiner factory run --campaign configs/campaigns/scg_us_test.toml
+
+[campaign]
+name = "scg_us_test"
+tag = "us-test"
+owner = "omp"
+notes = "Quick test for US equities market"
+
+[dataset]
+market = "US"
+start_date = "2020-01-01"
+end_date = "2024-12-01"
+universe = "sp500"
+
+[evolution]
+population_size = 20
+max_generations = 5
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+
+[seeds]
+count = 1
+base_seed = 42
+
+[budget]
+max_runs = 1
+top_k = 5
+timeout_per_run_secs = 60
+stress_enabled = false
+
+[promotion]
+min_oos_sharpe_net = 0.3
+max_pbo = 0.25
+min_stress_passed = 0
+gates_required = false
+
+[data_integrity]
+mode = "fast"
+enabled = false
+
+

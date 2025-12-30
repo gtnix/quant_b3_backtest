@@ -269,3 +269,4 @@ export function ConfigTrading() {
 
 export default ConfigTrading;
 
+

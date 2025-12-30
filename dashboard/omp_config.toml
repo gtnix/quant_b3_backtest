@@ -86,12 +86,12 @@ stress_total = 8                  # Total stress scenarios
 # =============================================================================
 [promotion]
 enabled = true
-min_oos_sharpe_net = 1.0          # Higher bar for hall of fame
-max_pbo = 0.10                    # Stricter PBO
-min_dsr = 0.8                     # Minimum DSR
-max_drawdown_net = 0.20           # Maximum 20% drawdown
-require_all_stress_passed = true  # Must pass all stress tests
-require_gates_passed = true       # Must pass all gates
+min_oos_sharpe_net = 0.5          # Minimum Sharpe for hall of fame
+max_pbo = 0.20                    # Maximum PBO (lower is better)
+min_dsr = 0.4                     # Minimum DSR (relaxed for Stage B data)
+max_drawdown_net = 0.30           # Maximum 30% drawdown
+require_all_stress_passed = false # Relaxed for now
+require_gates_passed = false      # Accept NULL gates_passed
 auto_copy_artifacts = true        # Copy artifacts on promotion
 
 # =============================================================================

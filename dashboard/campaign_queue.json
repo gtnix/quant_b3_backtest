@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated_at": "2025-12-30T00:00:00Z",
+  "updated_at": "2025-12-30T18:30:00Z",
   "campaigns": [
     {
       "id": "camp_default_br",
@@ -16,13 +16,13 @@
     {
       "id": "camp_default_us",
       "name": "US Equities Explorer",
-      "config_path": "configs/campaigns/scg_quick_test.toml",
+      "config_path": "configs/campaigns/scg_us_test.toml",
       "market": "us",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "repeat": true,
-      "tags": ["us", "equities", "auto"],
-      "created_at": "2025-12-30T00:00:00Z"
+      "tags": ["us", "equities", "sp500", "auto"],
+      "created_at": "2025-12-30T18:30:00Z"
     }
   ]
 }

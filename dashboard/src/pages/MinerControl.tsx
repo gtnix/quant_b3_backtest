@@ -209,14 +209,15 @@ function PerformancePanel() {
       <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
         <div className="flex items-center gap-2 mb-3">
           <Gauge className="w-4 h-4 text-slate-500" />
-          <span className="text-xs font-medium text-slate-400">PERFORMANCE</span>
+          <span className="text-xs font-medium text-slate-400">RUST ENGINE METRICS</span>
         </div>
-        <div className="text-center py-4 text-slate-600 text-sm">No active run</div>
+        <div className="text-center py-4 text-slate-600 text-sm">Loading...</div>
       </div>
     );
   }
   
   const current = performance.current_run;
+  const historical = performance.historical;
   
   return (
     <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
@@ -287,6 +288,71 @@ function PerformancePanel() {
               <div className="text-[10px] text-emerald-500/70 uppercase">Best Sharpe Ratio</div>
             </div>
           )}
+        </div>
+      ) : historical ? (
+        <div className="space-y-4">
+          {/* Historical Throughput */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-bold font-mono text-slate-400">
+                {historical.avg_throughput_per_min.toFixed(1)}
+                <span className="text-sm text-slate-500 ml-1">/min</span>
+              </div>
+              <div className="text-[10px] text-slate-500 uppercase">Avg Throughput (24h)</div>
+            </div>
+            <Sparkline 
+              data={throughputHistory.length > 0 ? throughputHistory : [0, historical.avg_throughput_per_min]} 
+              width={100} 
+              height={30} 
+              color="#64748b"
+              showLastPoint={true}
+            />
+          </div>
+          
+          {/* Historical Metrics Grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-lg font-bold font-mono text-blue-400">
+                {historical.candidates_1h.toLocaleString()}
+              </div>
+              <div className="text-[10px] text-slate-500">CANDIDATES 1H</div>
+            </div>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-lg font-bold font-mono text-violet-400">
+                {historical.candidates_24h.toLocaleString()}
+              </div>
+              <div className="text-[10px] text-slate-500">CANDIDATES 24H</div>
+            </div>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-lg font-bold font-mono text-amber-400">
+                {historical.promotions_24h}
+              </div>
+              <div className="text-[10px] text-slate-500">PROMOTIONS 24H</div>
+            </div>
+            <div className="bg-slate-800/50 rounded p-2">
+              <div className="text-lg font-bold font-mono text-slate-400">
+                {performance.system?.memory_available_mb || '—'}
+              </div>
+              <div className="text-[10px] text-slate-500">MEM AVAIL MB</div>
+            </div>
+          </div>
+          
+          {/* Best Candidate 24h */}
+          {historical.best_candidate_24h && (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-3 text-center">
+              <div className="text-2xl font-bold font-mono text-emerald-400">
+                {historical.best_candidate_24h.sharpe?.toFixed(3) || '—'}
+              </div>
+              <div className="text-[10px] text-emerald-500/70 uppercase">Best Sharpe (24h)</div>
+            </div>
+          )}
+          
+          {/* Idle Status */}
+          <div className="text-center py-2">
+            <span className="px-3 py-1 text-xs bg-slate-800 text-slate-400 rounded-full">
+              Ready to mine
+            </span>
+          </div>
         </div>
       ) : (
         <div className="text-center py-4 text-slate-600 text-sm">

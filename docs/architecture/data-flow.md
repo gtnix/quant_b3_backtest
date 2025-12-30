@@ -1,7 +1,7 @@
 # Fluxo de Dados
 
-**Versão**: 2.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 2.1.0  
+**Última Atualização**: 2025-12-30
 
 ## Visão Geral
 

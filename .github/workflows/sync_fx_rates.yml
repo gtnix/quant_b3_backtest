@@ -1,0 +1,95 @@
+name: Sync FX Rates
+
+on:
+  schedule:
+    # Executa às 21:00 UTC (18:00 BRT) - após fechamento B3
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      sync_type:
+        description: 'Tipo de sync'
+        required: false
+        default: 'update'
+        type: choice
+        options:
+          - update
+          - full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-fx-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests python-dotenv
+      
+      - name: Restore FX cache
+        uses: actions/cache@v4
+        with:
+          path: cache/fx
+          key: fx-data-${{ github.run_id }}
+          restore-keys: |
+            fx-data-
+      
+      - name: Sync FX Rates
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          echo "## FX Rates Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event.inputs.sync_type }}" = "full" ]; then
+            echo "Running full sync..." >> $GITHUB_STEP_SUMMARY
+            python -m datahub_fx sync 2>&1 | tee /tmp/fx_output.log
+          else
+            echo "Running incremental update..." >> $GITHUB_STEP_SUMMARY
+            python -m datahub_fx update 2>&1 | tee /tmp/fx_output.log
+          fi
+      
+      - name: Show Status
+        run: |
+          python -m datahub_fx status
+      
+      - name: Add to Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Sync Output" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/fx_output.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Executed at: $(TZ=America/Sao_Paulo date)" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Save FX cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: cache/fx
+          key: fx-data-${{ github.run_id }}
+      
+      - name: Upload FX data artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fx-rates-${{ github.run_number }}
+          path: cache/fx/
+          retention-days: 30
+
+

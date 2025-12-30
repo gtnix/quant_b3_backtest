@@ -83,10 +83,29 @@ export function ConfigUniverse() {
   
   const handleSave = async () => {
     setSaving(true);
-    // In a real implementation, this would save to the server
-    console.log('Saving market config:', markets);
-    await new Promise(r => setTimeout(r, 500));
-    setSaving(false);
+    try {
+      const response = await fetch('/api/omp/config/markets', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markets }),
+        credentials: 'same-origin',
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to save');
+      }
+      
+      const result = await response.json();
+      console.log('Market config saved:', result);
+      
+      // Refresh config from server
+      fetchConfig();
+    } catch (err) {
+      console.error('Failed to save market config:', err);
+    } finally {
+      setSaving(false);
+    }
   };
   
   return (

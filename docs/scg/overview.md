@@ -1,7 +1,7 @@
 # Sistema Combinador Generativo (SCG) - Overview
 
-**Versão**: 1.1.0  
-**Última Atualização**: 2025-12-29
+**Versão**: 1.2.0  
+**Última Atualização**: 2025-12-30
 
 ## O que é o SCG?
 

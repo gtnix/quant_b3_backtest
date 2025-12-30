@@ -78,3 +78,4 @@ BEGIN
     RAISE NOTICE 'New columns: promotion_class, oos_sharpe_net, pbo, dsr, max_drawdown_net, cagr_net, stress_passed, stress_total, gates_passed, git_sha, config_hash, dataset_hash, market';
 END $$;
 
+

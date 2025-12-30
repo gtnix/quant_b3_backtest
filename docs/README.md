@@ -1,7 +1,7 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.2.0  
-**Última Atualização**: 2025-12-29  
+**Versão**: 3.3.0  
+**Última Atualização**: 2025-12-30  
 **Status**: Produção (VPS + Neon)
 
 ---
@@ -114,8 +114,9 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 ### Para Engenheiros de Dados
 
 1. [Documentação de Dados](data/README.md)
-2. [Provider Due Diligence](data/provider-due-diligence.md)
-3. [US DataHub Status](data/us-datahub-status.md)
+2. **[Data Providers Policy](data/data-providers-policy.md)** ← Política oficial
+3. [Provider Due Diligence](data/provider-due-diligence.md)
+4. [US DataHub Status](data/us-datahub-status.md)
 
 ### Para Operações/DevOps
 

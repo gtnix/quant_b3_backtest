@@ -49,3 +49,4 @@ jobs:
           curl -sf http://${{ secrets.VPS_IP }}/health || exit 1
           echo "Health check passed!"
 
+

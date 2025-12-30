@@ -1,7 +1,7 @@
 # Catálogo de Blocos
 
-**Versão**: 2.0.0  
-**Última Atualização**: 2025-12-28  
+**Versão**: 2.1.0  
+**Última Atualização**: 2025-12-30  
 **Geração**: Este documento deve ser gerado do código
 
 > **Nota**: Este documento deve ser regenerado sempre que blocos forem adicionados ou modificados.

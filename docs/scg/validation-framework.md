@@ -1,7 +1,7 @@
 # Framework de Validação - SCG
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 1.1.0  
+**Última Atualização**: 2025-12-30
 
 ## Motivação
 
