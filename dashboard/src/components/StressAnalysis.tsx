@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { config } from '../lib/platform';
 import { 
   RefreshCw,
   AlertTriangle,
@@ -57,7 +58,7 @@ export function StressAnalysis({ candidateId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`http://localhost:3001/api/candidate/${candidateId}/stress`);
+      const response = await fetch(`${config.apiBase}/candidate/${candidateId}/stress`);
       if (response.ok) {
         const result = await response.json();
         setData(result);

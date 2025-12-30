@@ -12,6 +12,7 @@ import { WFAAnalysis } from '../components/WFAAnalysis';
 import { StressAnalysis } from '../components/StressAnalysis';
 import { RiskDecomposition } from '../components/RiskDecomposition';
 import { useDataStore } from '../stores/dataStore';
+import { config } from '../lib/platform';
 import type { MonthlyReturn, RollingPoint, CandidateSummary } from '../stores/dataStore';
 import { 
   Play, 
@@ -211,7 +212,7 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   const loadRecentCandidates = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/candidates/recent?limit=20');
+      const response = await fetch(`${config.apiBase}/candidates/recent?limit=20`);
       if (response.ok) {
         const data = await response.json();
         setCandidates(data.candidates || []);
@@ -430,7 +431,7 @@ export function Backtest() {
   const loadSimulatedEquity = async (candidateId: string) => {
     setLoadingSimulated(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/candidate/${candidateId}/simulated-equity?days=504`);
+      const response = await fetch(`${config.apiBase}/candidate/${candidateId}/simulated-equity?days=504`);
       if (response.ok) {
         const data = await response.json();
         setSimulatedData(data);
@@ -446,7 +447,7 @@ export function Backtest() {
   const handleSelectCandidate = useCallback(async (candidate: RecentCandidate) => {
     // Fetch full candidate detail
     try {
-      const response = await fetch(`http://localhost:3001/api/candidate/${candidate.candidate_id}`);
+      const response = await fetch(`${config.apiBase}/candidate/${candidate.candidate_id}`);
       if (response.ok) {
         const fullCandidate = await response.json();
         setSelectedCandidate(fullCandidate);

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { config } from '../lib/platform';
 import { 
   Database, 
   Activity, 
@@ -77,7 +78,7 @@ export function StrategyPipeline({ candidateId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`http://localhost:3001/api/candidate/${candidateId}/pipeline`);
+      const response = await fetch(`${config.apiBase}/candidate/${candidateId}/pipeline`);
       if (response.ok) {
         const data = await response.json();
         setPipeline(data);

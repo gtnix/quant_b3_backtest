@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { config } from '../lib/platform';
 import { 
   RefreshCw,
   TrendingUp,
@@ -57,7 +58,7 @@ export function WFAAnalysis({ candidateId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`http://localhost:3001/api/candidate/${candidateId}/wfa`);
+      const response = await fetch(`${config.apiBase}/candidate/${candidateId}/wfa`);
       if (response.ok) {
         const result = await response.json();
         setData(result);
