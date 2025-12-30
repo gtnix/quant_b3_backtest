@@ -1,70 +1,96 @@
-# Dashboard Tauri - Documentação Técnica
+# Dashboard - Documentação Técnica
 
-**Versão**: 2.0.0  
-**Última Atualização**: 2025-12-28  
-**Framework**: Tauri 2.x + React 18 + TypeScript
+**Versão**: 3.0.0  
+**Última Atualização**: 2025-12-29  
+**Framework**: Tauri 2.x / Express + React 18 + TypeScript
 
 ---
 
 ## Visão Geral
 
-O Dashboard é uma aplicação desktop institucional para visualização de estratégias quantitativas, construída com estética de terminal de trading NYC.
+O Dashboard é uma aplicação institucional para visualização e controle de estratégias quantitativas, com estética de terminal de trading NYC.
+
+### Modos de Execução
+
+| Modo | Framework | Backend | Uso |
+|------|-----------|---------|-----|
+| **Desktop** | Tauri 2.x | Rust + Filesystem | Produção local |
+| **Browser** | Express | Node.js + Neon DB | Desenvolvimento/Demo |
 
 ### Características
 
 - **Terminal Theme** - Background escuro, cores neon, tipografia monospace
-- **Rust Backend** - Leitura eficiente de artefatos via Tauri commands
+- **Dual Mode** - Funciona em Tauri (desktop) ou Browser (API server)
+- **Unified Command Layer** - Abstração única para ambos os modos
 - **State Management** - Zustand com cache LRU
-- **Real-time Updates** - File watcher para hot-reload de dados
-- **Browser Fallback** - Mock data para desenvolvimento sem Tauri
+- **Real-time Updates** - Tauri Events ou SSE (Server-Sent Events)
+- **Neon Integration** - PostgreSQL na nuvem para browser mode
 
 ---
 
 ## Arquitetura
 
+### Desktop Mode (Tauri)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      TAURI APPLICATION                           │
+│                      TAURI APPLICATION                          │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                    REACT FRONTEND                           │ │
-│  │                                                              │ │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │ │
-│  │  │ Pages   │  │ Charts  │  │ UI Comp │  │ Stores  │        │ │
-│  │  │         │  │         │  │         │  │         │        │ │
-│  │  │Campaign │  │Equity   │  │MetricCard│ │dataStore│        │ │
-│  │  │Candidate│  │Drawdown │  │DataTable │ │         │        │ │
-│  │  │Backtest │  │Rolling  │  │          │ │         │        │ │
-│  │  │Risk     │  │VaR      │  │          │ │         │        │ │
-│  │  │Compare  │  │Heatmap  │  │          │ │         │        │ │
-│  │  │WFA      │  │Pareto   │  │          │ │         │        │ │
-│  │  │Monte    │  │Distrib  │  │          │ │         │        │ │
-│  │  │Regimes  │  │         │  │          │ │         │        │ │
-│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        │ │
-│  │       │            │            │            │              │ │
-│  │       └────────────┴────────────┴────────────┘              │ │
-│  │                           │                                  │ │
-│  │                    invoke() / listen()                       │ │
-│  └───────────────────────────┼──────────────────────────────────┘ │
-│                              │                                    │
-│  ┌───────────────────────────┴──────────────────────────────────┐ │
-│  │                    RUST BACKEND                              │ │
-│  │                                                               │ │
-│  │  ┌─────────────────────────────────────────────────────────┐ │ │
-│  │  │               ArtifactState (Managed State)              │ │ │
-│  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │ │ │
-│  │  │  │ SiteIndex   │  │ Campaigns   │  │ Candidates      │  │ │ │
-│  │  │  │ (Option)    │  │ (HashMap)   │  │ (LRU Cache)     │  │ │ │
-│  │  │  └─────────────┘  └─────────────┘  └─────────────────┘  │ │ │
-│  │  └─────────────────────────────────────────────────────────┘ │ │
-│  │                                                               │ │
-│  │  Commands: set_artifacts_root, load_index, load_campaign,    │ │
-│  │            load_run, list_candidates_v2, load_candidate_detail│ │
-│  │            load_backtest_series, watch_artifacts             │ │
-│  └───────────────────────────────────────────────────────────────┘ │
-│                                                                    │
-└────────────────────────────────────────────────────────────────────┘
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    REACT FRONTEND                           ││
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        ││
+│  │  │ Pages   │  │ Charts  │  │ UI Comp │  │ Stores  │        ││
+│  │  │Cockpit  │  │Equity   │  │MetricCard│ │cockpit  │        ││
+│  │  │Campaign │  │Drawdown │  │DataTable │ │dataStore│        ││
+│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        ││
+│  │       └────────────┴────────────┴────────────┘              ││
+│  │                           │                                  ││
+│  │                    lib/commands.ts                           ││
+│  │                    invoke() / listen()                       ││
+│  └───────────────────────────┼──────────────────────────────────┘│
+│                              │                                   │
+│  ┌───────────────────────────┴──────────────────────────────────┐│
+│  │                    RUST BACKEND (src-tauri)                  ││
+│  │  ArtifactState, SCG Control, File Watcher                    ││
+│  └───────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    Local Filesystem (artifacts/)
+```
+
+### Browser Mode (Express + Neon)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    BROWSER APPLICATION                          │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    REACT FRONTEND                           ││
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        ││
+│  │  │ Pages   │  │ Charts  │  │ UI Comp │  │ Stores  │        ││
+│  │  │Cockpit  │  │Equity   │  │MetricCard│ │cockpit  │        ││
+│  │  │Campaign │  │Drawdown │  │DataTable │ │dataStore│        ││
+│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        ││
+│  │       └────────────┴────────────┴────────────┘              ││
+│  │                           │                                  ││
+│  │                    lib/commands.ts                           ││
+│  │                    fetch() + SSE                             ││
+│  └───────────────────────────┼──────────────────────────────────┘│
+└──────────────────────────────┼──────────────────────────────────┘
+                               │ HTTP + SSE
+┌──────────────────────────────┴──────────────────────────────────┐
+│                    EXPRESS API SERVER                            │
+│                       server.js                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │  REST Endpoints │  │  SSE Events     │  │  SCG Control    │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
+└──────────────────────────────┼──────────────────────────────────┘
+                               │
+          ┌────────────────────┴────────────────────┐
+          ▼                                         ▼
+   Local Filesystem                          Neon PostgreSQL
+    (artifacts/)                               (cloud DB)
 ```
 
 ---
@@ -80,59 +106,65 @@ dashboard/
 │   │
 │   ├── components/
 │   │   ├── layout/
-│   │   │   ├── Sidebar.tsx       # Navegação agrupada (Core/Analytics/System)
+│   │   │   ├── Sidebar.tsx       # Navegação agrupada
 │   │   │   └── Header.tsx        # Clock, refresh, alerts
 │   │   │
-│   │   ├── charts/
-│   │   │   ├── EquityChart.tsx         # Recharts Line
-│   │   │   ├── DrawdownChart.tsx       # Recharts Area
-│   │   │   ├── GenerationChart.tsx     # Evolution progress
-│   │   │   ├── ParetoChart.tsx         # Scatter plot
-│   │   │   ├── ReturnDistribution.tsx  # Histogram + normal
-│   │   │   ├── MonthlyHeatmap.tsx      # Calendar heatmap
-│   │   │   ├── RollingMetrics.tsx      # Rolling Sharpe/Vol
-│   │   │   ├── VaRGauge.tsx            # VaR/CVaR visual
-│   │   │   ├── WalkForwardChart.tsx    # IS/OOS bars
-│   │   │   ├── CorrelationMatrix.tsx   # Strategy correlation
-│   │   │   └── DistributionFan.tsx     # Monte Carlo bands
+│   │   ├── charts/               # Recharts + D3
+│   │   │   ├── EquityChart.tsx
+│   │   │   ├── DrawdownChart.tsx
+│   │   │   ├── GenerationChart.tsx
+│   │   │   └── ...
 │   │   │
 │   │   ├── ui/
-│   │   │   ├── MetricCard.tsx    # KPI card component
-│   │   │   └── DataTable.tsx     # Sortable, scrollable table
+│   │   │   ├── MetricCard.tsx
+│   │   │   ├── DataTable.tsx
+│   │   │   ├── TooltipInfo.tsx   # Info tooltips
+│   │   │   └── BloombergTooltip.tsx
 │   │   │
-│   │   ├── AlertsPanel.tsx       # Notifications panel
-│   │   ├── CandidateDetail.tsx   # Candidate drawer
-│   │   └── ExportModal.tsx       # Export dialog
+│   │   ├── GlossaryOverlay.tsx   # Glossário de termos
+│   │   ├── StrategyPipeline.tsx  # Visualização de blocos
+│   │   └── ...
 │   │
 │   ├── pages/
-│   │   ├── Campaigns.tsx         # Project/run browser
-│   │   ├── Candidates.tsx        # Strategy candidate table
+│   │   ├── Cockpit.tsx           # SCG control panel (NEW)
+│   │   ├── Campaigns.tsx         # Campaign browser
+│   │   ├── Candidates.tsx        # Candidate table
 │   │   ├── Backtest.tsx          # Backtest drilldown
-│   │   ├── RiskAnalytics.tsx     # VaR, distribution, rolling
-│   │   ├── StrategyComparison.tsx# Multi-strategy compare
-│   │   ├── WalkForward.tsx       # Walk-forward validation
+│   │   ├── RiskAnalytics.tsx     # VaR, distribution
+│   │   ├── StrategyComparison.tsx# Multi-compare
+│   │   ├── WalkForward.tsx       # WFA visualization
 │   │   ├── MonteCarlo.tsx        # Bootstrap simulation
-│   │   ├── RegimeAnalysis.tsx    # Market regime analysis
-│   │   ├── Evolution.tsx         # GA evolution monitor
+│   │   ├── RegimeAnalysis.tsx    # Market regimes
+│   │   ├── Evolution.tsx         # GA monitor
 │   │   └── Dashboard.tsx         # System overview
 │   │
 │   ├── stores/
-│   │   └── dataStore.ts          # Zustand state + Tauri commands
+│   │   ├── cockpitStore.ts       # SCG run control (NEW)
+│   │   └── dataStore.ts          # Artifact navigation
+│   │
+│   ├── config/
+│   │   └── defaults.ts           # Cockpit presets/gates
 │   │
 │   └── lib/
-│       └── utils.ts              # Formatting utilities
+│       ├── commands.ts           # Unified command layer
+│       ├── platform.ts           # Mode detection
+│       ├── ranking.ts            # Candidate ranking
+│       └── utils.ts              # Formatters
 │
-├── src-tauri/                    # Rust backend
-│   ├── Cargo.toml                # Dependencies
-│   ├── tauri.conf.json           # App configuration
-│   └── src/
-│       └── lib.rs                # Tauri commands (1080 lines)
+├── server.js                     # Express API server (Browser Mode)
 │
-├── index.html                    # HTML entry with loading screen
-├── tailwind.config.js            # Terminal theme configuration
-├── vite.config.ts                # Vite configuration
-├── package.json                  # NPM scripts
-└── README.md                     # Quick start guide
+├── src-tauri/                    # Rust backend (Desktop Mode)
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   └── src/lib.rs
+│
+├── netlify/                      # Netlify deployment
+│   └── functions/
+│
+├── index.html
+├── tailwind.config.js
+├── vite.config.ts
+└── package.json
 ```
 
 ---
@@ -143,196 +175,195 @@ dashboard/
 
 | Page | Componente | Descrição |
 |------|------------|-----------|
-| **Campaigns** | `Campaigns.tsx` | Seleção de pasta de artefatos, browse de campanhas e runs |
-| **Candidates** | `Candidates.tsx` | Tabela de candidatos com filtros, multi-select para comparação |
-| **Backtest** | `Backtest.tsx` | Equity curve, drawdown, métricas detalhadas do backtest |
+| **Cockpit** | `Cockpit.tsx` | Painel de controle para SCG runs |
+| **Campaigns** | `Campaigns.tsx` | Browser de campanhas e runs |
+| **Candidates** | `Candidates.tsx` | Tabela de candidatos com filtros |
+| **Backtest** | `Backtest.tsx` | Equity curve, drawdown, métricas |
 
 ### Analytics Pages
 
 | Page | Componente | Descrição |
 |------|------------|-----------|
-| **Risk Analytics** | `RiskAnalytics.tsx` | VaR, CVaR, Sortino, Calmar, rolling metrics, distribuição |
-| **Comparison** | `StrategyComparison.tsx` | Comparação lado-a-lado, matriz de correlação, equity combinado |
-| **Walk-Forward** | `WalkForward.tsx` | Janelas IS/OOS, degradation ratio, consistency score |
-| **Monte Carlo** | `MonteCarlo.tsx` | Bootstrap simulation, bandas de confiança, distribuições |
-| **Regimes** | `RegimeAnalysis.tsx` | Detecção de regimes, performance por regime |
+| **Risk Analytics** | `RiskAnalytics.tsx` | VaR, CVaR, Sortino, rolling |
+| **Comparison** | `StrategyComparison.tsx` | Multi-strategy compare |
+| **Walk-Forward** | `WalkForward.tsx` | IS/OOS validation |
+| **Monte Carlo** | `MonteCarlo.tsx` | Bootstrap simulation |
+| **Regimes** | `RegimeAnalysis.tsx` | Regime detection |
 
 ### System Pages
 
 | Page | Componente | Descrição |
 |------|------------|-----------|
-| **Evolution** | `Evolution.tsx` | Monitor de evolução do algoritmo genético |
-| **Dashboard** | `Dashboard.tsx` | KPIs do sistema, status geral |
+| **Evolution** | `Evolution.tsx` | GA evolution monitor |
+| **Dashboard** | `Dashboard.tsx` | System overview |
 
 ---
 
-## Componentes de Charts
+## Cockpit - Controle SCG
 
-### Recharts-based
+O Cockpit é o painel central para orquestração de runs do SCG. Ver [cockpit.md](cockpit.md) para documentação completa.
 
-| Componente | Tipo | Uso |
-|------------|------|-----|
-| `EquityChart` | LineChart | Equity curve do backtest |
-| `DrawdownChart` | AreaChart | Visualização de drawdown |
-| `GenerationChart` | ComposedChart | Estatísticas por geração |
-| `ParetoChart` | ScatterChart | Fronteira de Pareto |
-| `RollingMetrics` | LineChart | Sharpe/volatilidade rolling |
-| `VaRGauge` | Custom | Gauge de VaR/CVaR |
-| `ReturnDistribution` | BarChart | Histograma de retornos |
-| `MonthlyHeatmap` | Custom SVG | Heatmap de retornos mensais |
-| `CorrelationMatrix` | Custom SVG | Matriz de correlação |
-| `WalkForwardChart` | BarChart | Barras IS/OOS por janela |
-| `DistributionFan` | AreaChart | Bandas de confiança Monte Carlo |
+### Funcionalidades
+
+- **Presets**: Rapid (3min), Institutional (15min), Exhaustive (1h)
+- **Compute Budget**: Time slider, workers/intensidade
+- **Risk Gates**: Sharpe mínimo, PBO máximo, stress tests
+- **Ranking Methods**: Institutional, Pareto, Sharpe, Risk-Adjusted
+- **Live Progress**: Geração, Sharpe, candidatos
+- **Top Strategies**: Tabela rankeada com drilldown
+
+### cockpitStore
+
+```typescript
+interface CockpitState {
+  // Configuration
+  config: CockpitConfig;
+  viewMode: 'basic' | 'advanced';
+  rankingMethod: RankingMethodKey;
+  
+  // Run state
+  runStatus: RunStatus;
+  currentRunId: string | null;
+  progress: RunProgress | null;
+  
+  // Results
+  topCandidates: RankedCandidate[];
+  selectedCandidateId: string | null;
+  
+  // Actions
+  setPreset: (preset: PresetKey) => void;
+  startRun: () => Promise<void>;
+  stopRun: () => Promise<void>;
+  loadTopCandidates: (runId: string) => Promise<void>;
+}
+```
 
 ---
 
-## State Management (Zustand)
+## Unified Command Layer
 
-### Store Structure
+A camada `lib/commands.ts` abstrai diferenças entre Tauri e Browser:
+
+```typescript
+import { cmd } from './lib/commands';
+
+// Funciona igual em ambos os modos
+const index = await cmd.loadIndex();
+const candidates = await cmd.listCandidates(runId);
+await cmd.startScgRun(config);
+```
+
+### API Disponível
+
+| Comando | Descrição |
+|---------|-----------|
+| `loadIndex()` | Carrega índice de campanhas |
+| `loadCampaign(id)` | Carrega detalhes da campanha |
+| `loadRun(id)` | Carrega detalhes do run |
+| `listCandidates(runId, opts)` | Lista candidatos com filtros |
+| `loadCandidateDetail(id)` | Carrega detalhes do candidato |
+| `loadBacktestSeries(id)` | Carrega timeseries do backtest |
+| `startScgRun(config)` | Inicia SCG run |
+| `stopScgRun(runId)` | Para SCG run |
+| `getRunStatus(runId)` | Obtém progresso do run |
+
+---
+
+## Platform Detection
+
+```typescript
+import { platform, capabilities } from './lib/platform';
+
+// Detecção
+platform.isTauri    // true se Tauri desktop
+platform.isBrowser  // true se browser mode
+platform.isDev      // true se desenvolvimento
+
+// Capabilities
+capabilities.nativeDialog   // Diálogos nativos
+capabilities.directFS       // Acesso ao filesystem
+capabilities.realTimeUpdates // Updates em tempo real
+```
+
+---
+
+## Browser Mode - API Server
+
+O `server.js` fornece uma API REST para browser mode. Ver [api-server.md](api-server.md) para referência completa.
+
+### Endpoints Principais
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/api/index` | GET | Índice de campanhas |
+| `/api/campaign/:id` | GET | Detalhes da campanha |
+| `/api/candidates/:runId` | GET | Lista candidatos |
+| `/api/candidate/:id` | GET | Detalhes do candidato |
+| `/api/backtest/:id` | GET | Timeseries do backtest |
+| `/api/scg/start` | POST | Inicia SCG run |
+| `/api/scg/progress/:id` | GET | Progresso do run |
+| `/api/events` | GET | SSE stream |
+
+### Executar
+
+```bash
+cd dashboard
+node server.js      # API em http://localhost:3001
+npm run dev         # Frontend em http://localhost:5173
+```
+
+---
+
+## Real-time Updates
+
+### Tauri Mode
+
+```typescript
+import { listen } from '@tauri-apps/api/event';
+
+await listen('scg-progress', (event) => {
+  console.log('Progress:', event.payload);
+});
+```
+
+### Browser Mode (SSE)
+
+```typescript
+import { createSSEConnection } from './lib/commands';
+
+const sse = createSSEConnection((event) => {
+  if (event.type === 'scg-progress') {
+    console.log('Progress:', event);
+  }
+});
+```
+
+---
+
+## State Management
+
+### Stores
+
+| Store | Arquivo | Responsabilidade |
+|-------|---------|------------------|
+| `cockpitStore` | `cockpitStore.ts` | SCG run control |
+| `dataStore` | `dataStore.ts` | Artifact navigation |
+
+### dataStore
 
 ```typescript
 interface DataState {
-  // Artifacts root
   artifactsRoot: string | null;
-  
-  // Site index & navigation
   siteIndex: SiteIndex | null;
   campaigns: CampaignSummary[];
   selectedCampaign: CampaignDetail | null;
-  runs: RunSummary[];
-  selectedRun: RunDetail | null;
-  
-  // Candidates
   candidates: CandidateListItem[];
   selectedCandidate: CandidateDetailFull | null;
-  candidateFilters: CandidateFilters;
-  selectedCandidateIds: string[];  // For comparison
-  
-  // Backtest
   backtest: BacktestResult | null;
-  
-  // Advanced Analytics
-  riskMetrics: RiskMetrics | null;
-  comparisonResult: ComparisonResult | null;
-  walkForwardResult: WalkForwardResult | null;
-  monteCarloResult: MonteCarloResult | null;
-  regimeAnalysis: RegimeAnalysis | null;
-  
-  // UI State
   isLoading: boolean;
   error: string | null;
-  selectedRunId: string | null;
 }
 ```
-
-### Actions
-
-```typescript
-// Artifact Indexer
-setArtifactsRoot: (path: string) => Promise<void>;
-loadIndex: () => Promise<void>;
-loadCampaign: (campaignId: string) => Promise<void>;
-loadRun: (runId: string) => Promise<void>;
-listCandidates: (runId: string, filters?) => Promise<void>;
-loadCandidateDetail: (candidateId: string) => Promise<void>;
-loadBacktest: (candidateId: string) => Promise<void>;
-
-// Multi-select
-toggleCandidateSelection: (candidateId: string) => void;
-clearCandidateSelection: () => void;
-
-// Advanced Analytics
-loadRiskMetrics: (candidateId: string) => Promise<void>;
-compareCandidates: (candidateIds: string[]) => Promise<void>;
-loadWalkForward: (candidateId: string, windowMonths?, stepMonths?) => Promise<void>;
-runMonteCarlo: (candidateId: string, numSimulations?, blockSize?) => Promise<void>;
-detectRegimes: (candidateId: string, volThreshold?) => Promise<void>;
-
-// File Watcher
-startWatcher: () => Promise<void>;
-invalidateCache: () => Promise<void>;
-```
-
----
-
-## Rust Backend (Tauri Commands)
-
-### Tipos Principais
-
-```rust
-// Site index
-pub struct SiteIndex {
-    pub schema_version: String,
-    pub generated_at: String,
-    pub campaigns: Vec<CampaignSummary>,
-}
-
-// Campaign summary
-pub struct CampaignSummary {
-    pub campaign_id: String,
-    pub name: String,
-    pub tag: String,
-    pub status: String,
-    pub runs_count: u32,
-    pub created_at: String,
-}
-
-// Run detail
-pub struct RunDetail {
-    pub schema_version: String,
-    pub run: RunInfo,
-    pub metrics: RunMetrics,
-    pub top_candidates: Vec<TopCandidateEntry>,
-    pub exports: RunExports,
-}
-
-// Candidate detail
-pub struct CandidateDetailFull {
-    pub candidate_id: String,
-    pub display_name: String,
-    pub candidate_class: String,
-    pub strategy_blocks: Vec<PipelineBlock>,
-    pub strategy_toml: Option<String>,
-    pub oos_sharpe_net: Option<f64>,
-    pub pbo: Option<f64>,
-    pub dsr: Option<f64>,
-    // ...
-}
-
-// Backtest result
-pub struct BacktestResult {
-    pub available: bool,
-    pub candidate_id: String,
-    pub timeseries: Vec<TimeseriesPoint>,
-    pub metrics: Option<BacktestMetrics>,
-}
-```
-
-### Cache Strategy
-
-```rust
-pub struct ArtifactCache {
-    pub artifacts_root: PathBuf,
-    pub index: Option<SiteIndex>,           // Single cached index
-    pub campaigns: HashMap<String, CampaignDetail>,  // Campaign cache
-    pub runs: HashMap<String, RunDetail>,            // Run cache
-    pub candidates: LruCache<String, CandidateDetailFull>,  // LRU(100)
-}
-```
-
-### Commands API
-
-| Command | Input | Output |
-|---------|-------|--------|
-| `set_artifacts_root` | `path: String` | `String` |
-| `load_index` | - | `SiteIndex` |
-| `load_campaign` | `campaignId: String` | `CampaignDetail` |
-| `load_run` | `runId: String` | `RunDetail` |
-| `list_candidates_v2` | `runId, search?, candidateClass?, maxPbo?, limit?` | `Vec<CandidateListItem>` |
-| `load_candidate_detail` | `candidateId: String` | `CandidateDetailFull` |
-| `load_backtest_series` | `candidateId: String` | `BacktestResult` |
-| `invalidate_cache` | - | `()` |
-| `watch_artifacts` | - | `()` |
 
 ---
 
@@ -361,16 +392,6 @@ pub struct ArtifactCache {
 | Headings | Inter | 600-700 |
 | Body | Inter | 400-500 |
 | Data/Numbers | JetBrains Mono | 400-500 |
-| Code | JetBrains Mono | 400 |
-
-### Classes CSS
-
-```css
-.card { @apply bg-terminal-surface border border-terminal-border rounded-lg p-4; }
-.card-elevated { @apply bg-terminal-surface border border-terminal-border rounded-lg p-4 shadow-lg; }
-.metric-label { @apply text-sm text-terminal-muted uppercase tracking-wide; }
-.metric-value { @apply text-2xl font-mono font-semibold; }
-```
 
 ---
 
@@ -379,10 +400,10 @@ pub struct ArtifactCache {
 ### Pré-requisitos
 
 - Node.js 18+
-- Rust 1.77+
-- Tauri CLI 2.x
+- Rust 1.77+ (para Tauri)
+- Tauri CLI 2.x (para desktop)
 
-### Setup
+### Desktop Mode
 
 ```bash
 cd dashboard
@@ -390,69 +411,52 @@ npm install
 npm run tauri dev
 ```
 
-### Build
+### Browser Mode
+
+```bash
+cd dashboard
+npm install
+node server.js &     # Terminal 1: API
+npm run dev          # Terminal 2: Frontend
+```
+
+### Build Desktop
 
 ```bash
 npm run tauri build
 ```
 
-### Browser Mode
-
-Para desenvolvimento sem Tauri:
+### Deploy Netlify
 
 ```bash
-npm run dev  # Usa mock data automaticamente
-```
-
-O store detecta se está rodando em Tauri:
-
-```typescript
-const isTauri = () => '__TAURI__' in window;
+npm run build
+netlify deploy --prod
 ```
 
 ---
 
-## Integração com SCG
+## Integração com Neon DB
 
-O dashboard consome os artefatos gerados pelo Strategy Factory:
+O browser mode usa Neon PostgreSQL para persistência:
 
-```
-artifacts/
-├── site/           # Índices para navegação
-├── candidates/     # Bundles de candidatos
-├── top_candidates/ # Exports CSV/JSON
-└── backtests/      # Timeseries
+### Variável de Ambiente
+
+```bash
+DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
 ```
 
-Ver [Artefatos de Output](../operations/artifacts.md) para detalhes do schema.
+### Tabelas Utilizadas
+
+| Tabela | Descrição |
+|--------|-----------|
+| `scg_campaigns` | Campanhas registradas |
+| `scg_runs` | Runs de cada campanha |
+| `scg_candidates` | Candidatos descobertos |
 
 ---
 
-## Eventos do Frontend
+## Documentação Relacionada
 
-Navegação entre páginas via CustomEvents:
-
-```typescript
-// Navegar para outra página
-window.dispatchEvent(new CustomEvent('navigate', { detail: 'candidates' }));
-
-// File watcher event
-await listen<{ paths: string[] }>('artifacts_changed', (event) => {
-  // Refresh data
-});
-```
-
----
-
-## Roadmap
-
-- [ ] Three.js 3D Pareto visualization
-- [ ] WebSocket para real-time updates durante evolução
-- [ ] Export PDF de relatórios
-- [ ] Dark/Light theme toggle
-- [ ] Keyboard shortcuts
-- [ ] Strategy replay com visualização tick-by-tick
-
-
-
-
+- [Cockpit](cockpit.md) - Painel de controle SCG
+- [API Server](api-server.md) - Referência da API REST
+- [Artefatos](../operations/artifacts.md) - Estrutura de output

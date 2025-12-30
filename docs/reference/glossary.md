@@ -1,7 +1,7 @@
 # Glossário
 
-**Versão**: 2.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 2.1.0  
+**Última Atualização**: 2025-12-29
 
 ## Termos Técnicos
 
@@ -23,11 +23,15 @@
 
 **BlockRegistry**: Registro que mapeia block_id para implementações de StrategyBlock.
 
+**Browser Mode**: Modo de execução do Dashboard via navegador web, usando API Server (Express) + Neon PostgreSQL. Alternativa ao Desktop Mode (Tauri).
+
 ### C
 
 **CAGR (Compound Annual Growth Rate)**: Retorno anualizado composto. Fórmula: `(end/start)^(1/years) - 1`.
 
 **Calmar Ratio**: CAGR dividido pelo máximo drawdown (absoluto).
+
+**Cockpit**: Painel de controle do Dashboard para orquestração de runs SCG. Permite configurar presets, gates, ranking methods e monitorar progresso em tempo real.
 
 **Compositor**: Executor de pipeline de estratégia que encadeia blocks.
 
@@ -40,6 +44,8 @@
 **Dividend**: Pagamento de proventos por ação. Creditado no ex-date.
 
 **Drawdown**: Queda do equity em relação ao pico histórico (high-water mark).
+
+**DSR (Deflated Sharpe Ratio)**: Sharpe Ratio ajustado para múltiplas comparações. Penaliza estratégias testadas muitas vezes. Valores >1.0 indicam edge estatístico genuíno.
 
 **DualPriceBar**: Estrutura com preços adjusted e raw para a mesma data.
 
@@ -62,6 +68,8 @@
 **FxPair**: Par de moedas (base/quote). USD/BRL = 5.50 significa 1 USD = 5.50 BRL.
 
 ### G
+
+**Gates**: Thresholds de validação configuráveis no Cockpit (minOosSharpeNet, maxPbo, minStressPassed). Estratégias que não passam nos gates são filtradas.
 
 **Gating**: Filtros aplicados antes de um ativo ser considerado candidato.
 
@@ -99,11 +107,15 @@
 
 ### P
 
+**PBO (Probability of Backtest Overfitting)**: Probabilidade de uma estratégia ter performado bem por sorte. Valores ≤0.15 indicam baixo risco de overfitting. Calculado via Combinatorially Symmetric Cross-Validation.
+
 **Pipeline**: Sequência de blocks executados em ordem.
 
 **PolicyViolation**: Erro retornado quando configuração viola política (ex: anti-double-count).
 
 **Prealloc**: Buffers pré-alocados para evitar alocações no hot path.
+
+**Preset**: Perfil de configuração pré-definido no Cockpit. Tipos: Rapid (3min debug), Institutional (15min produção), Exhaustive (1h exploração máxima).
 
 **Profit Factor**: Lucro bruto dividido por perda bruta.
 
@@ -126,6 +138,8 @@
 **SoA (Structure of Arrays)**: Layout de dados onde cada campo é um array separado. Eficiente para cache.
 
 **Sortino Ratio**: Similar a Sharpe, mas usa apenas downside volatility.
+
+**SSE (Server-Sent Events)**: Protocolo HTTP para streaming unidirecional server→client. Usado no Browser Mode para atualizações em tempo real de progresso do SCG.
 
 **Strict Mode**: Modo que falha o run se invariantes forem violadas.
 
@@ -189,14 +203,20 @@
 | CAGR | Compound Annual Growth Rate |
 | CLI | Command Line Interface |
 | DSL | Domain Specific Language |
+| DSR | Deflated Sharpe Ratio |
 | EOD | End of Day |
 | FX | Foreign Exchange |
 | HHI | Herfindahl-Hirschman Index |
 | LOCF | Last Observation Carried Forward |
 | NAV | Net Asset Value |
 | OHLCV | Open, High, Low, Close, Volume |
+| OOS | Out-of-Sample |
+| PBO | Probability of Backtest Overfitting |
 | PnL | Profit and Loss |
+| SCG | Sistema Combinador Generativo |
 | SoA | Structure of Arrays |
+| SSE | Server-Sent Events |
+| WFA | Walk-Forward Analysis |
 
 
 

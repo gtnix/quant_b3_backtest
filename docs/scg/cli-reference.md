@@ -1,11 +1,13 @@
 # CLI Reference - Combiner
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 1.1.0  
+**Última Atualização**: 2025-12-29
 
 ## Visão Geral
 
 O `combiner` CLI fornece comandos para execução de evolução genética, validação de estratégias, e orquestração de campanhas via Strategy Factory.
+
+O SCG também pode ser controlado via **Dashboard Cockpit** - ver [Cockpit Documentation](../dashboard/cockpit.md).
 
 ```bash
 combiner <COMMAND> [OPTIONS]
@@ -440,6 +442,43 @@ min_stress_pass = 4
 | `NEON_DATABASE_URL` | Connection string PostgreSQL (Strategy Factory) |
 | `FACTORY_JSON_LOGS` | Ativar logs JSON estruturados |
 | `RUST_LOG` | Nível de log (combiner=info, combiner=debug) |
+
+---
+
+## Dashboard Cockpit
+
+O SCG pode ser controlado via Dashboard Cockpit, que fornece uma interface gráfica para:
+
+- **Presets** - Configurações pré-definidas (Rapid, Institutional, Exhaustive)
+- **Compute Budget** - Controle de tempo e workers
+- **Risk Gates** - Thresholds de validação configuráveis
+- **Ranking** - Métodos de ordenação de candidatos
+- **Live Progress** - Monitoramento em tempo real
+- **Results** - Tabela de top strategies
+
+### Equivalência CLI ↔ Cockpit
+
+| Cockpit Preset | Equivalente CLI |
+|----------------|-----------------|
+| Rapid (3min) | `combiner run --config scg.toml --seed 42` com `max_runtime=180` |
+| Institutional (15min) | `combiner factory run --campaign institutional.toml` |
+| Exhaustive (1h) | `combiner factory run --campaign exhaustive.toml` |
+
+### API Server
+
+Em Browser Mode, o Cockpit comunica com o SCG via API Server (`server.js`):
+
+```bash
+# API spawna o combiner
+POST /api/scg/start
+  → spawn combiner factory run --campaign <config>
+
+# Progress é parseado do stdout
+GET /api/scg/progress/:runId
+  → retorna generation, sharpe, candidates
+```
+
+Ver [API Server Documentation](../dashboard/api-server.md) para detalhes.
 
 ---
 

@@ -796,16 +796,51 @@ app.post('/api/scg/start', (req, res) => {
   
   scgRuns.set(runId, runState);
   
+  // Parse output and broadcast SSE
+  const parseAndBroadcast = () => {
+    const elapsedSeconds = Math.floor((Date.now() - runState.startTime) / 1000);
+    const percentComplete = Math.min((elapsedSeconds / runState.maxRuntimeSeconds) * 100, 100);
+    
+    let currentGeneration = 0;
+    let bestSharpe = null;
+    let candidatesEvaluated = 0;
+    
+    for (const line of runState.output.slice(-50)) {
+      const genMatch = line.match(/Generation\s+(\d+)/i);
+      if (genMatch) currentGeneration = parseInt(genMatch[1]);
+      
+      const sharpeMatch = line.match(/Best Sharpe[:\s]+(\d+\.?\d*)/i);
+      if (sharpeMatch) bestSharpe = parseFloat(sharpeMatch[1]);
+      
+      const evalMatch = line.match(/(\d+)\s+candidates?\s+evaluated/i);
+      if (evalMatch) candidatesEvaluated = parseInt(evalMatch[1]);
+    }
+    
+    broadcastSSE('scg-progress', {
+      run_id: runId,
+      status: runState.status,
+      percent_complete: percentComplete,
+      elapsed_secs: elapsedSeconds,
+      max_runtime_seconds: runState.maxRuntimeSeconds,
+      current_generation: currentGeneration,
+      best_sharpe: bestSharpe,
+      candidates_evaluated: candidatesEvaluated,
+      latest_log: runState.output.slice(-1)[0] || null,
+    });
+  };
+  
   scgProcess.stdout.on('data', (data) => {
     const line = data.toString();
     console.log(`[SCG ${runId}] ${line}`);
     runState.output.push(line);
+    parseAndBroadcast();
   });
   
   scgProcess.stderr.on('data', (data) => {
     const line = data.toString();
     console.error(`[SCG ${runId}] ${line}`);
     runState.output.push(line);
+    parseAndBroadcast();
   });
   
   scgProcess.on('close', (code) => {
@@ -813,12 +848,25 @@ app.post('/api/scg/start', (req, res) => {
     runState.exitCode = code;
     runState.endTime = Date.now();
     console.log(`\n✅ SCG run ${runId} finished with code ${code}`);
+    broadcastSSE('scg-progress', {
+      run_id: runId,
+      status: runState.status,
+      percent_complete: 100,
+      elapsed_secs: Math.floor((Date.now() - runState.startTime) / 1000),
+      max_runtime_seconds: runState.maxRuntimeSeconds,
+      exit_code: code,
+    });
   });
   
   scgProcess.on('error', (err) => {
     runState.status = 'failed';
     runState.error = err.message;
     console.error(`\n❌ SCG run ${runId} error: ${err.message}`);
+    broadcastSSE('scg-progress', {
+      run_id: runId,
+      status: 'failed',
+      error_message: err.message,
+    });
   });
   
   res.json({ runId, status: 'started' });
@@ -1502,7 +1550,7 @@ app.get('/api/cockpit-candidates/:runId', async (req, res) => {
   try {
     // Try to load from Neon first
     const result = await pool.query(`
-      SELECT c.candidate_id, c.candidate_class, c.display_name, c.rank,
+      SELECT c.candidate_id, c.candidate_class, c.genome_hash, c.rank,
              c.oos_sharpe_net, c.oos_cagr_net, c.max_drawdown_net,
              c.pbo, c.dsr, c.gates_passed, c.stress_passed, c.stress_total
       FROM scg_candidates c
@@ -1516,7 +1564,7 @@ app.get('/api/cockpit-candidates/:runId', async (req, res) => {
         rank: c.rank || i + 1,
         candidate_id: c.candidate_id,
         candidate_class: c.candidate_class || 'research',
-        display_name: c.display_name || `Strategy #${i + 1}`,
+        display_name: `Strategy #${c.rank || i + 1} | ${(c.genome_hash || '').slice(-8)}`,
         oos_sharpe_net: parseFloat(c.oos_sharpe_net) || 0,
         oos_cagr_net: parseFloat(c.oos_cagr_net) || 0,
         max_drawdown_net: parseFloat(c.max_drawdown_net) || estimateMaxDD(c),
@@ -1590,12 +1638,27 @@ function estimateMaxDD(candidate) {
   return Math.min(-0.05, Math.max(-0.50, estimated));
 }
 
+// Event buffer for SSE replay (last 100 events)
+const sseEventBuffer = [];
+let sseEventId = 0;
+
 // Server-Sent Events for real-time updates
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  // Support Last-Event-ID for reconnection replay
+  const lastEventId = req.headers['last-event-id'];
+  if (lastEventId) {
+    const startId = parseInt(lastEventId) + 1;
+    const missedEvents = sseEventBuffer.filter(e => e.id >= startId);
+    for (const event of missedEvents) {
+      res.write(`id: ${event.id}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    }
+    console.log(`📡 SSE reconnect - replayed ${missedEvents.length} events since ${lastEventId}`);
+  }
   
   // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`);
@@ -1604,10 +1667,15 @@ app.get('/api/events', (req, res) => {
   sseClients.add(res);
   console.log(`📡 SSE client connected (total: ${sseClients.size})`);
   
-  // Keep-alive ping every 30 seconds
+  // Keep-alive ping every 15 seconds (more aggressive for VPS)
   const keepAlive = setInterval(() => {
-    res.write(`data: ${JSON.stringify({ type: 'ping', timestamp: Date.now() })}\n\n`);
-  }, 30000);
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'ping', timestamp: Date.now() })}\n\n`);
+    } catch (err) {
+      clearInterval(keepAlive);
+      sseClients.delete(res);
+    }
+  }, 15000);
   
   // Remove client on close
   req.on('close', () => {
@@ -1617,11 +1685,23 @@ app.get('/api/events', (req, res) => {
   });
 });
 
-// Broadcast to all SSE clients
+// Broadcast to all SSE clients with event ID
 function broadcastSSE(eventType, data) {
-  const message = JSON.stringify({ type: eventType, ...data, timestamp: Date.now() });
+  sseEventId++;
+  const eventData = { type: eventType, ...data, timestamp: Date.now() };
+  const message = JSON.stringify(eventData);
+  
+  // Store in buffer for replay (keep last 100)
+  sseEventBuffer.push({ id: sseEventId, data: eventData });
+  if (sseEventBuffer.length > 100) sseEventBuffer.shift();
+  
+  // Broadcast to all clients
   for (const client of sseClients) {
-    client.write(`data: ${message}\n\n`);
+    try {
+      client.write(`id: ${sseEventId}\ndata: ${message}\n\n`);
+    } catch (err) {
+      sseClients.delete(client);
+    }
   }
 }
 

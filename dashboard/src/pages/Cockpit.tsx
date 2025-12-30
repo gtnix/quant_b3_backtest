@@ -347,8 +347,27 @@ function RankingSelector() {
 // PROGRESS DISPLAY
 // =============================================================================
 
+// Status badge component
+function StatusBadge({ status }: { status: string }) {
+  const config = {
+    idle: { label: 'Idle', color: 'bg-slate-600 text-slate-300' },
+    starting: { label: 'Iniciando...', color: 'bg-amber-500/20 text-amber-400 animate-pulse' },
+    running: { label: 'Executando', color: 'bg-cyan-500/20 text-cyan-400' },
+    stopping: { label: 'Parando...', color: 'bg-orange-500/20 text-orange-400' },
+    completed: { label: 'Concluído', color: 'bg-emerald-500/20 text-emerald-400' },
+    failed: { label: 'Erro', color: 'bg-red-500/20 text-red-400' },
+    cancelled: { label: 'Cancelado', color: 'bg-slate-500/20 text-slate-400' },
+  }[status] || { label: status, color: 'bg-slate-600 text-slate-300' };
+  
+  return (
+    <span className={`px-2 py-1 rounded text-xs font-medium ${config.color}`}>
+      {config.label}
+    </span>
+  );
+}
+
 function ProgressDisplay() {
-  const { progress, runStatus } = useCockpitStore();
+  const { progress, runStatus, startRun } = useCockpitStore();
   
   if (!progress || runStatus === 'idle') {
     return (
@@ -372,8 +391,82 @@ function ProgressDisplay() {
   const maxGens = progress.maxGenerations ?? 0;
   const candidates = progress.candidatesEvaluated ?? 0;
   
+  // Show error state prominently
+  if (runStatus === 'failed') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <StatusBadge status={runStatus} />
+          <span className="text-xs text-slate-500">{formatTime(elapsed)} decorrido</span>
+        </div>
+        
+        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+          <div className="flex items-start gap-3">
+            <span className="text-red-400 text-xl">⚠</span>
+            <div className="flex-1">
+              <p className="font-medium text-red-400">Execução falhou</p>
+              <p className="text-sm text-red-300/80 mt-1">
+                {progress.errorMessage || 'Erro desconhecido durante a execução do SCG'}
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        <button
+          onClick={startRun}
+          className="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <span>🔄</span> Tentar Novamente
+        </button>
+        
+        {/* Show last log for debugging */}
+        {progress.latestLog && (
+          <details className="text-xs">
+            <summary className="text-slate-500 cursor-pointer hover:text-slate-400">
+              Ver último log
+            </summary>
+            <div className="mt-2 p-3 bg-slate-900 rounded border border-slate-700 font-mono text-slate-400">
+              {progress.latestLog}
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  }
+  
+  // Completed state
+  if (runStatus === 'completed') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <StatusBadge status={runStatus} />
+          <span className="text-xs text-slate-500">{formatTime(elapsed)} total</span>
+        </div>
+        
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+          <div className="flex items-start gap-3">
+            <span className="text-emerald-400 text-xl">✓</span>
+            <div className="flex-1">
+              <p className="font-medium text-emerald-400">Execução concluída</p>
+              <p className="text-sm text-emerald-300/80 mt-1">
+                {candidates} candidatos avaliados
+                {progress.bestSharpe && ` • Melhor Sharpe: ${progress.bestSharpe.toFixed(3)}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="space-y-4">
+      {/* Status badge */}
+      <div className="flex items-center justify-between">
+        <StatusBadge status={runStatus} />
+        <span className="text-xs text-slate-500">Run: {progress.runId?.slice(-8) || '—'}</span>
+      </div>
+      
       {/* Progress bar with smooth animation */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm">
@@ -445,15 +538,8 @@ function ProgressDisplay() {
       
       {/* Latest log */}
       {progress.latestLog && (
-        <div className="p-3 bg-slate-900 rounded border border-slate-700 font-mono text-xs text-slate-400">
+        <div className="p-3 bg-slate-900 rounded border border-slate-700 font-mono text-xs text-slate-400 truncate">
           {progress.latestLog}
-        </div>
-      )}
-      
-      {/* Error message */}
-      {progress.errorMessage && (
-        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">
-          {progress.errorMessage}
         </div>
       )}
     </div>

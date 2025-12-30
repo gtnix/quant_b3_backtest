@@ -1,7 +1,7 @@
 # Artefatos e Estrutura de Output
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 1.1.0  
+**Última Atualização**: 2025-12-29
 
 ## Visão Geral
 
@@ -285,6 +285,14 @@ artifacts/
 │   └── <candidate_id>/
 │       ├── timeseries.csv
 │       └── metadata.json
+│
+├── cockpit_runs/          # Runs iniciados via Dashboard Cockpit
+│   └── <run_id>/
+│       ├── config.json    # Configuração usada (presets, gates)
+│       ├── progress.json  # Último estado de progresso
+│       └── candidates/    # Candidatos descobertos
+│
+├── campaigns/             # Campanhas completas
 │
 └── data_integrity/        # Relatórios de integridade
     ├── audit_report.json

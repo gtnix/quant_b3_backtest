@@ -1,7 +1,7 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.0.0  
-**Última Atualização**: 2025-12-28  
+**Versão**: 3.1.0  
+**Última Atualização**: 2025-12-29  
 **Status**: Produção
 
 ---
@@ -122,12 +122,17 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 1. [Strategy Factory](strategy_factory.md)
 2. [Artefatos de Output](operations/artifacts.md)
 3. [Dashboard](dashboard/README.md)
+4. [Cockpit - Controle SCG](dashboard/cockpit.md)
+5. [API Server (Browser Mode)](dashboard/api-server.md)
 
 ---
 
 ## Dashboard Interativo
 
-O sistema inclui um **dashboard desktop institucional** construído com Tauri (Rust + React):
+O sistema inclui um **dashboard institucional** com suporte a dois modos de execução:
+
+- **Desktop Mode (Tauri)**: Aplicação nativa com acesso direto ao filesystem
+- **Browser Mode**: Funciona em qualquer navegador via API Server + Neon DB
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -135,21 +140,38 @@ O sistema inclui um **dashboard desktop institucional** construído com Tauri (R
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  CORE                          ANALYTICS                        │
-│  ├── Campaigns                 ├── Risk Analytics               │
-│  ├── Candidates                ├── Strategy Comparison          │
-│  └── Backtest                  ├── Walk-Forward Analysis        │
-│                                ├── Monte Carlo Simulation       │
-│  SYSTEM                        └── Regime Analysis              │
+│  ├── Cockpit (NEW!)            ├── Risk Analytics               │
+│  ├── Campaigns                 ├── Strategy Comparison          │
+│  ├── Candidates                ├── Walk-Forward Analysis        │
+│  └── Backtest                  ├── Monte Carlo Simulation       │
+│                                └── Regime Analysis              │
+│  SYSTEM                                                         │
 │  ├── Evolution Monitor                                          │
 │  └── Overview                                                   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Cockpit - Controle SCG
+
+O **Cockpit** é o painel central para orquestração de runs do SCG:
+
+| Feature | Descrição |
+|---------|-----------|
+| **Presets** | Rapid (3min), Institutional (15min), Exhaustive (1h) |
+| **Compute Budget** | Time slider, workers/intensidade configurável |
+| **Risk Gates** | Sharpe mínimo, PBO máximo, stress tests |
+| **Ranking Methods** | Institutional, Pareto, Sharpe, Risk-Adjusted |
+| **Live Progress** | Geração atual, melhor Sharpe, candidatos avaliados |
+| **Top Strategies** | Tabela rankeada com drilldown para backtest |
+
+Ver [Cockpit Documentation](dashboard/cockpit.md) para detalhes.
+
 ### Funcionalidades Principais
 
 | Feature | Descrição |
 |---------|-----------|
+| **Cockpit** | Controle de SCG runs com presets e gates configuráveis |
 | **Campaign Browser** | Navegue por campanhas e runs do SCG |
 | **Candidate Explorer** | Tabela interativa com filtros, multi-select |
 | **Backtest Drilldown** | Equity curve, drawdown, trade log |
@@ -163,21 +185,30 @@ O sistema inclui um **dashboard desktop institucional** construído com Tauri (R
 
 | Stack | Tecnologia |
 |-------|------------|
-| Framework | Tauri 2.x (Rust backend) |
+| Framework | Tauri 2.x (Desktop) / Express (Browser) |
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS (terminal theme) |
 | State | Zustand |
 | Charts | Recharts + D3 |
+| Database | Neon PostgreSQL (Browser Mode) |
+| Real-time | Tauri Events / SSE |
 
 ### Executar
 
 ```bash
+# Desktop Mode (Tauri)
 cd dashboard
 npm install
 npm run tauri dev
+
+# Browser Mode (API Server)
+cd dashboard
+npm install
+node server.js &       # API em http://localhost:3001
+npm run dev            # Frontend em http://localhost:5173
 ```
 
-Ver [Dashboard README](../dashboard/README.md) para documentação completa
+Ver [Dashboard README](dashboard/README.md) para documentação completa
 
 ---
 
@@ -283,8 +314,10 @@ docs/
 │   ├── genome-structure.md     # Estrutura do genoma
 │   ├── validation-framework.md # WFA, PBO, DSR
 │   └── cli-reference.md        # Comandos combiner
-├── dashboard/                   # Dashboard Tauri
-│   └── README.md               # Arquitetura e componentes
+├── dashboard/                   # Dashboard Tauri/Browser
+│   ├── README.md               # Arquitetura e componentes
+│   ├── cockpit.md              # Cockpit - Controle SCG
+│   └── api-server.md           # API Server (Browser Mode)
 ├── data/                        # Documentação de dados
 │   ├── README.md               # Índice e overview
 │   ├── provider-due-diligence.md  # Avaliação de providers

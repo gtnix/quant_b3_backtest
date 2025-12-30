@@ -610,14 +610,29 @@ export interface SSEEvent {
 
 export function createSSEConnection(
   onEvent: (event: SSEEvent) => void,
-  onError?: (error: Event) => void
+  onError?: (error: Event) => void,
+  onReconnect?: () => void
 ): EventSource | null {
   if (platform.isTauri) {
     console.log('[Tauri Mode] SSE not needed, using native events');
     return null;
   }
   
+  if (!config.sseEndpoint) {
+    console.warn('[SSE] No endpoint configured, using polling only');
+    return null;
+  }
+  
   const eventSource = new EventSource(config.sseEndpoint);
+  let reconnectAttempts = 0;
+  
+  eventSource.onopen = () => {
+    console.log('[SSE] Connected');
+    if (reconnectAttempts > 0) {
+      onReconnect?.();
+    }
+    reconnectAttempts = 0;
+  };
   
   eventSource.onmessage = (event) => {
     try {
@@ -629,8 +644,14 @@ export function createSSEConnection(
   };
   
   eventSource.onerror = (error) => {
-    console.error('[SSE] Connection error:', error);
+    reconnectAttempts++;
+    console.warn(`[SSE] Connection error (attempt ${reconnectAttempts}), browser will auto-reconnect`);
     onError?.(error);
+    
+    // EventSource auto-reconnects, but we log the attempt
+    if (reconnectAttempts > 5) {
+      console.warn('[SSE] Multiple reconnect attempts, polling should take over');
+    }
   };
   
   return eventSource;

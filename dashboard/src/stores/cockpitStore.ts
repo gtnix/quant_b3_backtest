@@ -8,7 +8,7 @@ import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
 import type { CockpitConfig, PresetKey, RankingMethodKey } from '../config/defaults';
 import { COCKPIT_PRESETS, getDefaultConfig, toTauriConfig } from '../config/defaults';
-import { cmd, createSSEConnection, type RunProgress as CmdRunProgress } from '../lib/commands';
+import { cmd, createSSEConnection } from '../lib/commands';
 import { platform, config as platformConfig } from '../lib/platform';
 
 // =============================================================================
@@ -280,7 +280,13 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
     
     try {
       const tauriConfig = toTauriConfig(config);
-      const runId = await cmd.startScgRun(tauriConfig);
+      // Convert null to undefined for compatibility with ScgRunConfig
+      const runConfig = {
+        ...tauriConfig,
+        campaign_config: tauriConfig.campaign_config ?? undefined,
+        run_tag: tauriConfig.run_tag ?? undefined,
+      };
+      const runId = await cmd.startScgRun(runConfig);
       
       set({ 
         currentRunId: runId,
@@ -435,18 +441,24 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
     let intervalId: number | null = null;
     let unlistenPromise: Promise<() => void> | null = null;
     let sseConnection: EventSource | null = null;
+    let sseHealthy = false;
+    let lastSSEUpdate = 0;
     
-    // Poll every 2 seconds while running
+    // Poll while running (serves as fallback when SSE fails)
     const checkAndPoll = () => {
       const { runStatus } = get();
       if (runStatus === 'running' || runStatus === 'starting') {
-        get().pollProgress();
-      } else if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
+        // Only poll if SSE hasn't updated recently (fallback)
+        const now = Date.now();
+        if (!sseHealthy || now - lastSSEUpdate > 5000) {
+          get().pollProgress();
+        }
+      } else if (intervalId && runStatus !== 'idle') {
+        // Keep polling briefly after completion to catch final state
       }
     };
     
+    // Start polling at configurable interval
     intervalId = window.setInterval(checkAndPoll, platformConfig.scgPollIntervalMs);
     
     if (platform.isTauri) {
@@ -456,13 +468,36 @@ export const useCockpitStore = create<CockpitState>((set, get) => ({
         set({ progress, runStatus: progress.status as RunStatus });
       });
     } else {
-      // Browser: Use SSE for real-time updates
-      sseConnection = createSSEConnection((event) => {
-        if (event.type === 'scg-progress') {
-          const progress = parseRunProgress(event);
-          set({ progress, runStatus: progress.status as RunStatus });
+      // Browser: Use SSE for real-time updates with fallback
+      sseConnection = createSSEConnection(
+        (event) => {
+          if (event.type === 'scg-progress') {
+            sseHealthy = true;
+            lastSSEUpdate = Date.now();
+            const progress = parseRunProgress(event);
+            set({ progress, runStatus: progress.status as RunStatus });
+            
+            // Load candidates on completion
+            if (progress.status === 'completed' && progress.runId) {
+              get().loadTopCandidates(progress.runId);
+            }
+          } else if (event.type === 'connected' || event.type === 'ping') {
+            sseHealthy = true;
+            lastSSEUpdate = Date.now();
+          }
+        },
+        () => {
+          // SSE error - mark unhealthy, polling will take over
+          sseHealthy = false;
+          console.warn('[Cockpit] SSE unhealthy, falling back to polling');
+        },
+        () => {
+          // SSE reconnected - sync state
+          console.log('[Cockpit] SSE reconnected');
+          sseHealthy = true;
+          get().pollProgress();
         }
-      });
+      );
     }
     
     // Return cleanup function

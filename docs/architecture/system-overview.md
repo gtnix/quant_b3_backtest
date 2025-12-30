@@ -1,7 +1,7 @@
 # Visão Geral do Sistema
 
-**Versão**: 2.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 2.1.0  
+**Última Atualização**: 2025-12-29
 
 ## Resumo Executivo
 
@@ -13,6 +13,17 @@ O Quant B3 Backtester é um sistema de simulação de estratégias quantitativas
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│                      Dashboard Layer                             │
+│           React + Zustand + Recharts (TypeScript)                │
+│    ┌───────────────────┐    ┌────────────────────────┐          │
+│    │   Desktop Mode    │    │    Browser Mode        │          │
+│    │   Tauri + Rust    │    │    Express + Neon DB   │          │
+│    │   (lib.rs)        │    │    (server.js)         │          │
+│    └───────────────────┘    └────────────────────────┘          │
+│         ↓ invoke()                ↓ HTTP/SSE                    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────────┐
 │                         CLI Layer                                │
 │                    backtester_cli                                │
 │         (run, run-batch, compare, generate-catalog)             │

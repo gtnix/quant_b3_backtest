@@ -1,11 +1,17 @@
 # Sistema Combinador Generativo (SCG) - Overview
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2025-12-28
+**Versão**: 1.1.0  
+**Última Atualização**: 2025-12-29
 
 ## O que é o SCG?
 
 O Sistema Combinador Generativo é uma plataforma de descoberta evolutiva de estratégias de trading que utiliza **Algoritmos Genéticos** para explorar automaticamente o espaço de combinações de blocos de estratégia e seus parâmetros.
+
+O SCG pode ser controlado via:
+- **CLI** - Comandos de terminal (`combiner run`, `combiner factory`)
+- **Dashboard Cockpit** - Interface gráfica com presets, gates e ranking configuráveis
+
+Ver [Cockpit Documentation](../dashboard/cockpit.md) para controle via Dashboard.
 
 ### Motivação
 
