@@ -200,6 +200,48 @@ app.get('/api/campaigns', async (req, res) => {
   }
 });
 
+// Get runs for a specific campaign
+app.get('/api/campaigns/:campaignId/runs', async (req, res) => {
+  const { campaignId } = req.params;
+  
+  try {
+    const result = await pool.query(`
+      SELECT r.run_id, r.campaign_id, r.seed, r.status, r.started_at, 
+             r.completed_at, r.duration_secs, r.generations_completed,
+             r.total_evaluations, r.best_oos_sharpe_net,
+             COUNT(cand.candidate_id) as candidates_evaluated,
+             SUM(CASE WHEN cand.gates_passed THEN 1 ELSE 0 END) as validated_count,
+             MAX(cand.oos_cagr_net) as best_cagr
+      FROM scg_runs r
+      LEFT JOIN scg_candidates cand ON r.run_id = cand.run_id
+      WHERE r.campaign_id = $1
+      GROUP BY r.run_id, r.campaign_id, r.seed, r.status, r.started_at,
+               r.completed_at, r.duration_secs, r.generations_completed,
+               r.total_evaluations, r.best_oos_sharpe_net
+      ORDER BY r.started_at DESC
+    `, [campaignId]);
+    
+    const runs = result.rows.map(r => ({
+      run_id: r.run_id,
+      campaign_id: r.campaign_id,
+      seed: r.seed,
+      status: r.status || 'completed',
+      duration_secs: r.duration_secs,
+      candidates_evaluated: parseInt(r.candidates_evaluated) || 0,
+      validated_count: parseInt(r.validated_count) || 0,
+      best_sharpe: r.best_oos_sharpe_net,
+      best_cagr: r.best_cagr,
+      created_at: r.started_at,
+      completed_at: r.completed_at
+    }));
+    
+    res.json({ runs, count: runs.length });
+  } catch (err) {
+    console.error('Campaign runs error:', err.message);
+    res.status(500).json({ error: err.message, runs: [] });
+  }
+});
+
 // List recent runs from Neon (new endpoint)
 app.get('/api/runs/recent', async (req, res) => {
   const { limit = 10 } = req.query;
@@ -2163,23 +2205,24 @@ async function ompLoop() {
     ompState.queueLength = enabledCampaigns.length;
     
     // 4. If can start and queue has items and no active campaign
-    console.log(`⏰ [OMP] Loop #${ompState.loopCount} - canStart: ${ompState.resources.canStartCampaign}, queue: ${enabledCampaigns.length}, active: ${!!ompState.currentCampaign}`);
+    const loopMsg = `Loop #${ompState.loopCount} | CPU: ${ompState.resources.cpuUsage.toFixed(1)}% | MEM: ${ompState.resources.memoryUsagePct.toFixed(1)}% | Queue: ${enabledCampaigns.length}`;
+    addActivityLog('info', loopMsg, { loop: ompState.loopCount });
     
     if (ompState.resources.canStartCampaign && enabledCampaigns.length > 0 && !ompState.currentCampaign) {
       // Sort by priority (lower = higher priority)
       enabledCampaigns.sort((a, b) => (a.priority || 99) - (b.priority || 99));
       const nextCampaign = enabledCampaigns[0];
       
-      console.log(`🎯 [OMP] Attempting to start campaign: ${nextCampaign.name}`);
+      addActivityLog('info', `Starting campaign: ${nextCampaign.name}`, { campaignId: nextCampaign.id });
       broadcastSSE('omp-campaign-starting', { campaign: nextCampaign });
       
       ompState.currentCampaign = await startQueuedCampaign(nextCampaign);
       
       if (ompState.currentCampaign) {
-        console.log(`✅ [OMP] Campaign started successfully`);
+        addActivityLog('success', `Campaign started: ${nextCampaign.name}`, { runId: ompState.currentCampaign.runId });
         broadcastSSE('omp-campaign-started', { campaign: ompState.currentCampaign });
       } else {
-        console.log(`❌ [OMP] Campaign failed to start`);
+        addActivityLog('error', `Campaign failed to start: ${nextCampaign.name}`);
       }
     }
     
@@ -2187,12 +2230,22 @@ async function ompLoop() {
     if (ompState.currentCampaign) {
       const elapsed = (Date.now() - ompState.currentCampaign.startTime) / 1000;
       ompState.stats.throughputPerMin = ompState.currentCampaign.candidatesEvaluated / (elapsed / 60) || 0;
+      
+      // Log generation progress periodically
+      if (ompState.loopCount % 5 === 0) {
+        addActivityLog('info', `Gen ${ompState.currentCampaign.currentGeneration} | Candidates: ${ompState.currentCampaign.candidatesEvaluated} | Best: ${ompState.currentCampaign.bestSharpe?.toFixed(3) || '—'}`, {
+          generation: ompState.currentCampaign.currentGeneration,
+          candidates: ompState.currentCampaign.candidatesEvaluated,
+          bestSharpe: ompState.currentCampaign.bestSharpe
+        });
+      }
     }
     
     // 6. Broadcast status
     broadcastSSE('omp-status', getOmpStatus());
     
   } catch (err) {
+    addActivityLog('error', `Loop error: ${err.message}`);
     console.error('[OMP] Loop error:', err.message);
   }
 }
@@ -2464,6 +2517,200 @@ app.get('/api/omp/hall-of-fame', async (req, res) => {
     console.error('[OMP] Hall of Fame query failed:', err.message);
     res.status(500).json({ error: err.message, entries: [] });
   }
+});
+
+// Get OMP performance metrics (Rust engine stats)
+app.get('/api/omp/performance', async (req, res) => {
+  const currentCampaign = ompState.currentCampaign;
+  
+  // Calculate real-time metrics
+  let evalPerSec = 0;
+  let cacheHitRate = 0;
+  let throughputGenomesPerMin = 0;
+  
+  if (currentCampaign) {
+    const elapsedSecs = (Date.now() - currentCampaign.startTime) / 1000;
+    evalPerSec = elapsedSecs > 0 ? currentCampaign.candidatesEvaluated / elapsedSecs : 0;
+    throughputGenomesPerMin = evalPerSec * 60;
+    
+    // Parse output for cache hits (if available)
+    for (const line of currentCampaign.output.slice(-100)) {
+      const cacheMatch = line.match(/cache_hit[s]?[:\s]+(\d+\.?\d*)%?/i);
+      if (cacheMatch) cacheHitRate = parseFloat(cacheMatch[1]) / 100;
+    }
+  }
+  
+  res.json({
+    current_run: currentCampaign ? {
+      run_id: currentCampaign.runId,
+      evaluations_per_second: Math.round(evalPerSec * 100) / 100,
+      cache_hit_rate: cacheHitRate,
+      throughput_genomes_per_min: Math.round(throughputGenomesPerMin * 10) / 10,
+      current_generation: currentCampaign.currentGeneration,
+      best_sharpe: currentCampaign.bestSharpe,
+      candidates_evaluated: currentCampaign.candidatesEvaluated,
+      elapsed_seconds: Math.floor((Date.now() - currentCampaign.startTime) / 1000),
+      memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    } : null,
+    system: {
+      cpu_usage: ompState.resources.cpuUsage,
+      memory_usage_pct: ompState.resources.memoryUsagePct,
+      memory_available_mb: ompState.resources.memoryAvailableMb,
+      disk_free_gb: ompState.resources.diskFreeGb,
+    },
+    totals: {
+      candidates_generated: ompState.stats.candidatesGenerated,
+      backtests_executed: ompState.stats.backtestsExecuted,
+      promotions: ompState.stats.promotions,
+    }
+  });
+});
+
+// Get evolution state (for Evolution Monitor page)
+app.get('/api/evolution/state', (req, res) => {
+  const currentCampaign = ompState.currentCampaign;
+  
+  if (!currentCampaign) {
+    return res.json({
+      status: 'no_data',
+      message: 'No active campaign',
+    });
+  }
+  
+  // Parse output for evolution metrics
+  let generation = 0;
+  let maxGenerations = 50;
+  let bestSharpe = 0;
+  let meanSharpe = 0;
+  let paretoSize = 0;
+  let cacheHits = 0;
+  let populationSize = 100;
+  let bestCagr = 0;
+  
+  const generationHistory = [];
+  
+  for (const line of currentCampaign.output) {
+    // Parse generation progress
+    const genMatch = line.match(/gen(?:eration)?[:\s]+(\d+)\s*(?:\/|of)\s*(\d+)/i);
+    if (genMatch) {
+      generation = parseInt(genMatch[1]);
+      maxGenerations = parseInt(genMatch[2]);
+    }
+    
+    // Parse best Sharpe
+    const sharpeMatch = line.match(/best[_\s]?sharpe[:\s]+([\d.]+)/i);
+    if (sharpeMatch) {
+      bestSharpe = Math.max(bestSharpe, parseFloat(sharpeMatch[1]));
+    }
+    
+    // Parse mean Sharpe
+    const meanMatch = line.match(/mean[_\s]?sharpe[:\s]+([\d.]+)/i);
+    if (meanMatch) {
+      meanSharpe = parseFloat(meanMatch[1]);
+    }
+    
+    // Parse Pareto size
+    const paretoMatch = line.match(/pareto[_\s]?(?:size|frontier)[:\s]+(\d+)/i);
+    if (paretoMatch) {
+      paretoSize = parseInt(paretoMatch[1]);
+    }
+    
+    // Parse cache hits
+    const cacheMatch = line.match(/cache[_\s]?hits?[:\s]+(\d+)/i);
+    if (cacheMatch) {
+      cacheHits = parseInt(cacheMatch[1]);
+    }
+    
+    // Parse CAGR
+    const cagrMatch = line.match(/best[_\s]?cagr[:\s]+([\d.]+)/i);
+    if (cagrMatch) {
+      bestCagr = parseFloat(cagrMatch[1]);
+    }
+    
+    // Collect generation data points
+    const fullGenMatch = line.match(/\[gen\s*(\d+)\].*?sharpe[:\s]*([\d.]+).*?mean[:\s]*([\d.]+)/i);
+    if (fullGenMatch) {
+      generationHistory.push({
+        generation: parseInt(fullGenMatch[1]),
+        bestSharpe: parseFloat(fullGenMatch[2]),
+        meanSharpe: parseFloat(fullGenMatch[3]),
+        paretoSize: paretoSize,
+      });
+    }
+  }
+  
+  // Calculate elapsed time
+  const elapsedMs = Date.now() - currentCampaign.startTime;
+  const elapsedSecs = Math.floor(elapsedMs / 1000);
+  const hours = Math.floor(elapsedSecs / 3600);
+  const mins = Math.floor((elapsedSecs % 3600) / 60);
+  const secs = elapsedSecs % 60;
+  const elapsedTime = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  
+  // Calculate ETA
+  let eta = '--:--:--';
+  if (generation > 0 && maxGenerations > generation) {
+    const secsPerGen = elapsedSecs / generation;
+    const remainingGens = maxGenerations - generation;
+    const remainingSecs = Math.floor(secsPerGen * remainingGens);
+    const etaHours = Math.floor(remainingSecs / 3600);
+    const etaMins = Math.floor((remainingSecs % 3600) / 60);
+    const etaSecs = remainingSecs % 60;
+    eta = `${etaHours.toString().padStart(2, '0')}:${etaMins.toString().padStart(2, '0')}:${etaSecs.toString().padStart(2, '0')}`;
+  }
+  
+  res.json({
+    status: 'running',
+    generation,
+    maxGenerations,
+    populationSize,
+    totalEvaluations: currentCampaign.candidatesEvaluated,
+    cacheHits,
+    elapsedTime,
+    eta,
+    bestSharpe: bestSharpe || currentCampaign.bestSharpe || 0,
+    bestCagr,
+    bestMaxDD: 0,
+    meanSharpe,
+    paretoSize,
+    campaignId: currentCampaign.id,
+    campaignName: currentCampaign.name,
+    runId: currentCampaign.runId,
+    generationHistory,
+  });
+});
+
+// Activity Log buffer
+const activityLog = [];
+const MAX_LOG_ENTRIES = 200;
+
+function addActivityLog(level, message, details = {}) {
+  const entry = {
+    id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...details
+  };
+  activityLog.unshift(entry);
+  if (activityLog.length > MAX_LOG_ENTRIES) activityLog.pop();
+  broadcastSSE('omp-log', entry);
+  return entry;
+}
+
+// Get activity log
+app.get('/api/omp/activity', (req, res) => {
+  const { limit = 50, level } = req.query;
+  let logs = activityLog;
+  
+  if (level) {
+    logs = logs.filter(l => l.level === level);
+  }
+  
+  res.json({
+    logs: logs.slice(0, parseInt(limit)),
+    total: activityLog.length
+  });
 });
 
 // Get OMP stats

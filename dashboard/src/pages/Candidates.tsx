@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { DataTable } from '../components/ui/DataTable';
 import { CandidateDetail } from '../components/CandidateDetail';
+import { ParetoScatter } from '../components/charts/ParetoScatter';
 import { useDataStore } from '../stores/dataStore';
-import type { CandidateListItem, RecentRun } from '../stores/dataStore';
+import type { CandidateListItem } from '../stores/dataStore';
 import { platform } from '../lib/platform';
 import { FolderSelector } from '../components/FolderSelector';
 import { QuickTooltip } from '../components/ui/TooltipInfo';
@@ -13,7 +14,6 @@ import {
   Award,
   CheckCircle,
   XCircle,
-  AlertCircle,
   FolderOpen,
   RefreshCw,
   ChevronDown,
@@ -24,10 +24,10 @@ import {
   TrendingUp,
   Shield,
   Target,
-  Zap,
   Clock,
   Database,
-  Globe
+  ScatterChart,
+  Table
 } from 'lucide-react';
 
 export function Candidates() {
@@ -35,6 +35,7 @@ export function Candidates() {
   const [filterPbo, setFilterPbo] = useState<number | null>(null);
   const [filterClass, setFilterClass] = useState<string>('');
   const [showDetail, setShowDetail] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'pareto'>('table');
   
   const { 
     artifactsRoot,
@@ -565,29 +566,77 @@ export function Candidates() {
           <option value="validated">Validated</option>
           <option value="research">Research</option>
         </select>
+        
+        {/* View Mode Toggle */}
+        <div className="flex items-center bg-terminal-surface border border-terminal-border rounded-lg overflow-hidden ml-auto">
+          <button
+            onClick={() => setViewMode('table')}
+            className={`px-3 py-2 text-sm flex items-center gap-1.5 ${viewMode === 'table' ? 'bg-profit/20 text-profit' : 'text-terminal-muted hover:text-white'}`}
+          >
+            <Table className="w-4 h-4" />
+            Table
+          </button>
+          <button
+            onClick={() => setViewMode('pareto')}
+            className={`px-3 py-2 text-sm flex items-center gap-1.5 ${viewMode === 'pareto' ? 'bg-profit/20 text-profit' : 'text-terminal-muted hover:text-white'}`}
+          >
+            <ScatterChart className="w-4 h-4" />
+            Pareto
+          </button>
+        </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-terminal-surface rounded-xl border border-terminal-border overflow-hidden">
-        {isLoading && candidatesList.length === 0 ? (
-          <div className="flex items-center justify-center h-64">
-            <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+      {/* Pareto Scatter View */}
+      {viewMode === 'pareto' && (
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <ScatterChart className="w-4 h-4 text-terminal-muted" />
+              Pareto Frontier: Sharpe vs Max Drawdown
+            </h3>
+            <span className="text-xs text-terminal-muted">{candidatesList.length} candidates</span>
           </div>
-        ) : candidatesList.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-terminal-muted">
-            <Award className="w-12 h-12 mb-4 opacity-50" />
-            <p>No candidates found</p>
-            <p className="text-sm mt-1">Try adjusting your filters</p>
-          </div>
-        ) : (
-          <DataTable
-            data={candidatesList as unknown as Record<string, unknown>[]}
-            columns={columns}
-            maxHeight="500px"
-            onRowClick={handleRowClick}
+          <ParetoScatter
+            data={candidatesList.map(c => ({
+              id: c.candidate_id,
+              sharpe: c.oos_sharpe_net,
+              maxDrawdown: c.max_drawdown_net,
+              cagr: c.oos_cagr_net,
+              gatesPassed: c.gates_passed,
+              displayName: c.display_name,
+            }))}
+            onPointClick={(id) => {
+              loadCandidateDetail(id);
+              setShowDetail(true);
+            }}
+            height={400}
           />
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Table View */}
+      {viewMode === 'table' && (
+        <div className="bg-terminal-surface rounded-xl border border-terminal-border overflow-hidden">
+          {isLoading && candidatesList.length === 0 ? (
+            <div className="flex items-center justify-center h-64">
+              <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+            </div>
+          ) : candidatesList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-terminal-muted">
+              <Award className="w-12 h-12 mb-4 opacity-50" />
+              <p>No candidates found</p>
+              <p className="text-sm mt-1">Try adjusting your filters</p>
+            </div>
+          ) : (
+            <DataTable
+              data={candidatesList as unknown as Record<string, unknown>[]}
+              columns={columns}
+              maxHeight="500px"
+              onRowClick={handleRowClick}
+            />
+          )}
+        </div>
+      )}
 
       {/* Detail Drawer */}
       {showDetail && selectedCandidate && (

@@ -115,6 +115,43 @@ export interface OmpConfig {
   };
 }
 
+export interface ActivityLogEntry {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+  campaignId?: string;
+  runId?: string;
+  generation?: number;
+  candidates?: number;
+  bestSharpe?: number;
+}
+
+export interface PerformanceMetrics {
+  current_run: {
+    run_id: string;
+    evaluations_per_second: number;
+    cache_hit_rate: number;
+    throughput_genomes_per_min: number;
+    current_generation: number;
+    best_sharpe: number | null;
+    candidates_evaluated: number;
+    elapsed_seconds: number;
+    memory_mb: number;
+  } | null;
+  system: {
+    cpu_usage: number;
+    memory_usage_pct: number;
+    memory_available_mb: number;
+    disk_free_gb: number;
+  };
+  totals: {
+    candidates_generated: number;
+    backtests_executed: number;
+    promotions: number;
+  };
+}
+
 export interface OmpState {
   // Connection
   sseConnected: boolean;
@@ -147,12 +184,23 @@ export interface OmpState {
   // Config
   config: OmpConfig | null;
   
+  // Activity Log
+  activityLog: ActivityLogEntry[];
+  
+  // Performance Metrics
+  performance: PerformanceMetrics | null;
+  
+  // Throughput History (for sparkline)
+  throughputHistory: number[];
+  
   // Actions
   fetchStatus: () => Promise<void>;
   fetchStats: () => Promise<void>;
   fetchQueue: () => Promise<void>;
   fetchHallOfFame: (limit?: number, market?: string) => Promise<void>;
   fetchConfig: () => Promise<void>;
+  fetchActivityLog: (limit?: number) => Promise<void>;
+  fetchPerformance: () => Promise<void>;
   
   start: () => Promise<boolean>;
   stop: () => Promise<boolean>;
@@ -197,6 +245,9 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   hallOfFame: [],
   hallOfFameLoading: false,
   config: null,
+  activityLog: [],
+  performance: null,
+  throughputHistory: [],
   
   // ==========================================================================
   // FETCH ACTIONS
@@ -270,6 +321,33 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       set({ config: data, lastError: null });
     } catch (err) {
       set({ lastError: err instanceof Error ? err.message : 'Failed to fetch config' });
+    }
+  },
+  
+  fetchActivityLog: async (limit = 50) => {
+    try {
+      const response = await fetch(`${platformConfig.apiBase}/omp/activity?limit=${limit}`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Failed to fetch activity log');
+      const data = await response.json();
+      set({ activityLog: data.logs || [], lastError: null });
+    } catch (err) {
+      set({ lastError: err instanceof Error ? err.message : 'Failed to fetch activity log' });
+    }
+  },
+  
+  fetchPerformance: async () => {
+    try {
+      const response = await fetch(`${platformConfig.apiBase}/omp/performance`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Failed to fetch performance');
+      const data = await response.json();
+      
+      // Update throughput history for sparkline
+      const currentThroughput = data.current_run?.throughput_genomes_per_min || 0;
+      const history = [...get().throughputHistory, currentThroughput].slice(-60); // Keep last 60 samples
+      
+      set({ performance: data, throughputHistory: history, lastError: null });
+    } catch (err) {
+      set({ lastError: err instanceof Error ? err.message : 'Failed to fetch performance' });
     }
   },
   
@@ -409,20 +487,27 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     if (platform === 'browser') {
       const sse = createSSEConnection(
         (event) => {
-          if (event.type === 'omp-status') {
-            const data = event.data;
+          // Set connected on any event
+          if (!get().sseConnected) {
+            set({ sseConnected: true });
+          }
+          
+          if (event.type === 'connected' || event.type === 'ping') {
+            set({ sseConnected: true });
+          } else if (event.type === 'omp-status') {
+            const data = event.data as Record<string, unknown>;
             set({
-              status: data.status || 'offline',
-              startedAt: data.startedAt,
-              lastLoop: data.lastLoop,
-              loopCount: data.loopCount || 0,
-              queueLength: data.queueLength || 0,
-              lastPromotion: data.lastPromotion,
-              currentCampaign: data.currentCampaign,
-              resources: data.resources || get().resources,
+              status: (data.status as OmpStatus) || 'offline',
+              startedAt: data.startedAt as string | null,
+              lastLoop: data.lastLoop as string | null,
+              loopCount: (data.loopCount as number) || 0,
+              queueLength: (data.queueLength as number) || 0,
+              lastPromotion: data.lastPromotion as string | null,
+              currentCampaign: data.currentCampaign as CurrentCampaign | null,
+              resources: (data.resources as OmpResources) || get().resources,
             });
           } else if (event.type === 'omp-started') {
-            set({ status: 'running', startedAt: event.data.startedAt });
+            set({ status: 'running', startedAt: (event as { startedAt?: string }).startedAt || new Date().toISOString() });
           } else if (event.type === 'omp-stopped') {
             set({ status: 'offline', currentCampaign: null });
           } else if (event.type === 'omp-paused') {
@@ -438,6 +523,11 @@ export const useOmpStore = create<OmpState>((set, get) => ({
           } else if (event.type === 'omp-campaign-completed') {
             set({ currentCampaign: null });
             get().fetchStats();
+          } else if (event.type === 'omp-log') {
+            // Add new log entry to the front
+            const logEntry = event as unknown as ActivityLogEntry;
+            const currentLog = get().activityLog;
+            set({ activityLog: [logEntry, ...currentLog].slice(0, 100) });
           }
         },
         (error) => {
@@ -455,9 +545,19 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       get().fetchStatus();
       get().fetchStats();
       get().fetchQueue();
+      get().fetchActivityLog();
+      get().fetchPerformance();
+      
+      // Performance polling (every 5 seconds for live metrics)
+      const perfInterval = setInterval(() => {
+        if (get().status === 'running') {
+          get().fetchPerformance();
+        }
+      }, 5000);
       
       return () => {
-        sse.close();
+        if (sse) sse.close();
+        clearInterval(perfInterval);
         set({ sseConnected: false });
       };
     }
@@ -465,12 +565,17 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     // Desktop mode - use polling
     const pollInterval = setInterval(() => {
       get().fetchStatus();
+      if (get().status === 'running') {
+        get().fetchPerformance();
+      }
     }, 5000);
     
     // Initial fetch
     get().fetchStatus();
     get().fetchStats();
     get().fetchQueue();
+    get().fetchActivityLog();
+    get().fetchPerformance();
     
     return () => {
       clearInterval(pollInterval);
