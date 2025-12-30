@@ -31,9 +31,9 @@ pub struct InstitutionalCriteria {
 impl Default for InstitutionalCriteria {
     fn default() -> Self {
         Self {
-            min_oos_sharpe: 0.3,
+            min_oos_sharpe: 0.5,
             max_pbo: 0.15,
-            min_dsr: 0.25,
+            min_dsr: 0.8,
             max_degradation_pct: 40.0,
             min_split_pass_rate: 0.6, // 60% of splits must pass
             max_oos_drawdown: -0.35,
