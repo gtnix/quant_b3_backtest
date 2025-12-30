@@ -12,9 +12,10 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { parse } from 'csv-parse/sync';
 import toml from 'toml';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -1780,10 +1781,715 @@ async function autoInitialize() {
 }
 
 // =============================================================================
+// OMP - ORQUESTRADOR DE MINERAÇÃO PERPÉTUA
+// =============================================================================
+
+// OMP State
+const ompState = {
+  status: 'offline', // offline | running | paused | draining
+  currentCampaign: null,
+  queueLength: 0,
+  startedAt: null,
+  lastPromotion: null,
+  lastLoop: null,
+  loopCount: 0,
+  stats: {
+    candidatesGenerated: 0,
+    candidatesGenerated24h: 0,
+    candidatesGenerated7d: 0,
+    backtestsExecuted: 0,
+    backtestsExecuted24h: 0,
+    promotions: 0,
+    promotions24h: 0,
+    campaignsCompleted: 0,
+    campaignsFailed: 0,
+    throughputPerMin: 0,
+    gatesApprovalRate: 0,
+  },
+  resources: {
+    cpuUsage: 0,
+    memoryUsagePct: 0,
+    memoryAvailableMb: 0,
+    diskFreeGb: 0,
+    canStartCampaign: false,
+  },
+  config: null,
+};
+
+// OMP Configuration file path
+const OMP_CONFIG_PATH = path.join(process.cwd(), 'omp_config.toml');
+const QUEUE_PATH = path.join(process.cwd(), 'campaign_queue.json');
+
+// Load OMP config
+function loadOmpConfig() {
+  try {
+    if (fs.existsSync(OMP_CONFIG_PATH)) {
+      const content = fs.readFileSync(OMP_CONFIG_PATH, 'utf-8');
+      ompState.config = toml.parse(content);
+      return ompState.config;
+    }
+  } catch (err) {
+    console.error('[OMP] Failed to load config:', err.message);
+  }
+  return null;
+}
+
+// Load campaign queue
+function loadCampaignQueue() {
+  try {
+    if (fs.existsSync(QUEUE_PATH)) {
+      const content = fs.readFileSync(QUEUE_PATH, 'utf-8');
+      const queue = JSON.parse(content);
+      ompState.queueLength = queue.campaigns?.filter(c => c.enabled).length || 0;
+      return queue;
+    }
+  } catch (err) {
+    console.error('[OMP] Failed to load queue:', err.message);
+  }
+  return { version: '1.0', campaigns: [] };
+}
+
+// Save campaign queue
+function saveCampaignQueue(queue) {
+  try {
+    queue.updated_at = new Date().toISOString();
+    fs.writeFileSync(QUEUE_PATH, JSON.stringify(queue, null, 2));
+    ompState.queueLength = queue.campaigns?.filter(c => c.enabled).length || 0;
+    return true;
+  } catch (err) {
+    console.error('[OMP] Failed to save queue:', err.message);
+    return false;
+  }
+}
+
+// Check system resources
+async function checkResources() {
+  const cpus = os.cpus();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  
+  // Calculate CPU usage (simplified - average load)
+  const loadAvg = os.loadavg()[0];
+  const cpuCount = cpus.length;
+  const cpuUsage = Math.min((loadAvg / cpuCount) * 100, 100);
+  
+  const memoryUsagePct = ((totalMem - freeMem) / totalMem) * 100;
+  const memoryAvailableMb = freeMem / (1024 * 1024);
+  
+  // Disk space (simplified - check artifacts directory)
+  let diskFreeGb = 100; // Default high value
+  try {
+    const dfOutput = execSync(`df -BG ${ARTIFACTS_ROOT} | tail -1 | awk '{print $4}'`, { encoding: 'utf-8' });
+    diskFreeGb = parseFloat(dfOutput.replace('G', '')) || 100;
+  } catch (e) {
+    // Ignore disk check errors
+  }
+  
+  const config = ompState.config?.resource_limits || {};
+  const maxCpu = config.max_cpu_util_pct || 85;
+  const minMem = config.min_mem_available_mb || 512;
+  const minDisk = config.min_disk_free_gb || 10;
+  const maxConcurrent = config.max_concurrent_campaigns || 1;
+  
+  const activeCampaigns = ompState.currentCampaign ? 1 : 0;
+  
+  ompState.resources = {
+    cpuUsage: Math.round(cpuUsage * 10) / 10,
+    memoryUsagePct: Math.round(memoryUsagePct * 10) / 10,
+    memoryAvailableMb: Math.round(memoryAvailableMb),
+    diskFreeGb: Math.round(diskFreeGb * 10) / 10,
+    canStartCampaign: 
+      cpuUsage < maxCpu && 
+      memoryAvailableMb > minMem && 
+      diskFreeGb > minDisk &&
+      activeCampaigns < maxConcurrent,
+  };
+  
+  return ompState.resources;
+}
+
+// Start a campaign from queue
+async function startQueuedCampaign(campaign) {
+  const configPath = path.join(PROJECT_ROOT, campaign.config_path);
+  const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
+  
+  if (!fs.existsSync(combinerPath)) {
+    console.error('[OMP] Combiner binary not found');
+    return null;
+  }
+  
+  if (!fs.existsSync(configPath)) {
+    console.error(`[OMP] Campaign config not found: ${configPath}`);
+    return null;
+  }
+  
+  const runId = `run_${Date.now().toString(36)}`;
+  
+  console.log(`\n🚀 [OMP] Starting campaign: ${campaign.name} (${campaign.id})`);
+  console.log(`   Config: ${configPath}`);
+  console.log(`   Run ID: ${runId}`);
+  
+  const scgProcess = spawn(combinerPath, [
+    'factory', 'run',
+    '--campaign', configPath
+  ], {
+    cwd: PROJECT_ROOT,
+    env: { 
+      ...process.env, 
+      RUST_LOG: 'combiner=info',
+      NEON_DATABASE_URL: DATABASE_URL
+    }
+  });
+  
+  const campaignState = {
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    runId,
+    market: campaign.market || 'br',
+    status: 'running',
+    startTime: Date.now(),
+    output: [],
+    process: scgProcess,
+    currentGeneration: 0,
+    bestSharpe: null,
+    candidatesEvaluated: 0,
+  };
+  
+  // Parse output
+  scgProcess.stdout.on('data', (data) => {
+    const line = data.toString();
+    console.log(`[OMP ${runId}] ${line}`);
+    campaignState.output.push(line);
+    
+    // Parse metrics
+    const genMatch = line.match(/Generation\s+(\d+)/i);
+    if (genMatch) campaignState.currentGeneration = parseInt(genMatch[1]);
+    
+    const sharpeMatch = line.match(/Best Sharpe[:\s]+(\d+\.?\d*)/i);
+    if (sharpeMatch) campaignState.bestSharpe = parseFloat(sharpeMatch[1]);
+    
+    const evalMatch = line.match(/(\d+)\s+candidates?\s+evaluated/i);
+    if (evalMatch) {
+      campaignState.candidatesEvaluated = parseInt(evalMatch[1]);
+      ompState.stats.candidatesGenerated += parseInt(evalMatch[1]);
+    }
+  });
+  
+  scgProcess.stderr.on('data', (data) => {
+    const line = data.toString();
+    console.error(`[OMP ${runId}] ${line}`);
+    campaignState.output.push(line);
+  });
+  
+  scgProcess.on('close', async (code) => {
+    campaignState.status = code === 0 ? 'completed' : 'failed';
+    campaignState.endTime = Date.now();
+    
+    console.log(`\n✅ [OMP] Campaign ${campaign.name} finished with code ${code}`);
+    
+    if (code === 0) {
+      ompState.stats.campaignsCompleted++;
+      ompState.stats.backtestsExecuted++;
+      
+      // Trigger promotion check
+      await checkAndPromoteCandidates(runId, campaign);
+      
+      // Re-add to queue if repeat is enabled
+      if (campaign.repeat) {
+        const queue = loadCampaignQueue();
+        // Campaign is already in queue, just keep it
+        saveCampaignQueue(queue);
+      }
+    } else {
+      ompState.stats.campaignsFailed++;
+    }
+    
+    // Clear current campaign
+    ompState.currentCampaign = null;
+    
+    // Broadcast completion
+    broadcastSSE('omp-campaign-completed', {
+      campaignId: campaign.id,
+      runId,
+      status: campaignState.status,
+      duration: (campaignState.endTime - campaignState.startTime) / 1000,
+    });
+  });
+  
+  scgProcess.on('error', (err) => {
+    console.error(`[OMP] Campaign error: ${err.message}`);
+    campaignState.status = 'failed';
+    ompState.currentCampaign = null;
+  });
+  
+  return campaignState;
+}
+
+// Check and promote candidates to hall of fame
+async function checkAndPromoteCandidates(runId, campaign) {
+  const config = ompState.config?.promotion || {};
+  if (!config.enabled) return;
+  
+  try {
+    // Query top candidates from the run
+    const result = await pool.query(`
+      SELECT c.candidate_id, c.genome_hash, c.oos_sharpe_net, c.pbo, c.dsr,
+             c.max_drawdown_net, c.oos_cagr_net, c.stress_passed, c.stress_total,
+             c.gates_passed, r.campaign_id
+      FROM scg_candidates c
+      JOIN scg_runs r ON c.run_id = r.run_id
+      LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id
+      WHERE c.run_id = $1
+      ORDER BY c.oos_sharpe_net DESC NULLS LAST
+      LIMIT 100
+    `, [runId]);
+    
+    const thresholds = {
+      minSharpe: config.min_oos_sharpe_net || 1.0,
+      maxPbo: config.max_pbo || 0.10,
+      minDsr: config.min_dsr || 0.8,
+      maxDrawdown: config.max_drawdown_net || 0.20,
+    };
+    
+    let promoted = 0;
+    
+    for (const candidate of result.rows) {
+      // Check promotion criteria
+      const meetsSharpeCriteria = (candidate.oos_sharpe_net || 0) >= thresholds.minSharpe;
+      const meetsPboCriteria = (candidate.pbo || 1) <= thresholds.maxPbo;
+      const meetsDsrCriteria = (candidate.dsr || 0) >= thresholds.minDsr;
+      const meetsDrawdownCriteria = Math.abs(candidate.max_drawdown_net || 1) <= thresholds.maxDrawdown;
+      const passesGates = candidate.gates_passed === true;
+      
+      if (meetsSharpeCriteria && meetsPboCriteria && meetsDsrCriteria && meetsDrawdownCriteria && passesGates) {
+        // Check if already promoted
+        const existing = await pool.query(
+          'SELECT promotion_id FROM scg_promotions WHERE candidate_id = $1 AND promotion_class = $2',
+          [candidate.candidate_id, 'hall_of_fame']
+        );
+        
+        if (existing.rows.length === 0) {
+          // Get git info
+          let gitSha = null;
+          try {
+            gitSha = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, encoding: 'utf-8' }).trim().slice(0, 40);
+          } catch (e) {}
+          
+          // Insert promotion
+          const promotionId = `prom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          
+          await pool.query(`
+            INSERT INTO scg_promotions (
+              promotion_id, candidate_id, stage, promotion_class,
+              oos_sharpe_net, pbo, dsr, max_drawdown_net, cagr_net,
+              stress_passed, stress_total, gates_passed,
+              git_sha, market, notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          `, [
+            promotionId,
+            candidate.candidate_id,
+            'hall_of_fame',
+            'hall_of_fame',
+            candidate.oos_sharpe_net,
+            candidate.pbo,
+            candidate.dsr,
+            candidate.max_drawdown_net,
+            candidate.oos_cagr_net,
+            candidate.stress_passed,
+            candidate.stress_total,
+            candidate.gates_passed,
+            gitSha,
+            campaign.market || 'br',
+            `Auto-promoted by OMP from run ${runId}`
+          ]);
+          
+          promoted++;
+          ompState.stats.promotions++;
+          ompState.lastPromotion = new Date().toISOString();
+          
+          console.log(`🏆 [OMP] Promoted to Hall of Fame: ${candidate.candidate_id} (Sharpe: ${candidate.oos_sharpe_net?.toFixed(3)})`);
+          
+          // Broadcast promotion
+          broadcastSSE('omp-promotion', {
+            candidateId: candidate.candidate_id,
+            promotionId,
+            sharpe: candidate.oos_sharpe_net,
+            pbo: candidate.pbo,
+          });
+        }
+      }
+    }
+    
+    if (promoted > 0) {
+      console.log(`🏆 [OMP] Promoted ${promoted} candidates to Hall of Fame`);
+    }
+    
+  } catch (err) {
+    console.error('[OMP] Promotion check failed:', err.message);
+  }
+}
+
+// OMP Main Loop
+let ompLoopInterval = null;
+
+async function ompLoop() {
+  if (ompState.status !== 'running') return;
+  
+  ompState.loopCount++;
+  ompState.lastLoop = new Date().toISOString();
+  
+  try {
+    // 1. Reload config (hot reload)
+    loadOmpConfig();
+    
+    // 2. Check resources
+    await checkResources();
+    
+    // 3. Load queue
+    const queue = loadCampaignQueue();
+    const enabledCampaigns = queue.campaigns?.filter(c => c.enabled) || [];
+    ompState.queueLength = enabledCampaigns.length;
+    
+    // 4. If can start and queue has items and no active campaign
+    if (ompState.resources.canStartCampaign && enabledCampaigns.length > 0 && !ompState.currentCampaign) {
+      // Sort by priority (lower = higher priority)
+      enabledCampaigns.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+      const nextCampaign = enabledCampaigns[0];
+      
+      ompState.currentCampaign = await startQueuedCampaign(nextCampaign);
+    }
+    
+    // 5. Update current campaign metrics
+    if (ompState.currentCampaign) {
+      const elapsed = (Date.now() - ompState.currentCampaign.startTime) / 1000;
+      ompState.stats.throughputPerMin = ompState.currentCampaign.candidatesEvaluated / (elapsed / 60) || 0;
+    }
+    
+    // 6. Broadcast status
+    broadcastSSE('omp-status', getOmpStatus());
+    
+  } catch (err) {
+    console.error('[OMP] Loop error:', err.message);
+  }
+}
+
+// Get OMP status for API/SSE
+function getOmpStatus() {
+  const currentCampaign = ompState.currentCampaign ? {
+    campaignId: ompState.currentCampaign.campaignId,
+    campaignName: ompState.currentCampaign.campaignName,
+    runId: ompState.currentCampaign.runId,
+    market: ompState.currentCampaign.market,
+    status: ompState.currentCampaign.status,
+    elapsedSeconds: Math.floor((Date.now() - ompState.currentCampaign.startTime) / 1000),
+    currentGeneration: ompState.currentCampaign.currentGeneration,
+    bestSharpe: ompState.currentCampaign.bestSharpe,
+    candidatesEvaluated: ompState.currentCampaign.candidatesEvaluated,
+  } : null;
+  
+  return {
+    status: ompState.status,
+    startedAt: ompState.startedAt,
+    lastLoop: ompState.lastLoop,
+    loopCount: ompState.loopCount,
+    queueLength: ompState.queueLength,
+    lastPromotion: ompState.lastPromotion,
+    currentCampaign,
+    resources: ompState.resources,
+    stats: ompState.stats,
+    config: ompState.config ? {
+      loopIntervalSecs: ompState.config.orchestrator?.loop_interval_secs || 30,
+      markets: ompState.config.markets || {},
+      promotion: ompState.config.promotion || {},
+    } : null,
+  };
+}
+
+// =============================================================================
+// OMP API ENDPOINTS
+// =============================================================================
+
+// Get OMP status
+app.get('/api/omp/status', (req, res) => {
+  res.json(getOmpStatus());
+});
+
+// Start OMP
+app.post('/api/omp/start', (req, res) => {
+  if (ompState.status === 'running') {
+    return res.status(400).json({ error: 'OMP is already running' });
+  }
+  
+  loadOmpConfig();
+  loadCampaignQueue();
+  
+  ompState.status = 'running';
+  ompState.startedAt = new Date().toISOString();
+  ompState.loopCount = 0;
+  
+  const intervalMs = (ompState.config?.orchestrator?.loop_interval_secs || 30) * 1000;
+  ompLoopInterval = setInterval(ompLoop, intervalMs);
+  
+  // Run immediately
+  ompLoop();
+  
+  console.log('\n🟢 [OMP] Mining started');
+  broadcastSSE('omp-started', { startedAt: ompState.startedAt });
+  
+  res.json({ status: 'started', startedAt: ompState.startedAt });
+});
+
+// Stop OMP
+app.post('/api/omp/stop', (req, res) => {
+  if (ompState.status === 'offline') {
+    return res.status(400).json({ error: 'OMP is not running' });
+  }
+  
+  // Stop loop
+  if (ompLoopInterval) {
+    clearInterval(ompLoopInterval);
+    ompLoopInterval = null;
+  }
+  
+  // Kill current campaign if running
+  if (ompState.currentCampaign?.process) {
+    ompState.currentCampaign.process.kill('SIGTERM');
+  }
+  
+  ompState.status = 'offline';
+  ompState.currentCampaign = null;
+  
+  console.log('\n🔴 [OMP] Mining stopped');
+  broadcastSSE('omp-stopped', { stoppedAt: new Date().toISOString() });
+  
+  res.json({ status: 'stopped' });
+});
+
+// Pause OMP (don't start new campaigns)
+app.post('/api/omp/pause', (req, res) => {
+  if (ompState.status !== 'running') {
+    return res.status(400).json({ error: 'OMP is not running' });
+  }
+  
+  ompState.status = 'paused';
+  
+  console.log('\n⏸️ [OMP] Mining paused');
+  broadcastSSE('omp-paused', { pausedAt: new Date().toISOString() });
+  
+  res.json({ status: 'paused' });
+});
+
+// Resume OMP
+app.post('/api/omp/resume', (req, res) => {
+  if (ompState.status !== 'paused') {
+    return res.status(400).json({ error: 'OMP is not paused' });
+  }
+  
+  ompState.status = 'running';
+  
+  console.log('\n▶️ [OMP] Mining resumed');
+  broadcastSSE('omp-resumed', { resumedAt: new Date().toISOString() });
+  
+  res.json({ status: 'running' });
+});
+
+// Get campaign queue
+app.get('/api/omp/queue', (req, res) => {
+  const queue = loadCampaignQueue();
+  res.json(queue);
+});
+
+// Add to queue
+app.post('/api/omp/queue', (req, res) => {
+  const { name, config_path, market, priority, enabled, repeat, tags } = req.body;
+  
+  if (!name || !config_path) {
+    return res.status(400).json({ error: 'name and config_path are required' });
+  }
+  
+  const queue = loadCampaignQueue();
+  const campaign = {
+    id: `camp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    config_path,
+    market: market || 'br',
+    priority: priority || queue.campaigns.length + 1,
+    enabled: enabled !== false,
+    repeat: repeat || false,
+    tags: tags || [],
+    created_at: new Date().toISOString(),
+  };
+  
+  queue.campaigns.push(campaign);
+  saveCampaignQueue(queue);
+  
+  console.log(`[OMP] Added campaign to queue: ${name}`);
+  broadcastSSE('omp-queue-updated', { action: 'add', campaign });
+  
+  res.json(campaign);
+});
+
+// Update queue item
+app.patch('/api/omp/queue/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  
+  const queue = loadCampaignQueue();
+  const index = queue.campaigns.findIndex(c => c.id === id);
+  
+  if (index === -1) {
+    return res.status(404).json({ error: 'Campaign not found in queue' });
+  }
+  
+  queue.campaigns[index] = { ...queue.campaigns[index], ...updates };
+  saveCampaignQueue(queue);
+  
+  broadcastSSE('omp-queue-updated', { action: 'update', campaign: queue.campaigns[index] });
+  
+  res.json(queue.campaigns[index]);
+});
+
+// Remove from queue
+app.delete('/api/omp/queue/:id', (req, res) => {
+  const { id } = req.params;
+  
+  const queue = loadCampaignQueue();
+  const index = queue.campaigns.findIndex(c => c.id === id);
+  
+  if (index === -1) {
+    return res.status(404).json({ error: 'Campaign not found in queue' });
+  }
+  
+  const removed = queue.campaigns.splice(index, 1)[0];
+  saveCampaignQueue(queue);
+  
+  broadcastSSE('omp-queue-updated', { action: 'remove', campaignId: id });
+  
+  res.json({ removed });
+});
+
+// Get OMP config
+app.get('/api/omp/config', (req, res) => {
+  loadOmpConfig();
+  res.json(ompState.config || {});
+});
+
+// Update OMP config (hot reload)
+app.patch('/api/omp/config', (req, res) => {
+  // This would require TOML serialization - for now just reload
+  loadOmpConfig();
+  res.json({ message: 'Config reloaded', config: ompState.config });
+});
+
+// Get Hall of Fame
+app.get('/api/omp/hall-of-fame', async (req, res) => {
+  const { limit = 50, market } = req.query;
+  
+  try {
+    let query = `
+      SELECT p.*, c.genome_hash, c.run_id, r.campaign_id, camp.name as campaign_name
+      FROM scg_promotions p
+      JOIN scg_candidates c ON p.candidate_id = c.candidate_id
+      JOIN scg_runs r ON c.run_id = r.run_id
+      LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id
+      WHERE p.promotion_class = 'hall_of_fame'
+    `;
+    const params = [];
+    
+    if (market) {
+      params.push(market);
+      query += ` AND p.market = $${params.length}`;
+    }
+    
+    query += ` ORDER BY p.oos_sharpe_net DESC NULLS LAST LIMIT $${params.length + 1}`;
+    params.push(parseInt(limit));
+    
+    const result = await pool.query(query, params);
+    
+    res.json({
+      count: result.rows.length,
+      entries: result.rows.map(r => ({
+        promotionId: r.promotion_id,
+        candidateId: r.candidate_id,
+        genomeHash: r.genome_hash,
+        campaignId: r.campaign_id,
+        campaignName: r.campaign_name,
+        runId: r.run_id,
+        market: r.market,
+        promotedAt: r.promoted_at,
+        metrics: {
+          oosSharpeNet: r.oos_sharpe_net,
+          pbo: r.pbo,
+          dsr: r.dsr,
+          maxDrawdownNet: r.max_drawdown_net,
+          cagrNet: r.cagr_net,
+        },
+        validation: {
+          stressPassed: r.stress_passed,
+          stressTotal: r.stress_total,
+          gatesPassed: r.gates_passed,
+        },
+        provenance: {
+          gitSha: r.git_sha,
+          configHash: r.config_hash,
+        },
+        notes: r.notes,
+      })),
+    });
+  } catch (err) {
+    console.error('[OMP] Hall of Fame query failed:', err.message);
+    res.status(500).json({ error: err.message, entries: [] });
+  }
+});
+
+// Get OMP stats
+app.get('/api/omp/stats', async (req, res) => {
+  try {
+    // Get recent stats from DB
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const last7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    const [candidates24h, promotions24h, candidates7d, promotions7d, totalPromotions] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM scg_candidates WHERE created_at > $1', [last24h]),
+      pool.query("SELECT COUNT(*) FROM scg_promotions WHERE promoted_at > $1 AND promotion_class = 'hall_of_fame'", [last24h]),
+      pool.query('SELECT COUNT(*) FROM scg_candidates WHERE created_at > $1', [last7d]),
+      pool.query("SELECT COUNT(*) FROM scg_promotions WHERE promoted_at > $1 AND promotion_class = 'hall_of_fame'", [last7d]),
+      pool.query("SELECT COUNT(*) FROM scg_promotions WHERE promotion_class = 'hall_of_fame'"),
+    ]);
+    
+    res.json({
+      candidates: {
+        last24h: parseInt(candidates24h.rows[0].count),
+        last7d: parseInt(candidates7d.rows[0].count),
+        total: ompState.stats.candidatesGenerated,
+      },
+      promotions: {
+        last24h: parseInt(promotions24h.rows[0].count),
+        last7d: parseInt(promotions7d.rows[0].count),
+        total: parseInt(totalPromotions.rows[0].count),
+      },
+      campaigns: {
+        completed: ompState.stats.campaignsCompleted,
+        failed: ompState.stats.campaignsFailed,
+      },
+      throughput: {
+        candidatesPerMin: Math.round(ompState.stats.throughputPerMin * 10) / 10,
+      },
+      lastPromotion: ompState.lastPromotion,
+    });
+  } catch (err) {
+    console.error('[OMP] Stats query failed:', err.message);
+    res.json(ompState.stats);
+  }
+});
+
+// =============================================================================
 // START SERVER
 // =============================================================================
 
 // Initialize before starting
+loadOmpConfig();
+loadCampaignQueue();
 autoInitialize();
 
 app.listen(PORT, () => {
@@ -1809,6 +2515,19 @@ app.listen(PORT, () => {
   console.log(`   POST /api/scg/stop/:runId`);
   console.log(`   GET  /api/scg/active-runs`);
   console.log(`   GET  /api/cockpit-candidates/:runId`);
+  console.log(`\n⛏️ OMP (Perpetual Mining):`);
+  console.log(`   GET  /api/omp/status`);
+  console.log(`   POST /api/omp/start`);
+  console.log(`   POST /api/omp/stop`);
+  console.log(`   POST /api/omp/pause`);
+  console.log(`   POST /api/omp/resume`);
+  console.log(`   GET  /api/omp/queue`);
+  console.log(`   POST /api/omp/queue`);
+  console.log(`   PATCH /api/omp/queue/:id`);
+  console.log(`   DELETE /api/omp/queue/:id`);
+  console.log(`   GET  /api/omp/config`);
+  console.log(`   GET  /api/omp/hall-of-fame`);
+  console.log(`   GET  /api/omp/stats`);
   console.log(`\n🔧 Browser Mode Compatibility:`);
   console.log(`   GET  /api/artifacts-root`);
   console.log(`   POST /api/artifacts-root`);

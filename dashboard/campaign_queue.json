@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "updated_at": "2025-12-30T00:00:00Z",
+  "campaigns": [
+    {
+      "id": "camp_default_br",
+      "name": "B3 Momentum Discovery",
+      "config_path": "configs/campaigns/scg_quick_test.toml",
+      "market": "br",
+      "priority": 1,
+      "enabled": true,
+      "repeat": true,
+      "tags": ["b3", "momentum", "auto"],
+      "created_at": "2025-12-30T00:00:00Z"
+    },
+    {
+      "id": "camp_default_us",
+      "name": "US Equities Explorer",
+      "config_path": "configs/campaigns/scg_quick_test.toml",
+      "market": "us",
+      "priority": 2,
+      "enabled": false,
+      "repeat": true,
+      "tags": ["us", "equities", "auto"],
+      "created_at": "2025-12-30T00:00:00Z"
+    }
+  ]
+}
+

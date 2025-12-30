@@ -1,0 +1,114 @@
+# OMP - Orquestrador de Mineração Perpétua
+# Configuration file for perpetual strategy mining
+# 
+# Hot reload: Changes are picked up on next loop iteration (30s)
+
+[orchestrator]
+name = "Alpha Forge Strategy Miner"
+version = "1.0.0"
+loop_interval_secs = 30
+log_level = "INFO"
+enabled = true
+
+# =============================================================================
+# RESOURCE LIMITS
+# =============================================================================
+[resource_limits]
+max_cpu_util_pct = 85.0           # Don't start new campaigns if CPU > 85%
+min_mem_available_mb = 512        # Don't start if free memory < 512MB
+min_disk_free_gb = 10.0           # Pause mining if disk < 10GB
+max_concurrent_campaigns = 1      # Max simultaneous campaigns
+check_interval_secs = 30          # Resource check interval
+
+# =============================================================================
+# MARKET CONFIGURATIONS (GLOBAL)
+# =============================================================================
+[markets.br]
+enabled = true
+name = "B3 - Brasil"
+universe = "ibov"
+fee_tier = "b3-retail"
+slippage_bps = 10
+trading_hours = "10:00-17:00"
+calendar = "b3"
+currency = "BRL"
+lot_size = 100                    # B3 requires multiples of 100
+
+[markets.us]
+enabled = true
+name = "US Equities"
+universe = "sp500"
+fee_tier = "us-retail"
+slippage_bps = 5
+trading_hours = "09:30-16:00"
+calendar = "nyse"
+currency = "USD"
+lot_size = 1                      # US allows fractional shares
+
+# =============================================================================
+# EVOLUTION DEFAULTS
+# =============================================================================
+[evolution]
+population_size = 100
+max_generations = 50
+convergence_generations = 10
+tournament_size = 3
+crossover_rate = 0.85
+mutation_rate = 0.05
+elitism_rate = 0.1
+hall_of_fame_size = 25
+
+# =============================================================================
+# BUDGET DEFAULTS
+# =============================================================================
+[budget]
+max_runtime_seconds = 900         # 15 minutes default
+workers = 8                       # Parallel workers
+seeds = [42, 123, 456]            # Default seeds for reproducibility
+top_k = 10                        # Top candidates for Stage B validation
+persist_stage_a_top_n = 100       # Research candidates to persist
+stress_enabled = true             # Enable stress testing
+
+# =============================================================================
+# VALIDATION THRESHOLDS
+# =============================================================================
+[validation]
+min_oos_sharpe_net = 0.5          # Minimum Sharpe for passing
+max_pbo = 0.15                    # Maximum PBO (lower is better)
+min_dsr = 0.8                     # Minimum Deflated Sharpe Ratio
+max_degradation = 0.40            # Max IS->OOS degradation
+min_trades_oos = 30               # Minimum trades in OOS period
+min_stress_passed = 4             # Minimum stress scenarios passed
+stress_total = 8                  # Total stress scenarios
+
+# =============================================================================
+# HALL OF FAME PROMOTION CRITERIA
+# =============================================================================
+[promotion]
+enabled = true
+min_oos_sharpe_net = 1.0          # Higher bar for hall of fame
+max_pbo = 0.10                    # Stricter PBO
+min_dsr = 0.8                     # Minimum DSR
+max_drawdown_net = 0.20           # Maximum 20% drawdown
+require_all_stress_passed = true  # Must pass all stress tests
+require_gates_passed = true       # Must pass all gates
+auto_copy_artifacts = true        # Copy artifacts on promotion
+
+# =============================================================================
+# PATHS
+# =============================================================================
+[paths]
+artifacts_base = "artifacts"
+hall_of_fame_dir = "artifacts/hall_of_fame"
+campaigns_dir = "configs/campaigns"
+queue_file = "dashboard/campaign_queue.json"
+
+# =============================================================================
+# NOTIFICATIONS (FUTURE)
+# =============================================================================
+[notifications]
+enabled = false
+webhook_url = ""
+slack_channel = ""
+email = ""
+

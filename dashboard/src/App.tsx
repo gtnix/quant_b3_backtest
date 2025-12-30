@@ -13,6 +13,12 @@ import { MonteCarlo } from './pages/MonteCarlo';
 import { RegimeAnalysis } from './pages/RegimeAnalysis';
 import { Cockpit } from './pages/Cockpit';
 import { StrategyView } from './pages/StrategyView';
+import { MinerControl } from './pages/MinerControl';
+import { HallOfFame } from './pages/HallOfFame';
+import { ConfigUniverse } from './pages/ConfigUniverse';
+import { ConfigTrading } from './pages/ConfigTrading';
+import { ConfigBudget } from './pages/ConfigBudget';
+import { ConfigGates } from './pages/ConfigGates';
 import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
 import { platform, features, getModeDisplay } from './lib/platform';
@@ -57,6 +63,12 @@ function BrowserModeBanner({ onDismiss, sseConnected }: { onDismiss: () => void;
 }
 
 export type Page = 
+  | 'miner'
+  | 'hall-of-fame'
+  | 'config-universe'
+  | 'config-trading'
+  | 'config-budget'
+  | 'config-gates'
   | 'cockpit'
   | 'campaigns' 
   | 'dashboard' 
@@ -71,7 +83,8 @@ export type Page =
   | 'regimes';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('cockpit');
+  // Default to miner control panel
+  const [currentPage, setCurrentPage] = useState<Page>('miner');
   const [showBrowserBanner, setShowBrowserBanner] = useState(features.showBrowserBanner);
   const [sseConnected, setSseConnected] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
@@ -124,7 +137,11 @@ function App() {
   // Listen for navigation events (from Campaigns page)
   useEffect(() => {
     const handleNavigate = (e: CustomEvent<string>) => {
-      const validPages = ['cockpit', 'campaigns', 'dashboard', 'evolution', 'candidates', 'strategy', 'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes'];
+      const validPages = [
+        'miner', 'hall-of-fame', 'config-universe', 'config-trading', 'config-budget', 'config-gates',
+        'cockpit', 'campaigns', 'dashboard', 'evolution', 'candidates', 'strategy', 
+        'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes'
+      ];
       if (validPages.includes(e.detail)) {
         setCurrentPage(e.detail as Page);
       }
@@ -136,6 +153,18 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'miner':
+        return <MinerControl />;
+      case 'hall-of-fame':
+        return <HallOfFame />;
+      case 'config-universe':
+        return <ConfigUniverse />;
+      case 'config-trading':
+        return <ConfigTrading />;
+      case 'config-budget':
+        return <ConfigBudget />;
+      case 'config-gates':
+        return <ConfigGates />;
       case 'cockpit':
         return <Cockpit />;
       case 'campaigns':
@@ -161,7 +190,7 @@ function App() {
       case 'regimes':
         return <RegimeAnalysis />;
       default:
-        return <Cockpit />;
+        return <MinerControl />;
     }
   };
 

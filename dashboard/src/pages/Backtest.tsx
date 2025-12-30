@@ -204,6 +204,7 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   const [candidates, setCandidates] = useState<RecentCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [marketFilter, setMarketFilter] = useState<'all' | 'br' | 'us'>('all');
 
   useEffect(() => {
     loadRecentCandidates();
@@ -212,7 +213,7 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   const loadRecentCandidates = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.apiBase}/candidates/recent?limit=20`);
+      const response = await fetch(`${config.apiBase}/candidates/recent?limit=50`);
       if (response.ok) {
         const data = await response.json();
         setCandidates(data.candidates || []);
@@ -224,13 +225,30 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
     }
   };
 
-  const filtered = search 
-    ? candidates.filter(c => 
-        c.display_name.toLowerCase().includes(search.toLowerCase()) ||
-        c.candidate_id.toLowerCase().includes(search.toLowerCase()) ||
-        c.campaign_name?.toLowerCase().includes(search.toLowerCase())
-      )
-    : candidates;
+  // Infer market from symbol format (B3: ends with number, US: letters only)
+  const inferMarket = (c: RecentCandidate): 'br' | 'us' => {
+    // Check display_name or candidate_id for market hints
+    const name = c.display_name || c.candidate_id || '';
+    if (/[A-Z]{4}\d/.test(name)) return 'br'; // e.g., PETR4, VALE3
+    if (/^[A-Z]{1,5}$/.test(name.split('_')[0] || '')) return 'us'; // e.g., AAPL, MSFT
+    return 'br'; // Default to B3
+  };
+
+  const filtered = candidates.filter(c => {
+    // Market filter
+    if (marketFilter !== 'all') {
+      const market = inferMarket(c);
+      if (market !== marketFilter) return false;
+    }
+    // Search filter
+    if (search) {
+      const searchLower = search.toLowerCase();
+      return c.display_name.toLowerCase().includes(searchLower) ||
+             c.candidate_id.toLowerCase().includes(searchLower) ||
+             c.campaign_name?.toLowerCase().includes(searchLower);
+    }
+    return true;
+  });
 
   if (loading) {
     return (
@@ -261,16 +279,53 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-terminal-muted" />
-        <input
-          type="text"
-          placeholder="Search by strategy name, ID, or campaign..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-11 pr-4 py-3 bg-terminal-surface border border-terminal-border rounded-xl focus:outline-none focus:border-profit text-sm"
-        />
+      {/* Search and Market Filter */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        {/* Market Selector */}
+        <div className="flex rounded-xl overflow-hidden border border-terminal-border">
+          <button
+            onClick={() => setMarketFilter('all')}
+            className={`px-4 py-3 text-sm font-medium transition-colors ${
+              marketFilter === 'all' 
+                ? 'bg-profit/20 text-profit' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🌐 All
+          </button>
+          <button
+            onClick={() => setMarketFilter('br')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              marketFilter === 'br' 
+                ? 'bg-green-500/20 text-green-400' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🇧🇷 B3
+          </button>
+          <button
+            onClick={() => setMarketFilter('us')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              marketFilter === 'us' 
+                ? 'bg-blue-500/20 text-blue-400' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🇺🇸 US
+          </button>
+        </div>
+        
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-terminal-muted" />
+          <input
+            type="text"
+            placeholder="Search by strategy name, ID, or campaign..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-11 pr-4 py-3 bg-terminal-surface border border-terminal-border rounded-xl focus:outline-none focus:border-profit text-sm"
+          />
+        </div>
       </div>
 
       {/* Stats Bar */}
