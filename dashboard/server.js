@@ -823,7 +823,8 @@ app.post('/api/scg/start', (req, res) => {
     env: { 
       ...process.env, 
       RUST_LOG: 'combiner=info',
-      NEON_DATABASE_URL: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require'
+      NEON_DATABASE_URL: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require',
+      BACKTEST_CLI_PATH: process.env.BACKTEST_CLI_PATH || path.join(PROJECT_ROOT, 'target/release/backtest')
     }
   });
   
@@ -1997,7 +1998,8 @@ async function startQueuedCampaign(campaign) {
     env: { 
       ...process.env, 
       RUST_LOG: 'combiner=info',
-      NEON_DATABASE_URL: DATABASE_URL
+      NEON_DATABASE_URL: DATABASE_URL,
+      BACKTEST_CLI_PATH: process.env.BACKTEST_CLI_PATH || path.join(PROJECT_ROOT, 'target/release/backtest')
     }
   });
   
