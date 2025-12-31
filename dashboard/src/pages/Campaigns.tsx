@@ -412,7 +412,7 @@ function TimelineCard({
             {campaign.validated_count !== undefined && (
               <MetricPill label="Validated" value={campaign.validated_count} color="profit" />
             )}
-            {campaign.best_sharpe !== undefined && (
+            {campaign.best_sharpe != null && (
               <MetricPill label="Best Sharpe" value={campaign.best_sharpe.toFixed(2)} color="profit" />
             )}
           </div>
@@ -493,7 +493,7 @@ function CampaignCard({
           {campaign.validated_count !== undefined && (
             <MetricPill label="Validated" value={campaign.validated_count} color="profit" />
           )}
-          {campaign.best_sharpe !== undefined && (
+          {campaign.best_sharpe != null && (
             <MetricPill label="Best Sharpe" value={campaign.best_sharpe.toFixed(2)} color="profit" />
           )}
         </div>
@@ -570,7 +570,7 @@ function RunRow({ run }: { run: Run }) {
         </div>
 
         {/* Best Sharpe */}
-        {run.best_sharpe !== undefined && (
+        {run.best_sharpe != null && (
           <div className="text-right min-w-[80px]">
             <div className="text-terminal-muted text-xs">Best Sharpe</div>
             <div className="font-mono font-semibold text-profit">{run.best_sharpe.toFixed(2)}</div>

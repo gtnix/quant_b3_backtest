@@ -189,7 +189,7 @@ app.get('/api/campaigns', async (req, res) => {
       git_branch: c.git_branch,
       notes: c.notes,
       runs_count: parseInt(c.runs_count) || 0,
-      best_sharpe: c.best_sharpe,
+      best_sharpe: c.best_sharpe != null ? parseFloat(c.best_sharpe) : null,
       created_at: c.created_at
     }));
     
@@ -372,17 +372,49 @@ app.get('/api/campaign/:campaignId', async (req, res) => {
   }
 });
 
-// Get run detail
-app.get('/api/run/:runId', (req, res) => {
+// Get run detail (from Neon database)
+app.get('/api/run/:runId', async (req, res) => {
   const { runId } = req.params;
-  const filePath = path.join(ARTIFACTS_ROOT, 'site', `run_${runId}.json`);
-  const data = readJsonFile(filePath);
   
-  if (!data) {
-    return res.status(404).json({ error: `Run ${runId} not found` });
+  try {
+    // Query run details from database
+    const runResult = await pool.query(`
+      SELECT r.*, c.name as campaign_name, c.tag as campaign_tag
+      FROM scg_runs r
+      LEFT JOIN scg_campaigns c ON r.campaign_id = c.campaign_id
+      WHERE r.run_id = $1
+    `, [runId]);
+    
+    if (runResult.rows.length === 0) {
+      return res.status(404).json({ error: `Run ${runId} not found` });
+    }
+    
+    const run = runResult.rows[0];
+    
+    // Return RunDetail structure expected by frontend
+    res.json({
+      schema_version: "1.0",
+      run: {
+        run_id: run.run_id,
+        campaign_id: run.campaign_id,
+        seed: run.seed,
+        status: run.status,
+        started_at: run.started_at,
+        completed_at: run.completed_at,
+        duration_secs: run.duration_secs
+      },
+      metrics: {
+        total_evaluations: run.total_evaluations || 0,
+        generations_completed: run.generations_completed || 0,
+        best_oos_sharpe_net: run.best_oos_sharpe_net
+      },
+      top_candidates: [],
+      exports: {}
+    });
+  } catch (err) {
+    console.error('Get run error:', err.message);
+    res.status(500).json({ error: err.message });
   }
-  
-  res.json(data);
 });
 
 // List recent candidates for quick selection (must be before :runId route)

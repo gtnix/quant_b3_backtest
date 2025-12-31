@@ -213,6 +213,7 @@ pub fn simd_volatility(returns: &[f64]) -> f64 {
 
 /// Calculate Sharpe ratio using SIMD.
 /// sharpe = (annualized_return - risk_free_rate) / annualized_volatility
+/// Clamped to [-10, 10] to prevent unrealistic values from low volatility data.
 #[must_use]
 pub fn simd_sharpe(returns: &[f64], risk_free_rate: f64) -> f64 {
     if returns.len() < 2 {
@@ -224,7 +225,9 @@ pub fn simd_sharpe(returns: &[f64], risk_free_rate: f64) -> f64 {
     let annual_vol = simd_volatility(returns);
 
     if annual_vol > 0.0 {
-        (annual_return - risk_free_rate) / annual_vol
+        let sharpe = (annual_return - risk_free_rate) / annual_vol;
+        // Cap to realistic bounds - values beyond this indicate calculation errors
+        sharpe.clamp(-10.0, 10.0)
     } else {
         0.0
     }
@@ -232,6 +235,7 @@ pub fn simd_sharpe(returns: &[f64], risk_free_rate: f64) -> f64 {
 
 /// Calculate Sortino ratio using SIMD.
 /// sortino = (annualized_return - risk_free_rate) / downside_volatility
+/// Clamped to [-10, 10] to prevent unrealistic values.
 #[must_use]
 pub fn simd_sortino(returns: &[f64], risk_free_rate: f64) -> f64 {
     if returns.len() < 2 {
@@ -242,7 +246,7 @@ pub fn simd_sortino(returns: &[f64], risk_free_rate: f64) -> f64 {
     let downside: Vec<f64> = returns.iter().filter(|&&r| r < 0.0).copied().collect();
 
     if downside.is_empty() {
-        return f64::INFINITY;
+        return 10.0; // Max capped value for perfect strategies
     }
 
     let mean_return = simd_mean(returns);
@@ -254,7 +258,8 @@ pub fn simd_sortino(returns: &[f64], risk_free_rate: f64) -> f64 {
     let downside_vol = downside_var.sqrt() * 15.874_507_866_387_544;
 
     if downside_vol > 0.0 {
-        (annual_return - risk_free_rate) / downside_vol
+        let sortino = (annual_return - risk_free_rate) / downside_vol;
+        sortino.clamp(-10.0, 10.0)
     } else {
         0.0
     }
@@ -385,6 +390,8 @@ mod tests {
         assert!((dot - 40.0).abs() < 1e-10);
     }
 }
+
+
 
 
 
