@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { 
   Trophy, TrendingUp, Shield, BarChart3, Clock, 
   GitBranch, Hash, Globe, ChevronDown, RefreshCw,
-  CheckCircle2, XCircle, Filter
+  CheckCircle2, XCircle, Filter, LineChart
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
 import type { HallOfFameEntry } from '../stores/ompStore';
@@ -85,11 +85,39 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
 // ENTRY CARD COMPONENT
 // =============================================================================
 
+// Check if metrics are within valid ranges (quant sanity check)
+function validateMetrics(m: HallOfFameEntry['metrics']) {
+  const issues: string[] = [];
+  
+  // Sharpe ratio sanity: realistic range is -3 to +5 for most strategies
+  if (m.oosSharpeNet != null && (m.oosSharpeNet > 10 || m.oosSharpeNet < -3)) {
+    issues.push(`Sharpe ${m.oosSharpeNet.toFixed(1)} is unrealistic`);
+  }
+  
+  // PBO should be between 0 and 1, typically 0.05-0.50
+  if (m.pbo === 0 || m.pbo == null) {
+    issues.push('PBO not computed');
+  }
+  
+  // DSR should be positive and typically 60-80% of raw Sharpe
+  if (m.dsr === 0 || m.dsr == null) {
+    issues.push('DSR not computed');
+  }
+  
+  // MaxDD should be negative and between 0 and -1
+  if (m.maxDrawdownNet == null) {
+    issues.push('MaxDD missing');
+  }
+  
+  return { valid: issues.length === 0, issues };
+}
+
 function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
   const [expanded, setExpanded] = useState(false);
   
   const metrics = entry.metrics;
   const validation = entry.validation;
+  const metricsCheck = validateMetrics(metrics);
   
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden hover:border-amber-500/50 transition-colors">
@@ -111,17 +139,27 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
         {/* Candidate Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-white text-sm truncate">{entry.candidateId}</span>
+            <span className="font-semibold text-white text-sm truncate" title={entry.candidateId}>
+              {entry.strategyName || entry.candidateId}
+            </span>
             <span className={`px-2 py-0.5 text-xs rounded-full ${
               entry.market === 'br' 
                 ? 'bg-green-500/20 text-green-400' 
                 : 'bg-blue-500/20 text-blue-400'
             }`}>
-              {entry.market.toUpperCase()}
+              {entry.market?.toUpperCase() || 'BR'}
             </span>
+            {!metricsCheck.valid && (
+              <span 
+                className="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-400 cursor-help"
+                title={metricsCheck.issues.join(', ')}
+              >
+                ⚠ Incomplete
+              </span>
+            )}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">
-            {entry.campaignName || entry.campaignId}
+          <div className="text-xs text-slate-500 mt-0.5 font-mono">
+            {entry.candidateId.slice(-12)}
           </div>
         </div>
         
@@ -218,6 +256,10 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                   <span className="text-white font-mono text-xs">{entry.provenance.configHash?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-slate-500">Dataset Hash</span>
+                  <span className="text-white font-mono text-xs">{entry.provenance.datasetHash?.slice(0, 7) || '—'}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-slate-500">Genome Hash</span>
                   <span className="text-white font-mono text-xs">{entry.genomeHash?.slice(0, 7) || '—'}</span>
                 </div>
@@ -252,6 +294,29 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
               <p className="text-xs text-slate-500">Notes: {entry.notes}</p>
             </div>
           )}
+          
+          {/* Actions */}
+          <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end gap-3">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // Navigate to backtest page with this candidate
+                window.dispatchEvent(new CustomEvent('navigate', { detail: 'backtest' }));
+                // Set selected candidate in data store via API
+                fetch(`/api/candidate/${entry.candidateId}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    // Trigger candidate selection in dataStore
+                    window.dispatchEvent(new CustomEvent('select-candidate', { detail: data }));
+                  })
+                  .catch(err => console.error('Failed to load candidate:', err));
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-accent-cyan/20 text-accent-cyan rounded-lg hover:bg-accent-cyan/30 transition-colors text-sm font-medium"
+            >
+              <LineChart className="w-4 h-4" />
+              Open Backtest
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -21,46 +21,8 @@ import { ConfigBudget } from './pages/ConfigBudget';
 import { ConfigGates } from './pages/ConfigGates';
 import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
-import { platform, features, getModeDisplay } from './lib/platform';
+import { platform, features } from './lib/platform';
 import { createSSEConnection, type SSEEvent } from './lib/commands';
-import { Monitor, X, Wifi, WifiOff } from 'lucide-react';
-
-// Browser Mode Banner Component with SSE status
-function BrowserModeBanner({ onDismiss, sseConnected }: { onDismiss: () => void; sseConnected: boolean }) {
-  const modeInfo = getModeDisplay();
-  
-  return (
-    <div className="bg-gradient-to-r from-accent-cyan/20 via-accent-purple/10 to-accent-cyan/20 border-b border-accent-cyan/30 px-4 py-2 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <Monitor className="w-4 h-4 text-accent-cyan" />
-        <span className="text-sm">
-          <span className="font-semibold text-accent-cyan">{modeInfo.icon} {modeInfo.mode} Mode</span>
-          <span className="text-terminal-muted ml-2">
-            {modeInfo.description}
-          </span>
-        </span>
-        {/* SSE Connection Status */}
-        {features.useSSE && (
-          <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs ${
-            sseConnected 
-              ? 'bg-profit/20 text-profit' 
-              : 'bg-loss/20 text-loss'
-          }`}>
-            {sseConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-            {sseConnected ? 'Live' : 'Offline'}
-          </div>
-        )}
-      </div>
-      <button 
-        onClick={onDismiss}
-        className="p-1 hover:bg-terminal-surface rounded transition-colors"
-        title="Dismiss"
-      >
-        <X className="w-4 h-4 text-terminal-muted" />
-      </button>
-    </div>
-  );
-}
 
 export type Page = 
   | 'miner'
@@ -85,10 +47,9 @@ export type Page =
 function App() {
   // Default to miner control panel
   const [currentPage, setCurrentPage] = useState<Page>('miner');
-  const [showBrowserBanner, setShowBrowserBanner] = useState(features.showBrowserBanner);
   const [sseConnected, setSseConnected] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
-  const { startWatcher, artifactsRoot, loadIndex, invalidateCache } = useDataStore();
+  const { startWatcher, artifactsRoot, loadIndex } = useDataStore();
 
   // Start file watcher when artifacts root is set (Tauri mode)
   useEffect(() => {
@@ -198,14 +159,7 @@ function App() {
     <div className="flex h-screen bg-terminal-bg">
       <Sidebar currentPage={currentPage} onPageChange={setCurrentPage} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Browser Mode Banner */}
-        {showBrowserBanner && (
-          <BrowserModeBanner 
-            onDismiss={() => setShowBrowserBanner(false)} 
-            sseConnected={sseConnected}
-          />
-        )}
-        <Header />
+        <Header sseConnected={sseConnected} />
         <main className="flex-1 overflow-auto p-6 grid-bg">
           {renderPage()}
         </main>

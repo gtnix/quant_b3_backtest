@@ -574,6 +574,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                                 oos_sharpe_mean: cached.oos_sharpe_mean,
                                 oos_sharpe_std: cached.oos_sharpe_std,
                                 oos_cagr_median: cached.oos_cagr_median,
+                                oos_max_dd_worst: cached.oos_max_dd_worst,
                                 degradation_pct: cached.degradation_pct,
                                 pbo: cached.pbo,
                                 dsr: cached.dsr,
@@ -611,6 +612,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                             oos_sharpe_mean: mock_oos_sharpe,
                             oos_sharpe_std: 0.15,
                             oos_cagr_median: fitness.cagr * 0.8,
+                            oos_max_dd_worst: fitness.max_drawdown * 1.2, // Conservative estimate for OOS
                             degradation_pct: mock_degradation,
                             pbo: mock_pbo,
                             dsr: mock_dsr,

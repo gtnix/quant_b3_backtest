@@ -777,5 +777,167 @@ mod tests {
         assert!((gates.max_turnover_annual - 12.0).abs() < f64::EPSILON);
         assert!((gates.min_capacity_usd - 5_000_000.0).abs() < f64::EPSILON);
     }
+
+    // =========================================================================
+    // Phase 2.2: Comprehensive B3 Fee Validation
+    // =========================================================================
+
+    #[test]
+    fn test_b3_retail_fee_structure() {
+        let fee = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        
+        // Verify B3 retail rates
+        assert_eq!(fee.fixed_per_trade, 10.0, "B3 retail fixed fee should be R$10");
+        assert!((fee.commission_rate - 0.0015).abs() < 1e-6, "B3 retail commission should be 0.15%");
+        assert!((fee.emolument_rate - 0.00035).abs() < 1e-6, "B3 emolument should be 0.035%");
+    }
+
+    #[test]
+    fn test_b3_prime_fee_structure() {
+        let fee = FeeModelConfig::from_tier(FeeTier::B3Prime);
+        
+        // B3 Prime has lower costs
+        assert!(fee.fixed_per_trade < 10.0, "B3 Prime should have lower fixed fee");
+        assert!(fee.commission_rate < 0.0015, "B3 Prime should have lower commission");
+        // Emolument is the same (exchange fee)
+        assert!((fee.emolument_rate - 0.00035).abs() < 1e-6, "Emolument should be same");
+    }
+
+    #[test]
+    fn test_b3_fee_calculation_known_values() {
+        let fee = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        
+        // Trade: 1000 shares of R$50 = R$50,000 notional
+        // Fixed: R$10
+        // Commission: R$50,000 * 0.15% = R$75
+        // Emolument: R$50,000 * 0.035% = R$17.50
+        // Total: R$102.50
+        let cost = fee.calculate(50_000.0, 1000);
+        assert!((cost - 102.50).abs() < 0.01, "B3 retail cost should be R$102.50, got {}", cost);
+    }
+
+    #[test]
+    fn test_b3_fee_round_lot_enforcement() {
+        // B3 requires round lots of 100 shares
+        // Fees should be calculated the same way regardless
+        let fee = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        
+        let cost_100 = fee.calculate(5_000.0, 100);
+        let cost_200 = fee.calculate(10_000.0, 200);
+        
+        // Cost for 200 shares should be roughly 2x (minus fixed portion)
+        let variable_100 = cost_100 - fee.fixed_per_trade;
+        let variable_200 = cost_200 - fee.fixed_per_trade;
+        
+        assert!((variable_200 / variable_100 - 2.0).abs() < 0.01,
+            "Variable costs should scale linearly: {} / {} = {}", 
+            variable_200, variable_100, variable_200 / variable_100);
+    }
+
+    #[test]
+    fn test_us_retail_fee_structure() {
+        let fee = FeeModelConfig::from_tier(FeeTier::USRetail);
+        
+        // Verify US retail has per-share cost
+        assert!(fee.per_unit_cost > 0.0, "US retail should have per-share cost");
+        // SEC fee is very small
+        assert!(fee.emolument_rate < 0.0001, "SEC fee should be < 0.01%");
+    }
+
+    #[test]
+    fn test_us_retail_fee_calculation() {
+        let fee = FeeModelConfig::from_tier(FeeTier::USRetail);
+        
+        // Trade: 100 shares at $150 = $15,000 notional
+        // Fixed: $1
+        // Commission: $15,000 * 0.1% = $15
+        // Per-unit: 100 * $0.005 = $0.50
+        // SEC fee: $15,000 * 0.002% = $0.30
+        // Total: ~$16.80
+        let cost = fee.calculate(15_000.0, 100);
+        assert!(cost > 15.0 && cost < 20.0, "US retail cost should be ~$16-17, got {}", cost);
+    }
+
+    #[test]
+    fn test_fee_zero_notional() {
+        let fee = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        
+        let cost = fee.calculate(0.0, 0);
+        // Should still have fixed cost
+        assert_eq!(cost, fee.fixed_per_trade, "Zero trade should only have fixed cost");
+    }
+
+    #[test]
+    fn test_fee_tier_ordering() {
+        // Prime should always be cheaper than retail
+        let b3_retail = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        let b3_prime = FeeModelConfig::from_tier(FeeTier::B3Prime);
+        
+        let cost_retail = b3_retail.calculate(100_000.0, 1000);
+        let cost_prime = b3_prime.calculate(100_000.0, 1000);
+        
+        assert!(cost_prime < cost_retail, 
+            "Prime {} should be cheaper than retail {}", cost_prime, cost_retail);
+    }
+
+    #[test]
+    fn test_custom_fee_tier() {
+        let fee = FeeModelConfig::from_tier(FeeTier::Custom);
+        
+        // Custom tier should have zero costs
+        let cost = fee.calculate(100_000.0, 1000);
+        assert_eq!(cost, 0.0, "Custom tier should have zero cost");
+    }
+
+    #[test]
+    fn test_fee_config_validation() {
+        let valid = FeeModelConfig::from_tier(FeeTier::B3Retail);
+        assert!(valid.validate().is_ok());
+        
+        // Negative commission rate should fail
+        let invalid = FeeModelConfig {
+            commission_rate: -0.001,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err(), "Negative commission should fail");
+    }
+
+    #[test]
+    fn test_slippage_config_presets() {
+        // Test all slippage model variants
+        let configs = vec![
+            SlippageModelConfig::None,
+            SlippageModelConfig::Constant { bps: 10.0 },
+            SlippageModelConfig::VolumeImpact {
+                base_bps: 5.0,
+                volume_factor: 0.5,
+                max_participation: 0.1,
+            },
+            SlippageModelConfig::VolatilityAdaptive {
+                base_bps: 5.0,
+                vol_factor: 0.3,
+                regime_multiplier: 2.0,
+                regime_vol_threshold: 0.25,
+            },
+            SlippageModelConfig::SpreadProxy {
+                base_bps: 5.0,
+                spread_factor: 0.5,
+            },
+        ];
+        
+        for config in configs {
+            assert!(config.validate().is_ok(), "Valid config should pass: {:?}", config);
+        }
+    }
+
+    #[test]
+    fn test_execution_model_config_bypass() {
+        let mut config = ExecutionModelConfig::mvp();
+        config.bypass_for_debug = true;
+        
+        // With bypass, effective costs should be zero
+        // (This is tested at the execution level, but config should preserve the flag)
+        assert!(config.bypass_for_debug);
+    }
 }
 

@@ -78,7 +78,9 @@ pub fn sharpe_simd(returns: &[f64], rf_rate: f64) -> f64 {
     let mean = total_sum / n_f64;
     let variance = (total_sq / n_f64) - (mean * mean);
     
-    if variance <= 1e-20 {
+    // Use 1e-10 threshold for numerical stability
+    // 1e-20 is too small and can produce unstable results
+    if variance <= 1e-10 {
         return 0.0;
     }
     
@@ -107,7 +109,8 @@ pub fn sharpe_scalar(returns: &[f64], rf_rate: f64) -> f64 {
     let mean = sum / n_f64;
     let variance = (sum_sq / n_f64) - (mean * mean);
     
-    if variance <= 1e-20 {
+    // Use 1e-10 threshold for numerical stability
+    if variance <= 1e-10 {
         return 0.0;
     }
     
@@ -685,6 +688,353 @@ mod tests {
         
         assert_eq!(sharpe_simd(&single, 0.0), 0.0);
         assert_eq!(volatility_simd(&single), 0.0);
+    }
+
+    // =========================================================================
+    // Phase 1 Validation: Comprehensive Core Metrics Tests
+    // =========================================================================
+
+    #[test]
+    fn test_sharpe_all_positive_returns() {
+        // All positive returns should yield positive Sharpe
+        let returns = vec![0.01, 0.02, 0.015, 0.005, 0.01, 0.02, 0.008, 0.012];
+        let sharpe = sharpe_simd(&returns, 0.0);
+        assert!(sharpe > 0.0, "All positive returns should have positive Sharpe: {}", sharpe);
+        
+        // With rf > mean, Sharpe should be negative
+        let sharpe_high_rf = sharpe_simd(&returns, 0.05);
+        assert!(sharpe_high_rf < sharpe, "Higher rf should reduce Sharpe");
+    }
+
+    #[test]
+    fn test_sharpe_all_negative_returns() {
+        // All negative returns should yield negative Sharpe
+        let returns = vec![-0.01, -0.02, -0.015, -0.005, -0.01, -0.02, -0.008, -0.012];
+        let sharpe = sharpe_simd(&returns, 0.0);
+        assert!(sharpe < 0.0, "All negative returns should have negative Sharpe: {}", sharpe);
+    }
+
+    #[test]
+    fn test_sharpe_known_values() {
+        // Known synthetic series: mean = 0.01, std = 0.02
+        // Sharpe (annualized) = (0.01 / 0.02) * sqrt(252) ≈ 7.94
+        let returns = vec![0.01; 252]; // Constant 1% daily return
+        let sharpe = sharpe_simd(&returns, 0.0);
+        // With zero variance, should return 0
+        assert_eq!(sharpe, 0.0, "Constant returns have zero variance, Sharpe = 0");
+
+        // Variable returns with known statistics
+        // If we have mean ≈ 0.001 and std ≈ 0.01, Sharpe ≈ 0.1 * sqrt(252) ≈ 1.59
+        let mut variable_returns: Vec<f64> = (0..252).map(|i| {
+            if i % 2 == 0 { 0.011 } else { -0.009 } // mean ≈ 0.001
+        }).collect();
+        let sharpe_var = sharpe_simd(&variable_returns, 0.0);
+        assert!(sharpe_var > 0.0 && sharpe_var < 5.0, "Sharpe should be reasonable: {}", sharpe_var);
+    }
+
+    #[test]
+    fn test_sharpe_symmetry() {
+        // Property: negate all returns → negate Sharpe
+        let returns = vec![0.01, 0.02, -0.01, 0.015, 0.005, -0.005, 0.01, 0.02];
+        let negated: Vec<f64> = returns.iter().map(|r| -r).collect();
+        
+        let sharpe_pos = sharpe_simd(&returns, 0.0);
+        let sharpe_neg = sharpe_simd(&negated, 0.0);
+        
+        assert!((sharpe_pos + sharpe_neg).abs() < 1e-10, 
+            "Sharpe symmetry: {} vs {}", sharpe_pos, sharpe_neg);
+    }
+
+    #[test]
+    fn test_max_drawdown_monotonic_up() {
+        // Monotonically increasing NAV should have 0 drawdown
+        let returns = vec![0.01, 0.01, 0.01, 0.01, 0.01];
+        let dd = max_drawdown_simd(&returns);
+        assert_eq!(dd, 0.0, "Monotonic up should have 0 drawdown: {}", dd);
+    }
+
+    #[test]
+    fn test_max_drawdown_crash_50_percent() {
+        // 50% crash: NAV goes 1.0 -> 1.1 -> 0.55
+        // Returns: +10%, -50%
+        let returns = vec![0.10, -0.50];
+        let dd = max_drawdown_simd(&returns);
+        // Peak = 1.1, Trough = 0.55, DD = (0.55 - 1.1) / 1.1 = -0.5
+        assert!((dd - (-0.50)).abs() < 0.01, "50% crash should give -0.50 DD: {}", dd);
+    }
+
+    #[test]
+    fn test_max_drawdown_bounds() {
+        // Property: DD is always in [-1, 0]
+        let test_cases = vec![
+            vec![0.5, -0.99, 0.5],  // Near total loss
+            vec![0.01; 100],       // All positive
+            vec![-0.01; 100],      // All negative
+            vec![0.1, -0.1, 0.1, -0.1],  // Alternating
+        ];
+        
+        for returns in test_cases {
+            let dd = max_drawdown_simd(&returns);
+            assert!(dd >= -1.0 && dd <= 0.0, 
+                "DD must be in [-1, 0]: {} for {:?}", dd, &returns[..returns.len().min(5)]);
+        }
+    }
+
+    #[test]
+    fn test_max_drawdown_recovery() {
+        // Crash and full recovery
+        let returns = vec![0.10, -0.20, 0.30, 0.05];
+        // NAV: 1.0 -> 1.1 -> 0.88 -> 1.144 -> 1.2
+        // Peak at 1.1, trough at 0.88, DD = (0.88 - 1.1) / 1.1 = -0.2
+        let dd = max_drawdown_simd(&returns);
+        assert!((dd - (-0.20)).abs() < 0.01, "DD should be ~-0.20: {}", dd);
+    }
+
+    #[test]
+    fn test_cagr_exact_year() {
+        // 252 days of constant 0.04% daily ≈ 10% annual
+        let daily_return = 0.1_f64.ln() / 252.0; // Exact 10% annual
+        let returns: Vec<f64> = (0..252).map(|_| (1.0 + daily_return).ln().exp() - 1.0).collect();
+        
+        // Using simple approximation
+        let simple_returns: Vec<f64> = (0..252).map(|_| 0.0003968).collect();
+        let c = cagr(&simple_returns);
+        assert!(c > 0.05 && c < 0.15, "CAGR should be ~10%: {}", c);
+    }
+
+    #[test]
+    fn test_cagr_partial_year() {
+        // 126 days (half year) with same daily return
+        let returns: Vec<f64> = (0..126).map(|_| 0.0004).collect();
+        let c = cagr(&returns);
+        // Should still annualize correctly
+        assert!(c.is_finite(), "CAGR should be finite for partial year: {}", c);
+    }
+
+    #[test]
+    fn test_sortino_all_positive() {
+        // All positive returns → downside deviation = 0 → Sortino should be capped or high
+        let returns = vec![0.01, 0.02, 0.015, 0.005, 0.01];
+        let sortino = sortino_simd(&returns, 0.0, 0.0);
+        // With no downside, Sortino should be positive (capped or high)
+        assert!(sortino >= 0.0, "All positive should have non-negative Sortino: {}", sortino);
+    }
+
+    #[test]
+    fn test_sortino_all_negative() {
+        // All negative returns → high downside deviation
+        let returns = vec![-0.01, -0.02, -0.015, -0.005, -0.01];
+        let sortino = sortino_simd(&returns, 0.0, 0.0);
+        assert!(sortino < 0.0, "All negative should have negative Sortino: {}", sortino);
+    }
+
+    #[test]
+    fn test_calmar_divide_by_zero() {
+        // No drawdown (monotonic up) → Calmar should handle gracefully
+        let returns = vec![0.01, 0.01, 0.01, 0.01, 0.01];
+        let calmar = calmar_ratio(&returns);
+        // Should return 0 or handle gracefully (not inf/nan)
+        assert!(calmar == 0.0 || calmar.is_finite(), 
+            "Calmar should handle zero DD: {}", calmar);
+    }
+
+    #[test]
+    fn test_profit_factor_no_losses() {
+        // All positive returns → profit factor should handle gracefully
+        let returns = vec![0.01, 0.02, 0.015, 0.005, 0.01];
+        let pf = profit_factor(&returns);
+        // With no losses, PF should be capped or high (impl uses 100 cap)
+        assert!(pf >= 1.0, "No losses should give high PF: {}", pf);
+    }
+
+    #[test]
+    fn test_profit_factor_no_gains() {
+        // All negative returns → profit factor = 0
+        let returns = vec![-0.01, -0.02, -0.015, -0.005, -0.01];
+        let pf = profit_factor(&returns);
+        assert_eq!(pf, 0.0, "No gains should give PF = 0: {}", pf);
+    }
+
+    #[test]
+    fn test_profit_factor_known_value() {
+        // Gains = 0.05, Losses = 0.02 → PF = 2.5
+        let returns = vec![0.02, -0.01, 0.03, -0.01];
+        let pf = profit_factor(&returns);
+        assert!((pf - 2.5).abs() < 0.01, "PF should be 2.5: {}", pf);
+    }
+
+    #[test]
+    fn test_extreme_values() {
+        // Very large positive returns
+        let large = vec![0.5, 0.5, 0.5, 0.5]; // 50% daily returns
+        let sharpe_large = sharpe_simd(&large, 0.0);
+        assert!(sharpe_large == 0.0 || sharpe_large.is_finite(), 
+            "Large returns should give finite Sharpe: {}", sharpe_large);
+        
+        // Very small returns
+        let tiny = vec![1e-10, -1e-10, 1e-10, -1e-10];
+        let sharpe_tiny = sharpe_simd(&tiny, 0.0);
+        assert!(sharpe_tiny.is_finite(), "Tiny returns should give finite Sharpe: {}", sharpe_tiny);
+    }
+
+    #[test]
+    fn test_volatility_annualization() {
+        // Daily vol of 1% → Annual vol ≈ 15.87%
+        // Generate returns with std ≈ 0.01
+        let returns: Vec<f64> = (0..252).map(|i| {
+            if i % 2 == 0 { 0.01 } else { -0.01 }
+        }).collect();
+        
+        let vol = volatility_simd(&returns);
+        // std(returns) ≈ 0.01, annualized ≈ 0.01 * sqrt(252) ≈ 0.159
+        assert!(vol > 0.1 && vol < 0.25, "Annualized vol should be ~15.9%: {}", vol);
+    }
+
+    #[test]
+    fn test_metrics_consistency() {
+        // Calmar = CAGR / |MaxDD|
+        let returns = generate_returns(252, 0.0003, 0.015);
+        let batch = calculate_all_metrics(&returns, 0.0);
+        
+        if batch.max_drawdown < -0.001 {
+            let expected_calmar = batch.cagr / batch.max_drawdown.abs();
+            assert!((batch.calmar_ratio - expected_calmar).abs() < 0.01,
+                "Calmar should be CAGR/|MaxDD|: {} vs {}", batch.calmar_ratio, expected_calmar);
+        }
+    }
+
+    // =========================================================================
+    // Phase 7: Property-Based Tests for Key Invariants
+    // =========================================================================
+
+    #[test]
+    fn test_property_sharpe_symmetry() {
+        // Property: negate all returns → negate Sharpe
+        let test_cases = vec![
+            vec![0.01, 0.02, -0.01, 0.015],
+            vec![0.001, -0.002, 0.003, -0.001, 0.002],
+            vec![-0.05, 0.03, -0.02, 0.04, -0.01],
+        ];
+        
+        for returns in test_cases {
+            let negated: Vec<f64> = returns.iter().map(|r| -r).collect();
+            let sharpe_pos = sharpe_simd(&returns, 0.0);
+            let sharpe_neg = sharpe_simd(&negated, 0.0);
+            
+            assert!((sharpe_pos + sharpe_neg).abs() < 1e-9, 
+                "Sharpe symmetry failed: {} vs {}", sharpe_pos, sharpe_neg);
+        }
+    }
+
+    #[test]
+    fn test_property_drawdown_bounds() {
+        // Property: DD is always in [-1, 0]
+        let seeds = vec![42, 123, 456, 789, 1001];
+        
+        for seed in seeds {
+            let mut rng_state = seed as f64;
+            let returns: Vec<f64> = (0..100).map(|_| {
+                rng_state = (rng_state * 1.1 + 0.3) % 1.0;
+                (rng_state - 0.5) * 0.1
+            }).collect();
+            
+            let dd = max_drawdown_simd(&returns);
+            assert!(dd >= -1.0 && dd <= 0.0, 
+                "DD {} not in [-1, 0] for seed {}", dd, seed);
+        }
+    }
+
+    #[test]
+    fn test_property_volatility_non_negative() {
+        // Property: Volatility is always >= 0
+        let test_cases = vec![
+            vec![0.0; 10],
+            vec![0.01; 10],
+            vec![-0.01; 10],
+            vec![0.1, -0.1, 0.1, -0.1],
+            vec![0.001, 0.002, 0.001, 0.002],
+        ];
+        
+        for returns in test_cases {
+            let vol = volatility_simd(&returns);
+            assert!(vol >= 0.0, "Volatility should be >= 0: {}", vol);
+        }
+    }
+
+    #[test]
+    fn test_property_sortino_vs_sharpe() {
+        // Property: Both Sortino and Sharpe should be positive for positive excess returns
+        let mixed_returns = vec![0.01, -0.005, 0.02, -0.01, 0.015, -0.005, 0.01];
+        
+        let sharpe = sharpe_simd(&mixed_returns, 0.0);
+        let sortino = sortino_simd(&mixed_returns, 0.0, 0.0);
+        
+        // Both should have same sign for mixed returns
+        if sharpe > 0.0 {
+            assert!(sortino >= 0.0, 
+                "Sortino {} should be non-negative when Sharpe {} is positive", sortino, sharpe);
+        }
+        
+        // Negative returns should give negative metrics
+        let negative_returns = vec![-0.01, -0.02, -0.015, -0.01, -0.02];
+        let sharpe_neg = sharpe_simd(&negative_returns, 0.0);
+        let sortino_neg = sortino_simd(&negative_returns, 0.0, 0.0);
+        
+        assert!(sharpe_neg < 0.0, "Negative returns should have negative Sharpe");
+        assert!(sortino_neg <= 0.0, "Negative returns should have non-positive Sortino");
+    }
+
+    #[test]
+    fn test_property_profit_factor_positive() {
+        // Property: PF is always >= 0
+        let test_cases = vec![
+            vec![0.01, -0.01, 0.02, -0.02],
+            vec![0.01, 0.02, 0.03],  // All positive
+            vec![-0.01, -0.02, -0.03],  // All negative
+            vec![0.0, 0.0, 0.0],  // All zeros
+        ];
+        
+        for returns in test_cases {
+            let pf = profit_factor(&returns);
+            assert!(pf >= 0.0, "Profit factor should be >= 0: {}", pf);
+        }
+    }
+
+    #[test]
+    fn test_property_metrics_finite() {
+        // Property: All metrics should be finite (no NaN/Inf)
+        let test_cases = vec![
+            generate_returns(100, 0.0, 0.01),
+            generate_returns(252, 0.001, 0.02),
+            vec![0.01; 50],  // Constant
+            vec![0.0; 50],   // All zeros
+        ];
+        
+        for returns in test_cases {
+            let batch = calculate_all_metrics(&returns, 0.0);
+            
+            assert!(batch.sharpe_ratio.is_finite(), "Sharpe should be finite");
+            assert!(batch.volatility.is_finite(), "Volatility should be finite");
+            assert!(batch.max_drawdown.is_finite(), "MaxDD should be finite");
+            assert!(batch.cagr.is_finite(), "CAGR should be finite");
+            assert!(batch.calmar_ratio.is_finite(), "Calmar should be finite");
+        }
+    }
+
+    #[test]
+    fn test_stress_large_returns_vector() {
+        // Stress: 1M bars
+        let returns: Vec<f64> = (0..1_000_000)
+            .map(|i| if i % 3 == 0 { 0.001 } else { -0.0005 })
+            .collect();
+        
+        let sharpe = sharpe_simd(&returns, 0.0);
+        let dd = max_drawdown_simd(&returns);
+        let vol = volatility_simd(&returns);
+        
+        assert!(sharpe.is_finite(), "Sharpe finite for 1M bars");
+        assert!(dd.is_finite(), "MaxDD finite for 1M bars");
+        assert!(vol.is_finite(), "Vol finite for 1M bars");
     }
 }
 

@@ -140,6 +140,12 @@ pub struct ArenaMetrics {
     pub is_max_dd: f64,
     pub oos_max_dd: f64,
     pub oos_trades: u32,
+    /// Skewness of OOS returns (gamma_3) for PSR/DSR calculations
+    pub oos_skewness: f64,
+    /// Excess kurtosis of OOS returns (gamma_4) for PSR/DSR calculations
+    pub oos_kurtosis: f64,
+    /// Number of OOS observations
+    pub oos_n_observations: usize,
     pub passed: bool,
 }
 
@@ -154,6 +160,9 @@ impl Default for ArenaMetrics {
             is_max_dd: 0.0,
             oos_max_dd: 0.0,
             oos_trades: 0,
+            oos_skewness: 0.0,
+            oos_kurtosis: 0.0,
+            oos_n_observations: 252,
             passed: false,
         }
     }
@@ -330,6 +339,9 @@ mod tests {
                 is_max_dd: -0.10,
                 oos_max_dd: -0.15,
                 oos_trades: 50,
+                oos_skewness: -0.3,
+                oos_kurtosis: 3.0,
+                oos_n_observations: 252,
                 passed: i < 5,
             });
         }

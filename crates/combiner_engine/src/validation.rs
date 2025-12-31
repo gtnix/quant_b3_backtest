@@ -356,8 +356,12 @@ impl<E: BacktestExecutor> GenomeValidatorAntiOverfit<E> {
         }
 
         let oos_mean: f64 = oos_sharpes.iter().sum::<f64>() / n as f64;
-        let oos_var: f64 =
-            oos_sharpes.iter().map(|x| (x - oos_mean).powi(2)).sum::<f64>() / n as f64;
+        // Apply Bessel's correction (n-1) for unbiased sample variance
+        let oos_var: f64 = if n > 1 {
+            oos_sharpes.iter().map(|x| (x - oos_mean).powi(2)).sum::<f64>() / (n - 1) as f64
+        } else {
+            0.0
+        };
         let oos_std = oos_var.sqrt();
 
         let pbo = if oos_std > 0.0 {
@@ -369,8 +373,16 @@ impl<E: BacktestExecutor> GenomeValidatorAntiOverfit<E> {
             0.0
         };
 
-        let trial_adjustment = 1.0 - (total_trials as f64).ln() / 100.0;
-        let dsr = is_sharpe * (1.0 - pbo) * trial_adjustment.max(0.5);
+        // DSR: proper Bailey & López de Prado (2014) formula
+        // Uses OOS Sharpe and PSR against expected max under null
+        let dsr = crate::statistics::calculate_dsr(
+            oos_mean,               // OOS Sharpe (not IS)
+            n * 252,                // Approximate annual observations
+            0.0,                    // Default skewness (normal)
+            0.0,                    // Default excess kurtosis (normal)
+            total_trials as usize,  // Number of strategies tested
+            oos_var,                // Variance of OOS Sharpes
+        );
 
         let passed = pbo < self.config.max_pbo && dsr >= self.config.min_dsr;
 

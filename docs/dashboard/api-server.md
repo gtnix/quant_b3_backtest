@@ -1,6 +1,6 @@
 # API Server - Referência
 
-**Versão**: 2.1.0  
+**Versão**: 2.2.0  
 **Última Atualização**: 2025-12-30
 
 ---
@@ -122,6 +122,27 @@ Ver [VPS Deployment](vps-deployment.md) para configuração com nginx + PM2.
 |----------|--------|-----------|
 | `/api/events` | GET | Stream SSE com reconnection support |
 | `/api/poll-changes` | GET | Polling de mudanças (fallback) |
+
+---
+
+### OMP (Orquestrador de Mineração Perpétua)
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/api/omp/status` | GET | Status do OMP |
+| `/api/omp/start` | POST | Iniciar daemon |
+| `/api/omp/stop` | POST | Parar daemon |
+| `/api/omp/pause` | POST | Pausar temporariamente |
+| `/api/omp/resume` | POST | Retomar execução |
+| `/api/omp/resources` | GET | Recursos do sistema (CPU, MEM, Disk) |
+| `/api/omp/queue` | GET | Fila de campanhas |
+| `/api/omp/queue` | POST | Adicionar à fila |
+| `/api/omp/queue/:id` | PATCH | Atualizar item na fila |
+| `/api/omp/queue/:id` | DELETE | Remover da fila |
+| `/api/omp/config` | GET | Configuração atual |
+| `/api/omp/promote-check` | GET | **Sanity check de promoção (SEV-0)** |
+| `/api/omp/hall-of-fame` | GET | Hall of Fame entries |
+| `/api/omp/stats` | GET | Estatísticas gerais |
 
 ---
 
@@ -261,6 +282,127 @@ Retorna progresso de um run.
   "error_message": null
 }
 ```
+
+---
+
+### GET /api/omp/promote-check (SEV-0)
+
+Executa verificação de sanidade para promoção sem promover candidatos. Bloqueia se métricas colapsaram (variance ~0).
+
+**Query Parameters:**
+| Param | Tipo | Default | Descrição |
+|-------|------|---------|-----------|
+| `runId` | string | null | Opcional: filtrar por run específico |
+
+**Response:**
+```json
+{
+  "blocked": false,
+  "reason": null,
+  "details": {
+    "sharpeVar": "1.234e-2",
+    "pboVar": "5.678e-4",
+    "dsrVar": "9.012e-3",
+    "candidatesChecked": 100,
+    "incompleteMetrics": 3
+  }
+}
+```
+
+**Blocked Response (SEV-0):**
+```json
+{
+  "blocked": true,
+  "reason": "metrics_collapsed",
+  "details": {
+    "sharpeVar": "1.234e-9",
+    "pboVar": "0.000e+0",
+    "dsrVar": "5.678e-10",
+    "candidatesChecked": 50,
+    "incompleteMetrics": 0
+  }
+}
+```
+
+---
+
+### GET /api/omp/hall-of-fame
+
+Retorna Hall of Fame com strategy names e provenance completo.
+
+**Query Parameters:**
+| Param | Tipo | Default | Descrição |
+|-------|------|---------|-----------|
+| `limit` | number | 50 | Máximo de entries |
+| `market` | string | null | Filtrar por mercado (br/us) |
+
+**Response:**
+```json
+{
+  "count": 50,
+  "entries": [
+    {
+      "promotionId": "prom_abc123",
+      "candidateId": "cand_xyz789",
+      "genomeHash": "a1b2c3d4...",
+      "strategyName": "BR • MomentumQ1 • #ABC123",
+      "campaignId": "camp_001",
+      "campaignName": "Momentum Q1 2025",
+      "runId": "run_001",
+      "market": "br",
+      "promotedAt": "2025-12-30T10:00:00Z",
+      "metrics": {
+        "oosSharpeNet": 1.45,
+        "pbo": 0.08,
+        "dsr": 1.85,
+        "maxDrawdownNet": -0.12,
+        "cagrNet": 0.28
+      },
+      "validation": {
+        "stressPassed": 5,
+        "stressTotal": 5,
+        "gatesPassed": true
+      },
+      "provenance": {
+        "gitSha": "abc123def",
+        "configHash": "cfg789xyz",
+        "datasetHash": "ds456abc"
+      },
+      "notes": "Auto-promoted by OMP"
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/omp/resources
+
+Retorna recursos do sistema com métricas de disco expandidas.
+
+**Response:**
+```json
+{
+  "cpuUsage": 45.2,
+  "memoryUsagePct": 68.5,
+  "memoryAvailableMb": 4096,
+  "diskFreeGb": 125.6,
+  "diskFreePct": 52.3,
+  "diskWritten24h": 45.8,
+  "writeRateMbPerSec": 12.5,
+  "writeAcceleration": 0.025,
+  "canStartCampaign": true
+}
+```
+
+**Campos de Disco (SEV-0):**
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `diskFreeGb` | number | Espaço livre em GB |
+| `diskFreePct` | number | Espaço livre em % |
+| `diskWritten24h` | number | GB escritos nas últimas 24h |
+| `writeRateMbPerSec` | number | Taxa de escrita (MB/s, janela 5min) |
+| `writeAcceleration` | number | Aceleração de escrita (MB/s²) |
 
 ---
 

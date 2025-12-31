@@ -426,7 +426,7 @@ async fn execute_single_run(
             turnover_annual: 0.0, // Not available in summary
             capacity_usd: None,   // Not available in summary
             oos_cagr_net: Some(entry.validation.oos_cagr_median as f32),
-            max_drawdown_net: None, // Not available in ValidationResultSummary
+            max_drawdown_net: Some(entry.validation.oos_max_dd_worst as f32),
         });
 
         // Save strategy config

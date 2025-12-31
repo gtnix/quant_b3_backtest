@@ -537,6 +537,205 @@ mod tests {
         assert_eq!(sectors[0].gross, dec!(5100));
         assert_eq!(sectors[0].weight_pct, dec!(100));
     }
+
+    // =========================================================================
+    // Phase 1.3: Comprehensive Risk Metrics Validation
+    // VaR, CVaR, Beta, Tracking Error with known distributions
+    // =========================================================================
+
+    #[test]
+    fn test_var_known_percentiles() {
+        let calc = RiskCalculator::default();
+        
+        // Create a uniform distribution from -10% to +10%
+        // For 100 values: 5th percentile = -9%, 1st percentile = -10%
+        let returns: Vec<Decimal> = (0..100)
+            .map(|i| Decimal::from(i as i32 - 50) / Decimal::from(500))
+            .collect();
+        // Range: -0.10 to +0.098 (approximately)
+        
+        let var = calc.calculate_var(&returns, dec!(100000));
+        
+        // VaR95 should be around -9% * 100000 = -9000
+        // VaR99 should be around -10% * 100000 = -10000
+        assert!(var.var_95 < Decimal::ZERO, "VaR95 should be negative: {}", var.var_95);
+        assert!(var.var_99 <= var.var_95, "VaR99 {} should be <= VaR95 {}", var.var_99, var.var_95);
+    }
+
+    #[test]
+    fn test_var_property_ordering() {
+        // Property: VaR99 >= VaR95 in absolute terms (both are losses)
+        let calc = RiskCalculator::default();
+        
+        let returns: Vec<Decimal> = (-50..50)
+            .map(|i| Decimal::from(i) / Decimal::from(1000))
+            .collect();
+        
+        let var = calc.calculate_var(&returns, dec!(100000));
+        
+        assert!(var.var_99.abs() >= var.var_95.abs() || var.var_99 == var.var_95,
+            "VaR99 should be more extreme than VaR95: {} vs {}", var.var_99, var.var_95);
+    }
+
+    #[test]
+    fn test_var_scaled_by_portfolio_value() {
+        let calc = RiskCalculator::default();
+        
+        let returns: Vec<Decimal> = vec![dec!(-0.05), dec!(0.01), dec!(-0.02), dec!(0.03)];
+        
+        let var_100k = calc.calculate_var(&returns, dec!(100000));
+        let var_200k = calc.calculate_var(&returns, dec!(200000));
+        
+        // VaR should scale linearly with portfolio value
+        let ratio = if var_100k.var_95 != Decimal::ZERO {
+            var_200k.var_95 / var_100k.var_95
+        } else {
+            Decimal::from(2)
+        };
+        
+        assert!((ratio - dec!(2)).abs() < dec!(0.01),
+            "VaR should scale with portfolio: ratio = {}", ratio);
+    }
+
+    #[test]
+    fn test_volatility_known_returns() {
+        let calc = RiskCalculator::default();
+        
+        // Returns with known daily volatility
+        // If all returns are +1%, daily vol = 0
+        let constant_returns = vec![dec!(0.01); 10];
+        let vol_const = calc.calculate_volatility(&constant_returns);
+        assert_eq!(vol_const.daily_vol, Decimal::ZERO, "Constant returns should have 0 vol");
+        
+        // Alternating returns: +1%, -1%, +1%, -1%...
+        // Mean = 0, variance = 0.01^2 = 0.0001
+        let alternating: Vec<Decimal> = (0..100)
+            .map(|i| if i % 2 == 0 { dec!(0.01) } else { dec!(-0.01) })
+            .collect();
+        let vol_alt = calc.calculate_volatility(&alternating);
+        
+        // Daily vol should be approximately 0.01
+        assert!((vol_alt.daily_vol - dec!(0.01)).abs() < dec!(0.001),
+            "Alternating +/-1% should have daily vol ~0.01, got {}", vol_alt.daily_vol);
+    }
+
+    #[test]
+    fn test_volatility_annualization() {
+        let calc = RiskCalculator::default();
+        
+        // Create returns with known volatility
+        let returns: Vec<Decimal> = (0..252)
+            .map(|i| if i % 2 == 0 { dec!(0.01) } else { dec!(-0.01) })
+            .collect();
+        
+        let vol = calc.calculate_volatility(&returns);
+        
+        // Annualized vol = daily_vol * sqrt(252)
+        // sqrt(252) ≈ 15.87
+        let expected_ann = vol.daily_vol * dec!(15.87);
+        
+        assert!((vol.annualized_vol - expected_ann).abs() < dec!(0.5),
+            "Annualized vol {} should be daily {} * 15.87", vol.annualized_vol, vol.daily_vol);
+    }
+
+    #[test]
+    fn test_drawdown_properties() {
+        let calc = RiskCalculator::default();
+        
+        // Property 1: DD is always >= 0
+        let equity1 = vec![dec!(100), dec!(90), dec!(110), dec!(100)];
+        let dd1 = calc.calculate_drawdown(&equity1);
+        assert!(dd1.max_dd >= Decimal::ZERO, "Max DD should be >= 0: {}", dd1.max_dd);
+        
+        // Property 2: For monotonic up, DD = 0
+        let equity2 = vec![dec!(100), dec!(101), dec!(102), dec!(103)];
+        let dd2 = calc.calculate_drawdown(&equity2);
+        assert_eq!(dd2.max_dd, Decimal::ZERO, "Monotonic up should have 0 DD");
+        
+        // Property 3: DD <= 100%
+        let equity3 = vec![dec!(100), dec!(50), dec!(25), dec!(100)];
+        let dd3 = calc.calculate_drawdown(&equity3);
+        assert!(dd3.max_dd <= dec!(1), "Max DD should be <= 100%: {}", dd3.max_dd);
+    }
+
+    #[test]
+    fn test_drawdown_exact_calculation() {
+        let calc = RiskCalculator::default();
+        
+        // Equity: 100 -> 120 -> 100 -> 130
+        // DD from 120 to 100 = (120-100)/120 = 0.1667
+        let equity = vec![dec!(100), dec!(120), dec!(100), dec!(130)];
+        let dd = calc.calculate_drawdown(&equity);
+        
+        let expected_dd = (dec!(120) - dec!(100)) / dec!(120);
+        assert!((dd.max_dd - expected_dd).abs() < dec!(0.01),
+            "Max DD should be ~16.67%, got {}", dd.max_dd);
+    }
+
+    #[test]
+    fn test_sharpe_known_returns() {
+        let calc = RiskCalculator::new(21, Decimal::ZERO);
+        
+        // All positive returns should have positive Sharpe
+        let positive = vec![dec!(0.01), dec!(0.02), dec!(0.015), dec!(0.01)];
+        let sharpe_pos = calc.calculate_sharpe(&positive);
+        assert!(sharpe_pos > Decimal::ZERO, "All positive returns should have positive Sharpe");
+        
+        // All negative returns should have negative Sharpe
+        let negative = vec![dec!(-0.01), dec!(-0.02), dec!(-0.015), dec!(-0.01)];
+        let sharpe_neg = calc.calculate_sharpe(&negative);
+        assert!(sharpe_neg < Decimal::ZERO, "All negative returns should have negative Sharpe");
+        
+        // Zero mean returns should have ~0 Sharpe
+        let zero_mean = vec![dec!(0.01), dec!(-0.01), dec!(0.01), dec!(-0.01)];
+        let sharpe_zero = calc.calculate_sharpe(&zero_mean);
+        assert!(sharpe_zero.abs() < dec!(0.1), "Zero mean returns should have ~0 Sharpe");
+    }
+
+    #[test]
+    fn test_sharpe_with_risk_free_rate() {
+        // Sharpe should decrease when risk-free rate increases
+        let returns = vec![dec!(0.01), dec!(0.02), dec!(0.015), dec!(0.01)];
+        
+        let calc_zero_rf = RiskCalculator::new(21, Decimal::ZERO);
+        let calc_high_rf = RiskCalculator::new(21, dec!(0.10)); // 10% annual
+        
+        let sharpe_zero = calc_zero_rf.calculate_sharpe(&returns);
+        let sharpe_high = calc_high_rf.calculate_sharpe(&returns);
+        
+        assert!(sharpe_zero > sharpe_high,
+            "Higher RF should reduce Sharpe: {} vs {}", sharpe_zero, sharpe_high);
+    }
+
+    #[test]
+    fn test_decimal_sqrt_accuracy() {
+        // Test sqrt accuracy for various values
+        let test_cases = vec![
+            (dec!(1), dec!(1)),
+            (dec!(4), dec!(2)),
+            (dec!(9), dec!(3)),
+            (dec!(16), dec!(4)),
+            (dec!(100), dec!(10)),
+            (dec!(0.25), dec!(0.5)),
+        ];
+        
+        for (input, expected) in test_cases {
+            let result = decimal_sqrt(input);
+            assert!((result - expected).abs() < dec!(0.001),
+                "sqrt({}) = {}, expected {}", input, result, expected);
+        }
+    }
+
+    #[test]
+    fn test_decimal_sqrt_edge_cases() {
+        // Zero and negative
+        assert_eq!(decimal_sqrt(Decimal::ZERO), Decimal::ZERO);
+        assert_eq!(decimal_sqrt(dec!(-1)), Decimal::ZERO);
+        
+        // Very small positive
+        let tiny = decimal_sqrt(dec!(0.0001));
+        assert!((tiny - dec!(0.01)).abs() < dec!(0.001));
+    }
 }
 
 

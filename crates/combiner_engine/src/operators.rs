@@ -349,5 +349,193 @@ mod tests {
         assert!(child1.has_block_type(BlockType::Sizing));
         assert!(child2.has_block_type(BlockType::Sizing));
     }
+
+    // =========================================================================
+    // Phase 4.1: Comprehensive Genetic Operator Validation
+    // =========================================================================
+
+    #[test]
+    fn test_mutation_bounds_float() {
+        let param_ranges = ParamRanges::new();
+        let mutation = Mutation::new(1.0, param_ranges); // Always mutate
+        
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        // Create genome with known parameter bounds
+        let mut genome = StrategyGenome::new(vec![
+            BlockGene::new(
+                BlockType::Selection,
+                "momentum",
+                vec![("lookback_days", ParamValue::float(126.0, 21.0, 252.0, 21.0))],
+            ),
+            BlockGene::new(
+                BlockType::Sizing,
+                "equal_weight",
+                vec![("max_weight", ParamValue::float(0.2, 0.05, 0.5, 0.05))],
+            ),
+        ]);
+        
+        // Mutate many times
+        for _ in 0..100 {
+            mutation.mutate(&mut genome, &mut rng);
+            
+            // Check all parameters are within bounds
+            for gene in &genome.genes {
+                for (_, param) in &gene.params {
+                    match param {
+                        ParamValue::Float { value, min, max, .. } => {
+                            assert!(*value >= *min && *value <= *max,
+                                "Float param {} should be in [{}, {}]", value, min, max);
+                        }
+                        ParamValue::Int { value, min, max, .. } => {
+                            assert!(*value >= *min && *value <= *max,
+                                "Int param {} should be in [{}, {}]", value, min, max);
+                        }
+                        ParamValue::Bool { .. } => {}
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mutation_preserves_sizing() {
+        let param_ranges = ParamRanges::new();
+        let mutation = Mutation::new(0.5, param_ranges);
+        
+        let mut rng = ChaCha8Rng::seed_from_u64(12345);
+        let mut genome = create_test_genome();
+        
+        // Mutate many times
+        for _ in 0..50 {
+            mutation.mutate(&mut genome, &mut rng);
+            assert!(genome.has_block_type(BlockType::Sizing),
+                "Sizing block should never be removed");
+        }
+    }
+
+    #[test]
+    fn test_crossover_determinism() {
+        let crossover = Crossover::new(1.0);
+        let parent1 = create_test_genome();
+        let parent2 = StrategyGenome::new(vec![
+            BlockGene::with_defaults(BlockType::Selection, "quality"),
+            BlockGene::with_defaults(BlockType::Sizing, "risk_parity"),
+        ]);
+        
+        // Same seed should produce same offspring
+        let mut rng1 = ChaCha8Rng::seed_from_u64(42);
+        let (child1a, child2a) = crossover.crossover(&parent1, &parent2, &mut rng1, 1);
+        
+        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
+        let (child1b, child2b) = crossover.crossover(&parent1, &parent2, &mut rng2, 1);
+        
+        assert_eq!(child1a.genes.len(), child1b.genes.len());
+        assert_eq!(child2a.genes.len(), child2b.genes.len());
+    }
+
+    #[test]
+    fn test_crossover_no_crossover() {
+        let crossover = Crossover::new(0.0); // Never crossover
+        let parent1 = create_test_genome();
+        let parent2 = StrategyGenome::new(vec![
+            BlockGene::with_defaults(BlockType::Selection, "quality"),
+            BlockGene::with_defaults(BlockType::Sizing, "risk_parity"),
+        ]);
+        
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
+        
+        // With rate=0, children should be clones of parents
+        assert_eq!(child1.genes.len(), parent1.genes.len());
+        assert_eq!(child2.genes.len(), parent2.genes.len());
+    }
+
+    #[test]
+    fn test_crossover_rate_bounds() {
+        // Rate should be clamped to [0, 1]
+        let c1 = Crossover::new(-0.5);
+        assert_eq!(c1.rate, 0.0);
+        
+        let c2 = Crossover::new(1.5);
+        assert_eq!(c2.rate, 1.0);
+        
+        let c3 = Crossover::new(0.7);
+        assert!((c3.rate - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_mutation_rate_bounds() {
+        let m1 = Mutation::new(-0.5, ParamRanges::new());
+        assert_eq!(m1.rate, 0.0);
+        
+        let m2 = Mutation::new(1.5, ParamRanges::new());
+        assert_eq!(m2.rate, 1.0);
+    }
+
+    #[test]
+    fn test_selection_tournament_size() {
+        // Tournament size should be at least 2
+        let s1 = Selection::new(1);
+        assert!(s1.tournament_size >= 2);
+        
+        let s2 = Selection::new(5);
+        assert_eq!(s2.tournament_size, 5);
+    }
+
+    #[test]
+    fn test_selection_empty_population() {
+        let selection = Selection::new(3);
+        let population: Vec<StrategyGenome> = vec![];
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        let selected = selection.select(&population, 5, &mut rng);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_selection_no_evaluated() {
+        let selection = Selection::new(3);
+        
+        // Population with no fitness values
+        let population = vec![create_test_genome(), create_test_genome()];
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        let selected = selection.select(&population, 5, &mut rng);
+        assert!(selected.is_empty(), "No evaluated genomes should return empty");
+    }
+
+    #[test]
+    fn test_param_value_mutation_int() {
+        // Test that integer mutation works correctly
+        let param_ranges = ParamRanges::new();
+        let mutation = Mutation::new(1.0, param_ranges);
+        
+        let mut param = ParamValue::int(10, 0, 20, 2);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        for _ in 0..20 {
+            mutation.mutate_param(&mut param, &mut rng);
+            if let ParamValue::Int { value, min, max, step } = param {
+                assert!(value >= min && value <= max);
+                assert_eq!((value - min) % step, 0, "Value should be on step grid");
+            }
+        }
+    }
+
+    #[test]
+    fn test_param_value_mutation_bool() {
+        let param_ranges = ParamRanges::new();
+        let mutation = Mutation::new(1.0, param_ranges);
+        
+        let mut param = ParamValue::Bool { value: true };
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        mutation.mutate_param(&mut param, &mut rng);
+        
+        if let ParamValue::Bool { value } = param {
+            assert!(!value, "Bool should be flipped");
+        }
+    }
 }
 

@@ -755,4 +755,241 @@ mod tests {
         assert_eq!(exec_config.delay_bars, 1);
         assert!(matches!(exec_config.slippage, SlippageModel::Constant { .. }));
     }
+
+    // =========================================================================
+    // Phase 2.1: Comprehensive Slippage Model Validation
+    // =========================================================================
+
+    #[test]
+    fn test_slippage_none_zero_impact() {
+        let model = SlippageModel::None;
+        let bar = make_bar(100.0, 1000.0);
+        
+        let buy_order = make_order(100, None);
+        let slip = model.calculate(&buy_order, &bar);
+        assert_eq!(slip, 0.0, "None slippage should be zero");
+        
+        let sell_order = make_order(-500, None);
+        let slip = model.calculate(&sell_order, &bar);
+        assert_eq!(slip, 0.0, "None slippage should be zero for sells too");
+    }
+
+    #[test]
+    fn test_slippage_constant_symmetric() {
+        let model = SlippageModel::Constant { bps: 20.0 };
+        let bar = make_bar(100.0, 1000.0);
+        
+        let buy_order = make_order(100, None);
+        let sell_order = make_order(-100, None);
+        
+        let buy_slip = model.calculate(&buy_order, &bar);
+        let sell_slip = model.calculate(&sell_order, &bar);
+        
+        // Buy slippage should be positive (worse price)
+        assert!(buy_slip > 0.0, "Buy slippage should be positive: {}", buy_slip);
+        // Sell slippage should be negative (worse price for seller)
+        assert!(sell_slip < 0.0, "Sell slippage should be negative: {}", sell_slip);
+        // Absolute values should be equal (symmetric)
+        assert!((buy_slip.abs() - sell_slip.abs()).abs() < 0.001,
+            "Slippage should be symmetric: {} vs {}", buy_slip, sell_slip);
+    }
+
+    #[test]
+    fn test_slippage_constant_scales_with_price() {
+        let model = SlippageModel::Constant { bps: 10.0 }; // 0.1%
+        let order = make_order(100, None);
+        
+        let bar_100 = make_bar(100.0, 1000.0);
+        let bar_200 = make_bar(200.0, 1000.0);
+        
+        let slip_100 = model.calculate(&order, &bar_100);
+        let slip_200 = model.calculate(&order, &bar_200);
+        
+        // Slippage should be proportional to price
+        assert!((slip_200 / slip_100 - 2.0).abs() < 0.01,
+            "Slippage should scale with price: {} / {} = {}", slip_200, slip_100, slip_200 / slip_100);
+    }
+
+    #[test]
+    fn test_slippage_volume_monotonic_in_order_size() {
+        let model = SlippageModel::VolumeLinear {
+            base_bps: 5.0,
+            volume_factor: 0.5,
+        };
+        let bar = make_bar(100.0, 10000.0);
+        
+        let order_100 = make_order(100, None);
+        let order_500 = make_order(500, None);
+        let order_1000 = make_order(1000, None);
+        
+        let slip_100 = model.calculate(&order_100, &bar);
+        let slip_500 = model.calculate(&order_500, &bar);
+        let slip_1000 = model.calculate(&order_1000, &bar);
+        
+        assert!(slip_500 > slip_100, "Larger order should have more slippage: {} > {}", slip_500, slip_100);
+        assert!(slip_1000 > slip_500, "Larger order should have more slippage: {} > {}", slip_1000, slip_500);
+    }
+
+    #[test]
+    fn test_slippage_volume_order_exceeds_bar_volume() {
+        let model = SlippageModel::VolumeLinear {
+            base_bps: 0.0,
+            volume_factor: 1.0,
+        };
+        let bar = make_bar(100.0, 100.0); // Low volume
+        
+        // Order size > bar volume
+        let large_order = make_order(500, None);
+        let slip = model.calculate(&large_order, &bar);
+        
+        // Should handle gracefully (high slippage but not infinite)
+        assert!(slip.is_finite(), "Slippage should be finite even for large orders");
+        assert!(slip > 0.0, "Should have positive slippage");
+    }
+
+    #[test]
+    fn test_slippage_volume_zero_volume_bar() {
+        let model = SlippageModel::VolumeLinear {
+            base_bps: 5.0,
+            volume_factor: 0.5,
+        };
+        let bar = Bar {
+            timestamp: 0,
+            open: 100.0,
+            high: 102.0,
+            low: 98.0,
+            close: 100.0,
+            volume: 0.0, // Zero volume
+        };
+        
+        let order = make_order(100, None);
+        let slip = model.calculate(&order, &bar);
+        
+        // Should fall back to base slippage
+        assert!(slip.is_finite(), "Slippage should be finite for zero volume");
+        assert!((slip - 0.05).abs() < 0.01, "Should use base slippage only: {}", slip);
+    }
+
+    #[test]
+    fn test_slippage_volatility_proportional_to_range() {
+        let model = SlippageModel::Volatility {
+            base_bps: 0.0,
+            vol_factor: 1.0,
+        };
+        
+        let order = make_order(100, None);
+        
+        // Low volatility bar: H-L = 2% of price
+        let low_vol_bar = Bar {
+            timestamp: 0,
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.0,
+            volume: 1000.0,
+        };
+        
+        // High volatility bar: H-L = 10% of price
+        let high_vol_bar = Bar {
+            timestamp: 0,
+            open: 100.0,
+            high: 105.0,
+            low: 95.0,
+            close: 100.0,
+            volume: 1000.0,
+        };
+        
+        let slip_low = model.calculate(&order, &low_vol_bar);
+        let slip_high = model.calculate(&order, &high_vol_bar);
+        
+        assert!(slip_high > slip_low, 
+            "High vol bar should have more slippage: {} > {}", slip_high, slip_low);
+    }
+
+    #[test]
+    fn test_slippage_volatility_zero_range() {
+        let model = SlippageModel::Volatility {
+            base_bps: 10.0,
+            vol_factor: 0.5,
+        };
+        
+        // Zero range bar (H = L)
+        let flat_bar = Bar {
+            timestamp: 0,
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            close: 100.0,
+            volume: 1000.0,
+        };
+        
+        let order = make_order(100, None);
+        let slip = model.calculate(&order, &flat_bar);
+        
+        // Should fall back to base slippage
+        assert!(slip.is_finite(), "Slippage should be finite for zero range");
+        assert!((slip - 0.10).abs() < 0.01, "Should use base slippage: {}", slip);
+    }
+
+    #[test]
+    fn test_slippage_order_size_zero() {
+        let model = SlippageModel::Constant { bps: 10.0 };
+        let bar = make_bar(100.0, 1000.0);
+        
+        // Zero quantity order
+        let zero_order = OrderEvent {
+            timestamp: 0,
+            order_id: OrderId::new(1),
+            asset_id: AssetId::new(0),
+            direction: OrderDirection::Buy,
+            quantity: 0,
+            order_type: OrderType::Market,
+            limit_price: None,
+            stop_price: None,
+            time_in_force: backtester_core::TimeInForce::Day,
+        };
+        
+        let slip = model.calculate(&zero_order, &bar);
+        // Zero quantity should still calculate slippage based on price
+        assert!(slip.is_finite(), "Zero quantity should give finite slippage");
+    }
+
+    #[test]
+    fn test_cost_model_zero_inputs() {
+        let model = CostModel::new(0.0, 0.0, 0.0, 0.0);
+        let cost = model.calculate(10_000.0, 100);
+        assert_eq!(cost, 0.0, "Zero cost model should give zero cost");
+    }
+
+    #[test]
+    fn test_cost_model_components_additive() {
+        let model = CostModel::new(10.0, 0.001, 0.01, 0.0005);
+        let breakdown = model.calculate_breakdown(10_000.0, 100);
+        
+        let component_sum = breakdown.fixed + breakdown.commission + 
+                           breakdown.emolument + breakdown.per_unit;
+        
+        assert!((breakdown.total() - component_sum).abs() < 0.001,
+            "Total should equal sum of components: {} vs {}", 
+            breakdown.total(), component_sum);
+    }
+
+    #[test]
+    fn test_liquidity_model_edge_cases() {
+        // Very high participation rate
+        let high_rate = LiquidityModel::new(0.9, true);
+        let fill = high_rate.get_fill_quantity(1000, 1000.0);
+        assert_eq!(fill, 900, "90% participation should fill 900");
+        
+        // Small participation rate - minimum fill is 100 (B3 round lot)
+        let small_rate = LiquidityModel::new(0.01, true);
+        let fill = small_rate.get_fill_quantity(100, 10000.0);
+        // min(100, max(0.01 * 10000, 100)) = min(100, 100) = 100
+        assert_eq!(fill, 100, "Should respect B3 round lot minimum");
+        
+        // Large order with small participation - capped by participation
+        let fill = high_rate.get_fill_quantity(2000, 1000.0);
+        // max fill = max(0.9 * 1000, 100) = 900
+        assert_eq!(fill, 900, "Should cap at 90% of volume");
+    }
 }

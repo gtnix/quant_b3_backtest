@@ -441,7 +441,7 @@ impl FinalReportGenerator {
                 genome_hash: format!("{:016x}", entry.genome_hash),
                 oos_sharpe: entry.validation.oos_sharpe_median,
                 oos_cagr: entry.validation.oos_cagr_median,
-                max_drawdown: entry.validation.oos_sharpe_std, // DESCONHECIDO: Need proper max_dd
+                max_drawdown: entry.validation.oos_max_dd_worst,
                 pbo: entry.validation.pbo,
                 dsr: entry.validation.dsr,
                 degradation_pct: entry.validation.degradation_pct,

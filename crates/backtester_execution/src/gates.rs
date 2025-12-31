@@ -372,5 +372,166 @@ mod tests {
 
         assert!(result.passed);
     }
+
+    // =========================================================================
+    // Phase 2.3: Comprehensive Gate Threshold Tests
+    // =========================================================================
+
+    #[test]
+    fn test_gate_threshold_exact_values() {
+        let config = InstitutionalGatesConfig::default();
+        let checker = GateChecker::new(config.clone());
+        
+        // Test exactly at threshold (should pass)
+        let result = checker.check(
+            config.max_turnover_annual,  // Exactly at limit
+            100_000.0,
+            config.max_slippage_pct_of_pnl * 1000.0,  // 30% of 100k = 30k
+            config.max_avg_slippage_bps,
+            config.min_capacity_usd,
+        );
+        
+        assert!(result.passed, "Should pass when exactly at thresholds");
+    }
+
+    #[test]
+    fn test_gate_threshold_just_over() {
+        let config = InstitutionalGatesConfig::default();
+        let checker = GateChecker::new(config.clone());
+        
+        // Just over turnover limit
+        let result = checker.check(
+            config.max_turnover_annual + 0.1,  // Slightly over
+            100_000.0,
+            10_000.0,
+            10.0,
+            10_000_000.0,
+        );
+        
+        assert!(!result.passed, "Should fail when just over turnover threshold");
+    }
+
+    #[test]
+    fn test_gate_zero_pnl_handling() {
+        let checker = GateChecker::with_defaults();
+        
+        // Zero PnL should not check slippage percentage
+        let result = checker.check(
+            8.0,
+            0.0,  // Zero PnL
+            50_000.0,  // Would be infinite % of PnL
+            10.0,
+            10_000_000.0,
+        );
+        
+        // Should pass turnover but skip slippage % check
+        assert!(result.passed, "Should not fail on zero PnL");
+    }
+
+    #[test]
+    fn test_gate_negative_pnl_handling() {
+        let checker = GateChecker::with_defaults();
+        
+        // Negative PnL - slippage check uses abs()
+        let result = checker.check(
+            8.0,
+            -100_000.0,  // Loss
+            10_000.0,    // 10% of |PnL|
+            10.0,
+            10_000_000.0,
+        );
+        
+        assert!(result.passed, "Should handle negative PnL correctly");
+    }
+
+    #[test]
+    fn test_gate_multiple_failures() {
+        let checker = GateChecker::with_defaults();
+        
+        let result = checker.check(
+            20.0,        // turnover FAIL
+            100_000.0,
+            50_000.0,    // slippage % FAIL
+            10.0,
+            10_000_000.0,
+        );
+        
+        assert!(!result.passed);
+        assert_eq!(result.rejection_reasons.len(), 2, "Should have 2 failures");
+    }
+
+    #[test]
+    fn test_gate_multiple_warnings() {
+        let checker = GateChecker::with_defaults();
+        
+        let result = checker.check(
+            8.0,
+            100_000.0,
+            10_000.0,
+            30.0,        // avg slippage WARNING
+            3_000_000.0, // capacity WARNING
+        );
+        
+        assert!(result.passed, "Warnings should not fail the check");
+        assert_eq!(result.warnings.len(), 2, "Should have 2 warnings");
+    }
+
+    #[test]
+    fn test_gate_check_status_enum() {
+        assert_eq!(GateStatus::Passed, GateStatus::Passed);
+        assert_ne!(GateStatus::Passed, GateStatus::Failed);
+        assert_ne!(GateStatus::Warning, GateStatus::Failed);
+    }
+
+    #[test]
+    fn test_gate_result_has_warnings() {
+        let mut result = GateResult::pass();
+        assert!(!result.has_warnings());
+        
+        result.warnings.push("test warning".into());
+        assert!(result.has_warnings());
+    }
+
+    #[test]
+    fn test_gate_custom_thresholds() {
+        // Create stricter config
+        let config = InstitutionalGatesConfig {
+            max_turnover_annual: 6.0,       // Stricter: 6x vs 12x
+            max_slippage_pct_of_pnl: 20.0,  // Stricter: 20% vs 30%
+            min_capacity_usd: 10_000_000.0, // Stricter: $10M vs $5M
+            max_avg_slippage_bps: 15.0,     // Stricter: 15bps vs 25bps
+        };
+        let checker = GateChecker::new(config);
+        
+        // This would pass defaults but fail stricter config
+        let result = checker.check(
+            8.0,  // > 6x FAIL
+            100_000.0,
+            25_000.0,  // 25% > 20% FAIL
+            20.0,      // 20bps > 15bps WARNING
+            6_000_000.0, // < $10M WARNING
+        );
+        
+        assert!(!result.passed, "Should fail stricter thresholds");
+        assert!(result.rejection_reasons.len() >= 1);
+    }
+
+    #[test]
+    fn test_gate_check_messages_readable() {
+        let checker = GateChecker::with_defaults();
+        let result = checker.check(
+            8.0,
+            100_000.0,
+            10_000.0,
+            10.0,
+            10_000_000.0,
+        );
+        
+        for check in &result.checks {
+            assert!(!check.message.is_empty(), "Message should not be empty");
+            assert!(!check.gate_id.is_empty(), "Gate ID should not be empty");
+            assert!(!check.name.is_empty(), "Gate name should not be empty");
+        }
+    }
 }
 

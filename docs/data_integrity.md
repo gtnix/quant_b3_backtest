@@ -4,11 +4,12 @@ The Data Integrity System ensures that strategy backtests are not contaminated b
 
 ## Overview
 
-The system operates as a **hard gate** at three critical points:
+The system operates as a **hard gate** at four critical points:
 
 1. **Factory Run/Resume** - Blocks campaign execution if data fails audit
 2. **Stage B Validation** - Rejects strategies validated on bad data (implicit via run gate)
 3. **Promotion Pipeline** - Prevents promoting candidates from runs without PASS verdict
+4. **Variance Sanity Gate (SEV-0)** - Blocks promotion if top candidates have collapsed metrics (variance ~0)
 
 ## Architecture
 
@@ -85,6 +86,82 @@ Validates universe composition methodology:
 **Severity:**
 - PointInTime: **PASS**
 - Static/Unknown: **WARNING**
+
+## Variance Sanity Gate (SEV-0)
+
+Added in v2.2.0, this gate prevents promotion of candidates when metrics have collapsed to near-identical values, indicating a data or pipeline issue.
+
+### Detection
+
+The gate checks variance across the top 100 candidates:
+
+```javascript
+const calcVariance = (arr) => {
+  if (arr.length < 2) return 0;
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+  return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+};
+
+// Block if any metric has near-zero variance
+if (sharpeVar < 1e-6 || pboVar < 1e-8 || dsrVar < 1e-6) {
+  return { blocked: true, reason: 'metrics_collapsed' };
+}
+```
+
+### Thresholds
+
+| Metric | Threshold | Description |
+|--------|-----------|-------------|
+| Sharpe OOS NET | variance < 1e-6 | ~50 identical values |
+| PBO | variance < 1e-8 | Very tight clustering |
+| DSR | variance < 1e-6 | ~50 identical values |
+
+### API Endpoint
+
+Check promotion readiness without promoting:
+
+```bash
+curl http://localhost:3001/api/omp/promote-check?runId=run_001
+```
+
+**Response:**
+```json
+{
+  "blocked": false,
+  "reason": null,
+  "details": {
+    "sharpeVar": "1.234e-2",
+    "pboVar": "5.678e-4",
+    "dsrVar": "9.012e-3"
+  }
+}
+```
+
+### Blocked Response
+
+When metrics collapse is detected:
+
+```json
+{
+  "blocked": true,
+  "reason": "metrics_collapsed",
+  "details": {
+    "sharpeVar": "0.000e+0",
+    "pboVar": "0.000e+0",
+    "dsrVar": "0.000e+0"
+  }
+}
+```
+
+### Removed Features (SEV-0)
+
+The following estimation fallbacks were removed to enforce data rigor:
+
+- `estimateMaxDrawdown()` - NULL metrics now result in candidate skip
+- `estimatePbo()` - Removed, candidates without PBO are not promoted
+- `estimateDsr()` - Removed, candidates without DSR are not promoted
+
+---
 
 ## Configuration
 

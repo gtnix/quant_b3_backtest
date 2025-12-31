@@ -907,6 +907,8 @@ mod tests {
             turnover_penalty: dec!(0),
             cost_penalty: dec!(0),
             drawdown_penalty: dec!(0),
+            slippage_penalty: dec!(0),
+            capacity_penalty: dec!(0),
             final_score: dec!(0.72),
             tiebreaker_used: None,
         };

@@ -846,6 +846,7 @@ mod tests {
             embargo_days: 5,
             market: Market::BR,
             grid: None,
+            execution_config: None,
         };
 
         let runner = WalkForwardRunner::new(config);
@@ -885,6 +886,7 @@ mod tests {
             embargo_days: 5,
             market: Market::BR,
             grid: Some(grid),
+            execution_config: None,
         };
 
         let runner = WalkForwardRunner::new(config);

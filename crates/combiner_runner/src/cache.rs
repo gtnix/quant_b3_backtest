@@ -293,6 +293,12 @@ pub struct SplitMetrics {
     pub is_max_dd: f64,
     pub oos_max_dd: f64,
     pub oos_trades: u32,
+    /// Skewness of OOS returns (gamma_3)
+    pub oos_skewness: f64,
+    /// Excess kurtosis of OOS returns (gamma_4)
+    pub oos_kurtosis: f64,
+    /// Number of OOS observations (for PSR/DSR)
+    pub oos_n_observations: usize,
     pub passed: bool,
 }
 

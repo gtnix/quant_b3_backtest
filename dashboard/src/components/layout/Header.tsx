@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Activity, Bell, RefreshCw, Clock } from 'lucide-react';
+import { Bell, RefreshCw, Clock, Wifi, WifiOff } from 'lucide-react';
 import { AlertsPanel } from '../AlertsPanel';
 import { useDataStore } from '../../stores/dataStore';
 
-export function Header() {
+interface HeaderProps {
+  sseConnected?: boolean;
+}
+
+export function Header({ sseConnected = false }: HeaderProps) {
   const [time, setTime] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   
-  const { invalidateCache, loadIndex, selectedRunId, listCandidates } = useDataStore();
+  const { loadIndex, selectedRunId, listCandidates } = useDataStore();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -31,18 +35,13 @@ export function Header() {
   return (
     <>
       <header className="h-16 bg-terminal-surface border-b border-terminal-border flex items-center justify-between px-6">
-        {/* Left side - Status */}
+        {/* Left side - SSE Connection Status */}
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-profit animate-pulse" />
-            <span className="text-sm text-terminal-muted">System Online</span>
-          </div>
-          
-          <div className="h-4 w-px bg-terminal-border" />
-          
-          <div className="flex items-center gap-2 text-sm">
-            <Activity className="w-4 h-4 text-accent-cyan" />
-            <span className="text-terminal-muted">NYC/Chicago Quant Platform</span>
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+            sseConnected ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'
+          }`}>
+            {sseConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+            <span>{sseConnected ? 'Connected' : 'Offline'}</span>
           </div>
         </div>
 

@@ -373,11 +373,26 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   );
 }
 
+// Check if candidate has valid metrics (quant sanity check)
+function hasValidMetrics(c: RecentCandidate) {
+  const issues: string[] = [];
+  // Sharpe > 10 is unrealistic for any real strategy
+  if (c.oos_sharpe_net > 10) issues.push('Sharpe unrealistic');
+  // PBO = 0 means not computed
+  if (c.pbo === 0) issues.push('PBO not computed');
+  // DSR = 0 means not computed
+  if (c.dsr === 0) issues.push('DSR not computed');
+  // MaxDD null means not computed
+  if (c.max_drawdown_net == null || c.max_drawdown_missing) issues.push('MaxDD missing');
+  return { valid: issues.length === 0, issues };
+}
+
 function CandidateCard({ candidate, onClick }: { candidate: RecentCandidate; onClick: () => void }) {
   const sharpeColor = candidate.oos_sharpe_net >= 1.0 ? 'text-profit' : 
                        candidate.oos_sharpe_net >= 0.5 ? 'text-accent-yellow' : 'text-loss';
   const cagrPct = (candidate.oos_cagr_net * 100).toFixed(1);
-  const ddPct = (Math.abs(candidate.max_drawdown_net) * 100).toFixed(1);
+  const ddPct = (Math.abs(candidate.max_drawdown_net || 0) * 100).toFixed(1);
+  const metricsCheck = hasValidMetrics(candidate);
 
   return (
     <button
@@ -387,13 +402,21 @@ function CandidateCard({ candidate, onClick }: { candidate: RecentCandidate; onC
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${
               candidate.gates_passed ? 'bg-profit/20 text-profit' : 'bg-accent-cyan/20 text-accent-cyan'
             }`}>
               {candidate.gates_passed ? 'Validated' : 'Research'}
             </span>
             <span className="text-xs text-terminal-muted font-mono">#{candidate.rank}</span>
+            {!metricsCheck.valid && (
+              <span 
+                className="px-2 py-0.5 rounded text-xs font-medium bg-amber-500/20 text-amber-400 cursor-help"
+                title={metricsCheck.issues.join(', ')}
+              >
+                ⚠ Incomplete
+              </span>
+            )}
           </div>
           <h3 className="font-medium truncate group-hover:text-profit transition-colors">
             {candidate.display_name}
@@ -482,6 +505,18 @@ export function Backtest() {
       }
     }
   }, [selectedCandidate?.candidate_id]);
+
+  // Listen for select-candidate events from Hall of Fame
+  useEffect(() => {
+    const handleSelectCandidateEvent = (e: CustomEvent) => {
+      if (e.detail) {
+        setSelectedCandidate(e.detail);
+      }
+    };
+    
+    window.addEventListener('select-candidate', handleSelectCandidateEvent as EventListener);
+    return () => window.removeEventListener('select-candidate', handleSelectCandidateEvent as EventListener);
+  }, [setSelectedCandidate]);
 
   const loadSimulatedEquity = async (candidateId: string) => {
     setLoadingSimulated(true);
@@ -667,6 +702,25 @@ export function Backtest() {
       <div className="flex flex-col items-center justify-center h-full space-y-4">
         <RefreshCw className="w-12 h-12 animate-spin text-terminal-muted" />
         <p className="text-terminal-muted">Loading backtest data...</p>
+      </div>
+    );
+  }
+
+  // Error or no data available
+  if (error || (!backtest?.available && !simulatedData && !isLoading)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full space-y-4">
+        <AlertTriangle className="w-12 h-12 text-amber-500" />
+        <h3 className="text-lg font-semibold">No Backtest Data Available</h3>
+        <p className="text-terminal-muted text-center max-w-md">
+          {error || 'The selected candidate does not have backtest timeseries data. This may occur for candidates that are still being evaluated.'}
+        </p>
+        <button
+          onClick={() => setSelectedCandidate(null)}
+          className="px-4 py-2 bg-accent-cyan/20 text-accent-cyan rounded-lg hover:bg-accent-cyan/30 transition-colors"
+        >
+          Select Another Candidate
+        </button>
       </div>
     );
   }

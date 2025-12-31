@@ -343,7 +343,20 @@ O pipeline de promoção é acionado automaticamente após a conclusão bem-suce
    ```
    Gera um ranking determinístico dos melhores candidatos.
 
-2. **Aplicar Critérios de Promoção**:
+2. **Variance Sanity Gate (SEV-0)** *(implementado v2.2.0)*:
+   
+   Antes de processar candidatos, verifica se métricas não colapsaram:
+   
+   ```javascript
+   // Bloqueia se variância ~0 (indica bug ou dados corrompidos)
+   if (sharpeVar < 1e-6 || pboVar < 1e-8 || dsrVar < 1e-6) {
+     return { blocked: true, reason: 'metrics_collapsed' };
+   }
+   ```
+   
+   **Endpoint**: `GET /api/omp/promote-check` para verificar sem promover.
+
+3. **Aplicar Critérios de Promoção**:
    Para cada candidato no top 100, verificar:
    
    | Critério | Threshold | Justificativa |
@@ -356,13 +369,13 @@ O pipeline de promoção é acionado automaticamente após a conclusão bem-suce
    | `gates_passed` | == true | Passar em todos os institutional gates |
    | `genome_hash` | Único | Evitar duplicatas no Hall da Fama |
 
-3. **Copiar Artefatos**:
+4. **Copiar Artefatos**:
    Se todos os critérios forem atendidos:
    ```bash
    cp -r artifacts/candidates/<candidate_id> hall_of_fame/<candidate_id>
    ```
 
-4. **Inserir Registro no Banco de Dados**:
+5. **Inserir Registro no Banco de Dados**:
    ```sql
    INSERT INTO hall_of_fame (
        candidate_id, campaign_id, run_id, genome_hash,

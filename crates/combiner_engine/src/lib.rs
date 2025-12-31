@@ -34,6 +34,7 @@ pub mod evaluation;
 pub mod performance_metrics;
 pub mod report;
 pub mod institutional_thresholds;
+pub mod statistics;
 
 pub use config::EvolutionConfig;
 pub use population::Population;
