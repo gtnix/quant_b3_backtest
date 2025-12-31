@@ -228,6 +228,7 @@ impl RiskCalculator {
     }
 
     /// Calculate Sharpe ratio from returns.
+    /// Clamped to [-10, 10] to prevent unrealistic values from low volatility data.
     pub fn calculate_sharpe(&self, returns: &[Decimal]) -> Decimal {
         if returns.is_empty() {
             return Decimal::ZERO;
@@ -252,7 +253,12 @@ impl RiskCalculator {
 
         // Annualize: sharpe * sqrt(252)
         let sqrt_252 = Decimal::from_str_exact("15.87").unwrap_or(Decimal::from(16));
-        excess_return / vol * sqrt_252
+        let sharpe = excess_return / vol * sqrt_252;
+        
+        // Clamp to realistic bounds
+        let min_sharpe = Decimal::from(-10);
+        let max_sharpe = Decimal::from(10);
+        sharpe.max(min_sharpe).min(max_sharpe)
     }
 }
 
