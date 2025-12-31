@@ -635,6 +635,9 @@ mod tests {
             oos_max_dd: -0.15,
             is_max_dd: -0.10,
             oos_trades: 50,
+            oos_skewness: 0.0,
+            oos_kurtosis: 0.0,
+            oos_n_observations: 252,
             passed: true,
         };
 

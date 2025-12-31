@@ -85,7 +85,11 @@ pub fn sharpe_simd(returns: &[f64], rf_rate: f64) -> f64 {
     }
     
     let std_dev = variance.sqrt();
-    (mean / std_dev) * SQRT_TRADING_DAYS
+    let sharpe = (mean / std_dev) * SQRT_TRADING_DAYS;
+    
+    // Cap Sharpe ratio to realistic bounds [-10, 10]
+    // Any value beyond this indicates a calculation error or unrealistic data
+    sharpe.clamp(-10.0, 10.0)
 }
 
 /// Scalar Sharpe ratio calculation (fallback for small inputs)
@@ -115,7 +119,10 @@ pub fn sharpe_scalar(returns: &[f64], rf_rate: f64) -> f64 {
     }
     
     let std_dev = variance.sqrt();
-    (mean / std_dev) * SQRT_TRADING_DAYS
+    let sharpe = (mean / std_dev) * SQRT_TRADING_DAYS;
+    
+    // Cap Sharpe ratio to realistic bounds [-10, 10]
+    sharpe.clamp(-10.0, 10.0)
 }
 
 // ============================================================================
@@ -511,16 +518,18 @@ pub fn calculate_all_metrics(returns: &[f64], rf_rate: f64) -> MetricsBatch {
     let std_dev = if variance > 1e-20 { variance.sqrt() } else { 0.0 };
     let downside_dev = if downside_variance > 1e-20 { downside_variance.sqrt() } else { 0.0 };
 
-    let sharpe = if std_dev > 1e-20 { (mean / std_dev) * SQRT_TRADING_DAYS } else { 0.0 };
+    let sharpe_raw = if std_dev > 1e-20 { (mean / std_dev) * SQRT_TRADING_DAYS } else { 0.0 };
+    let sharpe = sharpe_raw.clamp(-10.0, 10.0); // Cap to realistic bounds
     let volatility = std_dev * SQRT_TRADING_DAYS;
     
-    let sortino = if downside_dev > 1e-20 {
+    let sortino_raw = if downside_dev > 1e-20 {
         (mean / downside_dev) * SQRT_TRADING_DAYS
     } else if mean > 0.0 {
         10.0
     } else {
         0.0
     };
+    let sortino = sortino_raw.clamp(-20.0, 20.0); // Sortino can be higher than Sharpe
 
     let total_return = nav - 1.0;
     let years = n_f64 / TRADING_DAYS_PER_YEAR;

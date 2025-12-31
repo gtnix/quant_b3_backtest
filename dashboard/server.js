@@ -2185,12 +2185,35 @@ async function checkAndPromoteCandidates(runId, campaign) {
     let promoted = 0;
     
     for (const candidate of result.rows) {
+      // HARD GATES: Block any candidate with suspicious or missing data
+      const sharpe = candidate.oos_sharpe_net;
+      const pbo = candidate.pbo;
+      const dsr = candidate.dsr;
+      const maxDD = candidate.max_drawdown_net;
+      
+      // Block if Sharpe is suspiciously high (>10 is unrealistic)
+      if (sharpe !== null && sharpe > 10) {
+        console.warn(`[OMP] BLOCKED: ${candidate.candidate_id} - Sharpe ${sharpe.toFixed(2)} > 10 (suspicious)`);
+        continue;
+      }
+      
+      // Block if MaxDD is NULL or 0 (indicates broken calculation)
+      if (maxDD === null || maxDD === 0) {
+        console.warn(`[OMP] BLOCKED: ${candidate.candidate_id} - MaxDD is NULL or 0 (broken metric)`);
+        continue;
+      }
+      
+      // Block if PBO or DSR is NULL (Stage B validation incomplete)
+      if (pbo === null || dsr === null) {
+        console.warn(`[OMP] BLOCKED: ${candidate.candidate_id} - PBO or DSR is NULL (incomplete validation)`);
+        continue;
+      }
+      
       // Check promotion criteria
-      const meetsSharpeCriteria = (candidate.oos_sharpe_net || 0) >= thresholds.minSharpe;
-      const meetsPboCriteria = (candidate.pbo || 1) <= thresholds.maxPbo;
-      const meetsDsrCriteria = (candidate.dsr || 0) >= thresholds.minDsr;
-      // If max_drawdown_net is null, skip the check (allow promotion)
-      const meetsDrawdownCriteria = candidate.max_drawdown_net === null || Math.abs(candidate.max_drawdown_net) <= thresholds.maxDrawdown;
+      const meetsSharpeCriteria = (sharpe || 0) >= thresholds.minSharpe;
+      const meetsPboCriteria = pbo <= thresholds.maxPbo;
+      const meetsDsrCriteria = dsr >= thresholds.minDsr;
+      const meetsDrawdownCriteria = Math.abs(maxDD) <= thresholds.maxDrawdown;
       const passesGates = candidate.gates_passed === true;
       
       if (meetsSharpeCriteria && meetsPboCriteria && meetsDsrCriteria && meetsDrawdownCriteria && passesGates) {
@@ -2663,37 +2686,58 @@ app.get('/api/omp/hall-of-fame', async (req, res) => {
       return parts.join(' • ').slice(0, 48);
     };
     
+    // Validate each entry and flag issues
+    const validateEntry = (r) => {
+      const issues = [];
+      if (r.oos_sharpe_net === null) issues.push('Sharpe is NULL');
+      else if (r.oos_sharpe_net > 10) issues.push('Sharpe > 10 (suspicious)');
+      else if (r.oos_sharpe_net > 5) issues.push('Sharpe > 5 (verify)');
+      if (r.pbo === null) issues.push('PBO is NULL');
+      else if (r.pbo > 0.5) issues.push('PBO > 50% (high overfitting risk)');
+      if (r.dsr === null) issues.push('DSR is NULL');
+      else if (r.dsr < 0.3) issues.push('DSR < 0.3 (low deflated Sharpe)');
+      if (r.max_drawdown_net === null || r.max_drawdown_net === 0) issues.push('MaxDD is NULL or 0');
+      else if (Math.abs(r.max_drawdown_net) > 0.5) issues.push('MaxDD > 50%');
+      if (!r.git_sha) issues.push('No git_sha');
+      return { isValid: issues.length === 0, issues };
+    };
+    
     res.json({
       count: result.rows.length,
-      entries: result.rows.map(r => ({
-        promotionId: r.promotion_id,
-        candidateId: r.candidate_id,
-        genomeHash: r.genome_hash,
-        strategyName: generateStrategyName(r),
-        campaignId: r.campaign_id,
-        campaignName: r.campaign_name,
-        runId: r.run_id,
-        market: r.market,
-        promotedAt: r.promoted_at,
-        metrics: {
-          oosSharpeNet: r.oos_sharpe_net,
-          pbo: r.pbo,
-          dsr: r.dsr,
-          maxDrawdownNet: r.max_drawdown_net,
-          cagrNet: r.cagr_net,
-        },
-        validation: {
-          stressPassed: r.stress_passed,
-          stressTotal: r.stress_total,
-          gatesPassed: r.gates_passed,
-        },
-        provenance: {
-          gitSha: r.git_sha,
-          configHash: r.config_hash,
-          datasetHash: null, // Column does not exist in scg_candidates yet
-        },
-        notes: r.notes,
-      })),
+      entries: result.rows.map(r => {
+        const { isValid, issues } = validateEntry(r);
+        return {
+          promotionId: r.promotion_id,
+          candidateId: r.candidate_id,
+          genomeHash: r.genome_hash,
+          strategyName: generateStrategyName(r),
+          campaignId: r.campaign_id,
+          campaignName: r.campaign_name,
+          runId: r.run_id,
+          market: r.market,
+          promotedAt: r.promoted_at,
+          metrics: {
+            oosSharpeNet: r.oos_sharpe_net,
+            pbo: r.pbo,
+            dsr: r.dsr,
+            maxDrawdownNet: r.max_drawdown_net,
+            cagrNet: r.cagr_net,
+          },
+          validation: {
+            stressPassed: r.stress_passed,
+            stressTotal: r.stress_total,
+            gatesPassed: r.gates_passed,
+            isValid,
+            issues,
+          },
+          provenance: {
+            gitSha: r.git_sha,
+            configHash: r.config_hash,
+            datasetHash: null, // Column does not exist in scg_candidates yet
+          },
+          notes: r.notes,
+        };
+      }),
     });
   } catch (err) {
     console.error('[OMP] Hall of Fame query failed:', err.message);

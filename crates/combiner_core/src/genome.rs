@@ -418,6 +418,51 @@ impl StrategyGenome {
             cached_hash: None,
         }
     }
+    
+    /// Generate a human-readable strategy name from the genome.
+    /// Format: <Selection> • <Entry> • <Exit> • <Sizing>
+    /// Example: "Momentum(126d) • MACross(20/50) • ATRTrail • VolTarget"
+    pub fn generate_name(&self) -> String {
+        let mut parts = Vec::new();
+        
+        // Format block_id to title case with key param
+        let format_block = |gene: &BlockGene| -> String {
+            let name = gene.block_id.chars()
+                .take(1)
+                .map(|c| c.to_uppercase().next().unwrap_or(c))
+                .chain(gene.block_id.chars().skip(1))
+                .collect::<String>()
+                .replace('_', "");
+            
+            // Add key parameter if present
+            if let Some(param) = gene.params.get("lookback_days").or(gene.params.get("fast_period")).or(gene.params.get("period")) {
+                format!("{}({})", name, param.as_i64())
+            } else if let Some(fast) = gene.params.get("fast_period") {
+                if let Some(slow) = gene.params.get("slow_period") {
+                    format!("{}({}/{})", name, fast.as_i64(), slow.as_i64())
+                } else {
+                    name
+                }
+            } else {
+                name
+            }
+        };
+        
+        // Get one gene per block type
+        for block_type in [BlockType::Selection, BlockType::Entry, BlockType::Exit, BlockType::Sizing] {
+            if let Some(gene) = self.genes.iter().find(|g| g.block_type == block_type) {
+                parts.push(format_block(gene));
+            }
+        }
+        
+        // Join with bullet separator, limit to 48 chars
+        let name = parts.join(" • ");
+        if name.len() > 48 {
+            format!("{}…", &name[..47])
+        } else {
+            name
+        }
+    }
 }
 
 #[cfg(test)]

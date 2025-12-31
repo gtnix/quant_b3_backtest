@@ -320,30 +320,65 @@ impl Registry {
     // RUN OPERATIONS
     // =========================================================================
 
-    /// Register a run start.
+    /// Register a run start with provenance info.
     pub async fn register_run_start(
         &self,
         run_id: &str,
         campaign_id: &str,
         seed: i64,
     ) -> Result<()> {
+        // Capture git SHA from environment or git command
+        let git_sha = std::env::var("GIT_SHA").ok().or_else(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+        }).and_then(|s| if s.len() >= 7 { Some(s[..40.min(s.len())].to_string()) } else { None });
+        
         self.client
             .execute(
                 r#"
-                INSERT INTO scg_runs (run_id, campaign_id, seed, status)
-                VALUES ($1, $2, $3, 'started')
+                INSERT INTO scg_runs (run_id, campaign_id, seed, status, git_sha)
+                VALUES ($1, $2, $3, 'started', $4)
                 ON CONFLICT (run_id) DO UPDATE SET
                     status = 'started',
                     started_at = NOW(),
                     completed_at = NULL,
-                    error_message = NULL
+                    error_message = NULL,
+                    git_sha = COALESCE($4, scg_runs.git_sha)
                 "#,
-                &[&run_id, &campaign_id, &seed],
+                &[&run_id, &campaign_id, &seed, &git_sha],
             )
             .await
             .context("Failed to register run start")?;
 
-        info!(run_id, campaign_id, seed, "Registered run start");
+        info!(run_id, campaign_id, seed, ?git_sha, "Registered run start");
+        Ok(())
+    }
+    
+    /// Register config and dataset hashes for a run.
+    pub async fn register_run_hashes(
+        &self,
+        run_id: &str,
+        config_hash: Option<&str>,
+        dataset_hash: Option<&str>,
+    ) -> Result<()> {
+        self.client
+            .execute(
+                r#"
+                UPDATE scg_runs SET
+                    config_hash = COALESCE($1, config_hash),
+                    dataset_hash = COALESCE($2, dataset_hash)
+                WHERE run_id = $3
+                "#,
+                &[&config_hash, &dataset_hash, &run_id],
+            )
+            .await
+            .context("Failed to register run hashes")?;
+
+        info!(run_id, config_hash, dataset_hash, "Registered run hashes");
         Ok(())
     }
 

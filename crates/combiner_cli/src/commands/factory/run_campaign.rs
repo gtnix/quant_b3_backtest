@@ -184,6 +184,11 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
                 .register_run_start(&run_id, &campaign_id, seed)
                 .await?;
 
+            // Compute and register config hash
+            let config_json = serde_json::to_string(&config)?;
+            let config_hash = format!("sha256:{}", hex::encode(&sha2::Sha256::digest(config_json.as_bytes())[..16]));
+            registry.register_run_hashes(&run_id, Some(&config_hash), None).await?;
+
             // Execute the SCG run
             let start_time = Instant::now();
             let result = execute_single_run(&config, seed as u64, &run_id).await;
