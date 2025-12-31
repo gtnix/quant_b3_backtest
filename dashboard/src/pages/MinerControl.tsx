@@ -624,35 +624,35 @@ export function MinerControl() {
       {/* Main Content */}
       <div className="max-w-[1600px] mx-auto p-4">
         {/* Top Stats Bar */}
-        <div className="grid grid-cols-6 gap-3 mb-4">
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+        <div className="grid grid-cols-6 gap-3 mb-4 animate-fade-in">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
             <LiveCounter value={loopCount} label="LOOPS" />
             <RefreshCw className={`w-5 h-5 text-slate-600 ${isRunning ? 'animate-spin' : ''}`} />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
             <LiveCounter value={uptimeSeconds} label="UPTIME" format="time" />
             <Clock className="w-5 h-5 text-slate-600" />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-blue-500/50">
             <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATES 24H" />
             <BarChart2 className="w-5 h-5 text-blue-500" />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-amber-500/50">
             <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOTIONS 24H" />
             <Trophy className="w-5 h-5 text-amber-500" />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-emerald-500/50">
             <LiveCounter value={stats?.promotions.total || 0} label="HALL OF FAME" />
             <Trophy className="w-5 h-5 text-emerald-500" />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-violet-500/50">
             <LiveCounter value={stats?.throughput.candidatesPerMin || 0} label="THROUGHPUT/MIN" format="decimal" />
             <TrendingUp className="w-5 h-5 text-violet-500" />
           </div>
         </div>
         
         {/* Main Grid */}
-        <div className="grid grid-cols-12 gap-4">
+        <div className="grid grid-cols-12 gap-4 animate-slide-up">
           {/* Left Column - Campaign + Queue */}
           <div className="col-span-4 space-y-4">
             {/* Active Campaign */}

@@ -16,8 +16,7 @@ import {
   Globe,
   Cpu,
   DollarSign,
-  Activity,
-  LogOut
+  Activity
 } from 'lucide-react';
 import type { Page } from '../../App';
 
@@ -124,23 +123,13 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-terminal-border space-y-1">
+      <div className="p-4 border-t border-terminal-border">
         <button 
           onClick={() => onPageChange('dashboard')}
           className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-terminal-muted hover:text-white hover:bg-terminal-border/50 transition-all"
         >
           <Settings className="w-4 h-4" />
           <span className="text-sm font-medium">Settings</span>
-        </button>
-        <button 
-          onClick={() => {
-            // Clear HTTP Basic Auth by redirecting to invalid credentials
-            window.location.href = 'http://logout:logout@' + window.location.host + '/';
-          }}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-terminal-muted hover:text-loss hover:bg-loss/10 transition-all"
-        >
-          <LogOut className="w-4 h-4" />
-          <span className="text-sm font-medium">Logout</span>
         </button>
       </div>
     </aside>
