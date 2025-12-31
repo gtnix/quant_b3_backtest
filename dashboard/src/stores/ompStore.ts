@@ -19,6 +19,10 @@ export interface OmpResources {
   memoryUsagePct: number;
   memoryAvailableMb: number;
   diskFreeGb: number;
+  diskFreePct?: number;
+  diskWritten24h?: number;
+  writeRateMbPerSec?: number;
+  writeAcceleration?: number;
   canStartCampaign: boolean;
 }
 
@@ -77,6 +81,7 @@ export interface HallOfFameEntry {
   promotionId: string;
   candidateId: string;
   genomeHash: string;
+  strategyName: string;
   campaignId: string;
   campaignName: string;
   runId: string;
@@ -97,6 +102,7 @@ export interface HallOfFameEntry {
   provenance: {
     gitSha: string;
     configHash: string;
+    datasetHash?: string;
   };
   notes: string;
 }
@@ -299,7 +305,17 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       const response = await fetch(`${platformConfig.apiBase}/omp/stats`, { credentials: 'same-origin' });
       if (!response.ok) throw new Error('Failed to fetch stats');
       const data = await response.json();
-      set({ stats: data, lastError: null });
+      // Only update if data actually changed (avoid unnecessary re-renders)
+      const current = get().stats;
+      const hasChanged = !current || 
+        current.candidates?.last24h !== data.candidates?.last24h ||
+        current.candidates?.last7d !== data.candidates?.last7d ||
+        current.promotions?.last24h !== data.promotions?.last24h ||
+        current.promotions?.total !== data.promotions?.total ||
+        current.throughput?.candidatesPerMin !== data.throughput?.candidatesPerMin;
+      if (hasChanged) {
+        set({ stats: data, lastError: null });
+      }
     } catch (err) {
       set({ lastError: err instanceof Error ? err.message : 'Failed to fetch stats' });
     }
@@ -505,24 +521,27 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     if (platform === 'browser') {
       const sse = createSSEConnection(
         (event) => {
-          // Set connected on any event
+          // Set connected on any event - KEEP previous state on reconnection
           if (!get().sseConnected) {
-            set({ sseConnected: true });
+            set({ sseConnected: true, lastError: null });
           }
           
           if (event.type === 'connected' || event.type === 'ping') {
-            set({ sseConnected: true });
+            set({ sseConnected: true, lastError: null });
           } else if (event.type === 'omp-status') {
             const data = event.data as Record<string, unknown>;
+            // INCREMENTAL UPDATE: Only update fields that have new values
+            // Keep previous values if new ones are null/undefined
+            const prev = get();
             set({
-              status: (data.status as OmpStatus) || 'offline',
-              startedAt: data.startedAt as string | null,
-              lastLoop: data.lastLoop as string | null,
-              loopCount: (data.loopCount as number) || 0,
-              queueLength: (data.queueLength as number) || 0,
-              lastPromotion: data.lastPromotion as string | null,
-              currentCampaign: data.currentCampaign as CurrentCampaign | null,
-              resources: (data.resources as OmpResources) || get().resources,
+              status: (data.status as OmpStatus) || prev.status || 'offline',
+              startedAt: (data.startedAt as string | null) ?? prev.startedAt,
+              lastLoop: (data.lastLoop as string | null) ?? prev.lastLoop,
+              loopCount: typeof data.loopCount === 'number' ? data.loopCount : prev.loopCount,
+              queueLength: typeof data.queueLength === 'number' ? data.queueLength : prev.queueLength,
+              lastPromotion: (data.lastPromotion as string | null) ?? prev.lastPromotion,
+              currentCampaign: (data.currentCampaign as CurrentCampaign | null) ?? prev.currentCampaign,
+              resources: data.resources ? { ...prev.resources, ...(data.resources as OmpResources) } : prev.resources,
             });
           } else if (event.type === 'omp-started') {
             set({ status: 'running', startedAt: (event as { startedAt?: string }).startedAt || new Date().toISOString() });
@@ -542,18 +561,23 @@ export const useOmpStore = create<OmpState>((set, get) => ({
             set({ currentCampaign: null });
             get().fetchStats();
           } else if (event.type === 'omp-log') {
-            // Add new log entry to the front
+            // Add new log entry to the front (INCREMENTAL - no reset)
             const logEntry = event as unknown as ActivityLogEntry;
             const currentLog = get().activityLog;
-            set({ activityLog: [logEntry, ...currentLog].slice(0, 100) });
+            // Dedupe by id to prevent duplicates on reconnection
+            const existingIds = new Set(currentLog.map(l => l.id));
+            if (!existingIds.has(logEntry.id)) {
+              set({ activityLog: [logEntry, ...currentLog].slice(0, 100) });
+            }
           }
         },
         (error) => {
           console.error('[OMP SSE] Error:', error);
-          set({ sseConnected: false });
+          // KEEP previous state on error - only mark disconnected
+          set({ sseConnected: false, lastError: 'SSE connection lost - reconnecting...' });
         },
         () => {
-          set({ sseConnected: true });
+          set({ sseConnected: true, lastError: null });
         }
       );
       

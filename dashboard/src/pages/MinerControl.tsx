@@ -53,15 +53,38 @@ function StatusIndicator({ status, sseConnected }: { status: OmpStatus; sseConne
 // =============================================================================
 
 function LiveCounter({ value, label, format = 'number' }: { value: number; label: string; format?: 'number' | 'decimal' | 'time' }) {
-  const displayValue = format === 'decimal' 
-    ? value.toFixed(2) 
-    : format === 'time' 
-      ? `${Math.floor(value / 3600)}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(value % 60)).padStart(2, '0')}`
-      : value.toLocaleString();
+  const prevValueRef = useRef(value);
+  const [displayValue, setDisplayValue] = useState(() => formatValue(value, format));
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  function formatValue(v: number, fmt: 'number' | 'decimal' | 'time') {
+    return fmt === 'decimal' 
+      ? v.toFixed(2) 
+      : fmt === 'time' 
+        ? `${Math.floor(v / 3600)}:${String(Math.floor((v % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v % 60)).padStart(2, '0')}`
+        : v.toLocaleString();
+  }
+  
+  useEffect(() => {
+    if (value !== prevValueRef.current) {
+      setIsUpdating(true);
+      // Small delay for smooth transition
+      const timer = setTimeout(() => {
+        setDisplayValue(formatValue(value, format));
+        prevValueRef.current = value;
+        setTimeout(() => setIsUpdating(false), 150);
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [value, format]);
   
   return (
     <div className="text-center">
-      <div className="font-mono text-2xl font-bold text-white tabular-nums">{displayValue}</div>
+      <div 
+        className={`font-mono text-2xl font-bold text-white tabular-nums transition-all duration-300 ease-out ${isUpdating ? 'opacity-80 scale-105' : 'opacity-100 scale-100'}`}
+      >
+        {displayValue}
+      </div>
       <div className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</div>
     </div>
   );
@@ -350,7 +373,7 @@ function PerformancePanel() {
           {/* Idle Status */}
           <div className="text-center py-2">
             <span className="px-3 py-1 text-xs bg-slate-800 text-slate-400 rounded-full">
-              Ready to mine
+              Standby
             </span>
           </div>
         </div>
@@ -697,7 +720,7 @@ export function MinerControl() {
                 <span className="text-xs font-medium text-slate-400">SYSTEM RESOURCES</span>
               </div>
               
-              <div className="flex justify-around items-start">
+              <div className="flex justify-around items-start mb-4">
                 <div className="relative">
                   <CircularGauge value={resources.cpuUsage} label="CPU" size={70} />
                 </div>
@@ -706,14 +729,36 @@ export function MinerControl() {
                 </div>
                 <div className="relative">
                   <CircularGauge 
-                    value={resources.diskFreeGb} 
+                    value={resources.diskFreePct || (resources.diskFreeGb / 100) * 100} 
                     max={100} 
-                    label="DISK" 
-                    unit="GB"
+                    label="DISK FREE" 
+                    unit="%"
                     size={70}
                     warningThreshold={20}
                     dangerThreshold={10}
                   />
+                </div>
+              </div>
+              
+              {/* Disk I/O Metrics */}
+              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                <div className="bg-slate-800/50 rounded p-2">
+                  <div className="text-slate-500 text-[10px]">Free Space</div>
+                  <div className="text-white font-mono">{resources.diskFreeGb?.toFixed(1) || '—'} GB</div>
+                </div>
+                <div className="bg-slate-800/50 rounded p-2">
+                  <div className="text-slate-500 text-[10px]">Written (24h)</div>
+                  <div className="text-white font-mono">{resources.diskWritten24h?.toFixed(2) || '0.00'} GB</div>
+                </div>
+                <div className="bg-slate-800/50 rounded p-2">
+                  <div className="text-slate-500 text-[10px]">Write Rate</div>
+                  <div className="text-white font-mono">{resources.writeRateMbPerSec?.toFixed(2) || '0.00'} MB/s</div>
+                </div>
+                <div className="bg-slate-800/50 rounded p-2">
+                  <div className="text-slate-500 text-[10px]">Acceleration</div>
+                  <div className={`font-mono ${(resources.writeAcceleration || 0) > 0 ? 'text-amber-400' : 'text-white'}`}>
+                    {resources.writeAcceleration?.toFixed(3) || '0.000'} MB/s²
+                  </div>
                 </div>
               </div>
               
@@ -725,7 +770,7 @@ export function MinerControl() {
                 {resources.canStartCampaign ? (
                   <span className="flex items-center justify-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
-                    Ready to mine
+                    Resources OK
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-1">
