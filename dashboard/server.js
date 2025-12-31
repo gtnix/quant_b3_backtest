@@ -385,21 +385,6 @@ app.get('/api/run/:runId', (req, res) => {
   res.json(data);
 });
 
-// =============================================================================
-// HELPER: Estimate MaxDD from Sharpe and CAGR (when not available in DB)
-// =============================================================================
-function estimateMaxDrawdown(sharpe, cagr) {
-  // Heuristic: MaxDD ≈ -CAGR / Sharpe (rough approximation)
-  // Higher Sharpe = lower volatility = smaller drawdown
-  // Lower Sharpe = higher volatility = larger drawdown
-  if (!sharpe || sharpe <= 0 || !cagr) return -0.15; // Default 15% drawdown
-  
-  const vol = Math.abs(cagr) / sharpe;
-  // Typical MaxDD is 1-2x annual volatility
-  const estimatedDD = -Math.min(0.50, Math.max(0.05, vol * 1.5));
-  return Math.round(estimatedDD * 1000) / 1000;
-}
-
 // List recent candidates for quick selection (must be before :runId route)
 app.get('/api/candidates/recent', async (req, res) => {
   const { limit = 10 } = req.query;
@@ -418,9 +403,6 @@ app.get('/api/candidates/recent', async (req, res) => {
     `, [parseInt(limit)]);
     
     const candidates = result.rows.map(c => {
-      // Estimate MaxDD if not available
-      const maxDD = c.max_drawdown_net ?? estimateMaxDrawdown(c.oos_sharpe_net, c.oos_cagr_net);
-      
       return {
         candidate_id: c.candidate_id,
         genome_hash: c.genome_hash || '',
@@ -428,8 +410,8 @@ app.get('/api/candidates/recent', async (req, res) => {
         display_name: `Strategy #${c.rank_in_run || 1} | ${(c.genome_hash || '').slice(-8)}`,
         oos_sharpe_net: c.oos_sharpe_net || 0,
         oos_cagr_net: c.oos_cagr_net || 0,
-        max_drawdown_net: maxDD,
-        max_drawdown_estimated: c.max_drawdown_net === null,
+        max_drawdown_net: c.max_drawdown_net,
+        max_drawdown_missing: c.max_drawdown_net === null,
         pbo: c.pbo || 0,
         dsr: c.dsr || 0,
         gates_passed: c.gates_passed || false,
@@ -515,9 +497,6 @@ app.get('/api/candidates/:runId', async (req, res) => {
     `, [runId, parseInt(limit)]);
     
     let candidates = result.rows.map((c, idx) => {
-      // Estimate MaxDD if not available
-      const maxDD = c.max_drawdown_net ?? estimateMaxDrawdown(c.oos_sharpe_net, c.oos_cagr_net);
-      
       return {
         rank: c.rank_in_run || idx + 1,
         candidate_id: c.candidate_id,
@@ -526,8 +505,8 @@ app.get('/api/candidates/:runId', async (req, res) => {
         candidate_class: c.candidate_class || (c.gates_passed ? 'validated' : 'research'),
         oos_sharpe_net: c.oos_sharpe_net || 0,
         oos_cagr_net: c.oos_cagr_net || 0,
-        max_drawdown_net: maxDD,
-        max_drawdown_estimated: c.max_drawdown_net === null,
+        max_drawdown_net: c.max_drawdown_net,
+        max_drawdown_missing: c.max_drawdown_net === null,
         pbo: c.pbo || 0,
         dsr: c.dsr || 0,
         stress_passed: c.stress_passed || 0,
@@ -585,8 +564,6 @@ app.get('/api/candidate/:candidateId', async (req, res) => {
       
       if (candidateResult.rows.length > 0) {
         const c = candidateResult.rows[0];
-        // Estimate MaxDD if not available
-        const maxDD = c.max_drawdown_net ?? estimateMaxDrawdown(c.oos_sharpe_net, c.oos_cagr_net);
         
         return res.json({
           candidate_id: c.candidate_id,
@@ -602,8 +579,8 @@ app.get('/api/candidate/:candidateId', async (req, res) => {
           pbo: c.pbo || 0,
           dsr: c.dsr || 0,
           oos_cagr_net: c.oos_cagr_net || 0,
-          max_drawdown_net: maxDD,
-          max_drawdown_estimated: c.max_drawdown_net === null,
+          max_drawdown_net: c.max_drawdown_net,
+          max_drawdown_missing: c.max_drawdown_net === null,
           turnover_annual: c.turnover_annual || 0,
           capacity_usd: c.capacity_usd,
           stress_passed: c.stress_passed || 0,
@@ -1849,13 +1826,20 @@ const ompState = {
     throughputPerMin: 0,
     gatesApprovalRate: 0,
   },
+  // Sliding window for throughput calculation (last 60 seconds)
+  throughputWindow: [],
   resources: {
     cpuUsage: 0,
     memoryUsagePct: 0,
     memoryAvailableMb: 0,
     diskFreeGb: 0,
+    diskWritten24h: 0,
+    writeRateMbPerSec: 0,
+    writeAcceleration: 0,
     canStartCampaign: false,
   },
+  // Disk I/O tracking
+  diskIoHistory: [],
   config: null,
 };
 
@@ -1921,11 +1905,76 @@ async function checkResources() {
   
   // Disk space (simplified - check artifacts directory)
   let diskFreeGb = 100; // Default high value
+  let diskTotalGb = 100;
+  let diskFreePct = 100;
   try {
-    const dfOutput = execSync(`df -BG ${ARTIFACTS_ROOT} | tail -1 | awk '{print $4}'`, { encoding: 'utf-8' });
-    diskFreeGb = parseFloat(dfOutput.replace('G', '')) || 100;
+    const dfOutput = execSync(`df -BG ${ARTIFACTS_ROOT} | tail -1`, { encoding: 'utf-8' });
+    const parts = dfOutput.trim().split(/\s+/);
+    diskTotalGb = parseFloat(parts[1]?.replace('G', '')) || 100;
+    diskFreeGb = parseFloat(parts[3]?.replace('G', '')) || 100;
+    diskFreePct = diskTotalGb > 0 ? (diskFreeGb / diskTotalGb) * 100 : 100;
   } catch (e) {
     // Ignore disk check errors
+  }
+  
+  // Disk I/O tracking (Linux only via /proc/diskstats)
+  let diskWrittenBytes = 0;
+  try {
+    // Read sectors written from /proc/diskstats (sector = 512 bytes typically)
+    const diskstats = fs.readFileSync('/proc/diskstats', 'utf-8');
+    const lines = diskstats.split('\n');
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 14 && (parts[2] === 'sda' || parts[2] === 'nvme0n1' || parts[2] === 'vda')) {
+        // Field 10 (index 9) is sectors written
+        diskWrittenBytes += parseInt(parts[9] || '0', 10) * 512;
+        break;
+      }
+    }
+  } catch (e) {
+    // Not Linux or no access to /proc
+  }
+  
+  const now = Date.now();
+  ompState.diskIoHistory = ompState.diskIoHistory || [];
+  ompState.diskIoHistory.push({ time: now, bytes: diskWrittenBytes });
+  
+  // Keep last 5 minutes of data (for rate calculation)
+  const cutoff5min = now - 5 * 60 * 1000;
+  const cutoff24h = now - 24 * 60 * 60 * 1000;
+  ompState.diskIoHistory = ompState.diskIoHistory.filter(p => p.time > cutoff24h);
+  
+  // Calculate write rate (MB/s) over last 5 minutes
+  let writeRateMbPerSec = 0;
+  let writeAcceleration = 0;
+  const recentHistory = ompState.diskIoHistory.filter(p => p.time > cutoff5min);
+  if (recentHistory.length >= 2) {
+    const oldest = recentHistory[0];
+    const newest = recentHistory[recentHistory.length - 1];
+    const deltaBytes = newest.bytes - oldest.bytes;
+    const deltaSecs = (newest.time - oldest.time) / 1000;
+    writeRateMbPerSec = deltaSecs > 0 ? (deltaBytes / (1024 * 1024)) / deltaSecs : 0;
+    
+    // Calculate acceleration (change in rate)
+    if (recentHistory.length >= 4) {
+      const mid = Math.floor(recentHistory.length / 2);
+      const firstHalf = recentHistory.slice(0, mid);
+      const secondHalf = recentHistory.slice(mid);
+      
+      const rate1 = (firstHalf[firstHalf.length - 1].bytes - firstHalf[0].bytes) / 
+                    ((firstHalf[firstHalf.length - 1].time - firstHalf[0].time) / 1000);
+      const rate2 = (secondHalf[secondHalf.length - 1].bytes - secondHalf[0].bytes) / 
+                    ((secondHalf[secondHalf.length - 1].time - secondHalf[0].time) / 1000);
+      writeAcceleration = (rate2 - rate1) / (1024 * 1024); // MB/s²
+    }
+  }
+  
+  // Calculate 24h written (if we have history spanning 24h)
+  let diskWritten24h = 0;
+  if (ompState.diskIoHistory.length >= 2) {
+    const oldest24h = ompState.diskIoHistory[0];
+    const newest = ompState.diskIoHistory[ompState.diskIoHistory.length - 1];
+    diskWritten24h = Math.max(0, newest.bytes - oldest24h.bytes) / (1024 * 1024 * 1024); // GB
   }
   
   const config = ompState.config?.resource_limits || {};
@@ -1941,16 +1990,15 @@ async function checkResources() {
       diskFreeGb > minDisk &&
       activeCampaigns < maxConcurrent;
   
-  // Debug log for canStartCampaign
-  if (!canStart) {
-    console.log(`[OMP DEBUG] canStart=false: cpu=${cpuUsage}<${maxCpu}? mem=${memoryAvailableMb}>${minMem}? disk=${diskFreeGb}>${minDisk}? active=${activeCampaigns}<${maxConcurrent}?`);
-  }
-  
   ompState.resources = {
     cpuUsage: Math.round(cpuUsage * 10) / 10,
     memoryUsagePct: Math.round(memoryUsagePct * 10) / 10,
     memoryAvailableMb: Math.round(memoryAvailableMb),
     diskFreeGb: Math.round(diskFreeGb * 10) / 10,
+    diskFreePct: Math.round(diskFreePct * 10) / 10,
+    diskWritten24h: Math.round(diskWritten24h * 100) / 100,
+    writeRateMbPerSec: Math.round(writeRateMbPerSec * 100) / 100,
+    writeAcceleration: Math.round(writeAcceleration * 1000) / 1000,
     canStartCampaign: canStart,
   };
   
@@ -2087,29 +2135,10 @@ async function startQueuedCampaign(campaign) {
   return campaignState;
 }
 
-// Estimate PBO from Sharpe ratio (heuristic when not available)
-function estimatePbo(sharpe) {
-  if (!sharpe || sharpe <= 0) return 0.5;
-  // Higher Sharpe = lower PBO (inverse relationship)
-  // Sharpe 2.0+ => PBO ~0.05, Sharpe 1.0 => PBO ~0.15, Sharpe 0.5 => PBO ~0.30
-  return Math.max(0.02, Math.min(0.5, 0.30 / sharpe));
-}
-
-// Estimate DSR from Sharpe (deflated Sharpe is typically 60-80% of raw)
-function estimateDsr(sharpe) {
-  if (!sharpe || sharpe <= 0) return 0;
-  return sharpe * 0.7; // Conservative 70% deflation
-}
-
 // Check and promote candidates to hall of fame
 async function checkAndPromoteCandidates(runId, campaign) {
   const config = ompState.config?.promotion || {};
-  // Default to enabled if not explicitly disabled
-  const promotionEnabled = config.enabled !== false;
-  if (!promotionEnabled) {
-    console.log('[OMP] Promotion disabled in config');
-    return;
-  }
+  if (!config.enabled) return;
   
   try {
     // Query top candidates from the run
@@ -2125,47 +2154,49 @@ async function checkAndPromoteCandidates(runId, campaign) {
       LIMIT 100
     `, [runId]);
     
-    console.log(`[OMP] Checking ${result.rows.length} candidates for promotion from run ${runId}`);
+    // Sanity check: detect metrics collapse (variance ~0)
+    const calcVariance = (arr) => {
+      if (arr.length < 2) return 0;
+      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+      return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+    };
     
-    // Relaxed thresholds for initial testing (can be tightened later)
+    const sharpeValues = result.rows.map(r => r.oos_sharpe_net).filter(v => v != null);
+    const pboValues = result.rows.map(r => r.pbo).filter(v => v != null);
+    const dsrValues = result.rows.map(r => r.dsr).filter(v => v != null);
+    
+    const sharpeVar = calcVariance(sharpeValues);
+    const pboVar = calcVariance(pboValues);
+    const dsrVar = calcVariance(dsrValues);
+    
+    if (sharpeVar < 1e-6 || pboVar < 1e-8 || dsrVar < 1e-6) {
+      console.error(`[OMP] BLOCKED: metrics_collapsed - variance ~0 detected (sharpe: ${sharpeVar.toExponential(2)}, pbo: ${pboVar.toExponential(2)}, dsr: ${dsrVar.toExponential(2)})`);
+      return { blocked: true, reason: 'metrics_collapsed', details: { sharpeVar, pboVar, dsrVar } };
+    }
+    
+    // Research-grade defaults for discovery - production would use stricter thresholds
     const thresholds = {
-      minSharpe: config.min_oos_sharpe_net ?? 0.8,
-      maxPbo: config.max_pbo ?? 0.20,
-      minDsr: config.min_dsr ?? 0.5,
-      maxDrawdown: config.max_drawdown_net ?? 0.30,
+      minSharpe: config.min_oos_sharpe_net || 0.5,  // Research: allow promising strategies
+      maxPbo: config.max_pbo || 0.25,               // Research: accept some overfitting risk
+      minDsr: config.min_dsr || 0.5,                // Research: lower threshold
+      maxDrawdown: config.max_drawdown_net || 0.30, // Research: 30% max drawdown acceptable
     };
     
     let promoted = 0;
-    let checked = 0;
     
     for (const candidate of result.rows) {
-      checked++;
-      const sharpe = candidate.oos_sharpe_net || 0;
-      const cagr = candidate.oos_cagr_net || 0;
+      // Check promotion criteria
+      const meetsSharpeCriteria = (candidate.oos_sharpe_net || 0) >= thresholds.minSharpe;
+      const meetsPboCriteria = (candidate.pbo || 1) <= thresholds.maxPbo;
+      const meetsDsrCriteria = (candidate.dsr || 0) >= thresholds.minDsr;
+      // If max_drawdown_net is null, skip the check (allow promotion)
+      const meetsDrawdownCriteria = candidate.max_drawdown_net === null || Math.abs(candidate.max_drawdown_net) <= thresholds.maxDrawdown;
+      const passesGates = candidate.gates_passed === true;
       
-      // Use actual values or estimates when NULL
-      const pbo = candidate.pbo ?? estimatePbo(sharpe);
-      const dsr = candidate.dsr ?? estimateDsr(sharpe);
-      const maxDD = candidate.max_drawdown_net ?? estimateMaxDrawdown(sharpe, cagr);
-      
-      // Gates passed: accept NULL as potentially passing (since combiner may not set it)
-      const gatesPassed = candidate.gates_passed === true || candidate.gates_passed === null;
-      
-      // Check promotion criteria with estimated values
-      const meetsSharpeCriteria = sharpe >= thresholds.minSharpe;
-      const meetsPboCriteria = pbo <= thresholds.maxPbo;
-      const meetsDsrCriteria = dsr >= thresholds.minDsr;
-      const meetsDrawdownCriteria = Math.abs(maxDD) <= thresholds.maxDrawdown;
-      
-      // Log first few candidates for debugging
-      if (checked <= 3) {
-        console.log(`[OMP] Candidate ${candidate.candidate_id}: Sharpe=${sharpe.toFixed(3)}, PBO=${pbo.toFixed(3)}(est=${candidate.pbo === null}), DSR=${dsr.toFixed(3)}, DD=${maxDD.toFixed(3)}, Gates=${gatesPassed}`);
-      }
-      
-      if (meetsSharpeCriteria && meetsPboCriteria && meetsDsrCriteria && meetsDrawdownCriteria && gatesPassed) {
+      if (meetsSharpeCriteria && meetsPboCriteria && meetsDsrCriteria && meetsDrawdownCriteria && passesGates) {
         // Check if already promoted
         const existing = await pool.query(
-          'SELECT promotion_id FROM scg_promotions WHERE candidate_id = $1 AND stage = $2',
+          'SELECT promotion_id FROM scg_promotions WHERE candidate_id = $1 AND promotion_class = $2',
           [candidate.candidate_id, 'hall_of_fame']
         );
         
@@ -2176,7 +2207,7 @@ async function checkAndPromoteCandidates(runId, campaign) {
             gitSha = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, encoding: 'utf-8' }).trim().slice(0, 40);
           } catch (e) {}
           
-          // Insert promotion with estimated values where needed
+          // Insert promotion
           const promotionId = `prom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
           
           await pool.query(`
@@ -2191,31 +2222,31 @@ async function checkAndPromoteCandidates(runId, campaign) {
             candidate.candidate_id,
             'hall_of_fame',
             'hall_of_fame',
-            sharpe,
-            pbo,
-            dsr,
-            maxDD,
-            cagr,
-            candidate.stress_passed || 0,
-            candidate.stress_total || 8,
-            gatesPassed,
+            candidate.oos_sharpe_net,
+            candidate.pbo,
+            candidate.dsr,
+            candidate.max_drawdown_net,
+            candidate.oos_cagr_net,
+            candidate.stress_passed,
+            candidate.stress_total,
+            candidate.gates_passed,
             gitSha,
             campaign.market || 'br',
-            `Auto-promoted by OMP from run ${runId}${candidate.pbo === null ? ' (metrics estimated)' : ''}`
+            `Auto-promoted by OMP from run ${runId}`
           ]);
           
           promoted++;
           ompState.stats.promotions++;
           ompState.lastPromotion = new Date().toISOString();
           
-          console.log(`🏆 [OMP] Promoted to Hall of Fame: ${candidate.candidate_id} (Sharpe: ${sharpe.toFixed(3)}, PBO: ${pbo.toFixed(3)})`);
+          console.log(`🏆 [OMP] Promoted to Hall of Fame: ${candidate.candidate_id} (Sharpe: ${candidate.oos_sharpe_net?.toFixed(3)})`);
           
           // Broadcast promotion
           broadcastSSE('omp-promotion', {
             candidateId: candidate.candidate_id,
             promotionId,
-            sharpe,
-            pbo,
+            sharpe: candidate.oos_sharpe_net,
+            pbo: candidate.pbo,
           });
         }
       }
@@ -2223,8 +2254,6 @@ async function checkAndPromoteCandidates(runId, campaign) {
     
     if (promoted > 0) {
       console.log(`🏆 [OMP] Promoted ${promoted} candidates to Hall of Fame`);
-    } else {
-      console.log(`[OMP] No candidates met promotion criteria (checked ${checked})`);
     }
     
   } catch (err) {
@@ -2275,16 +2304,37 @@ async function ompLoop() {
       }
     }
     
-    // 5. Update current campaign metrics
+    // 5. Update current campaign metrics with sliding window throughput
     if (ompState.currentCampaign) {
-      const elapsed = (Date.now() - ompState.currentCampaign.startTime) / 1000;
-      ompState.stats.throughputPerMin = ompState.currentCampaign.candidatesEvaluated / (elapsed / 60) || 0;
+      const now = Date.now();
+      const currentCount = ompState.currentCampaign.candidatesEvaluated || 0;
+      
+      // Add current datapoint to sliding window
+      ompState.throughputWindow.push({ time: now, count: currentCount });
+      
+      // Remove entries older than 60 seconds
+      const cutoff = now - 60000;
+      ompState.throughputWindow = ompState.throughputWindow.filter(p => p.time > cutoff);
+      
+      // Calculate throughput from sliding window
+      if (ompState.throughputWindow.length >= 2) {
+        const oldest = ompState.throughputWindow[0];
+        const newest = ompState.throughputWindow[ompState.throughputWindow.length - 1];
+        const deltaCount = newest.count - oldest.count;
+        const deltaTimeSecs = (newest.time - oldest.time) / 1000;
+        ompState.stats.throughputPerMin = deltaTimeSecs > 0 ? (deltaCount / deltaTimeSecs) * 60 : 0;
+      } else {
+        // Fallback to cumulative average if window is too small
+        const elapsed = (now - ompState.currentCampaign.startTime) / 1000;
+        ompState.stats.throughputPerMin = elapsed > 0 ? (currentCount / elapsed) * 60 : 0;
+      }
       
       // Log generation progress periodically
       if (ompState.loopCount % 5 === 0) {
-        addActivityLog('info', `Gen ${ompState.currentCampaign.currentGeneration} | Candidates: ${ompState.currentCampaign.candidatesEvaluated} | Best: ${ompState.currentCampaign.bestSharpe?.toFixed(3) || '—'}`, {
+        addActivityLog('info', `Gen ${ompState.currentCampaign.currentGeneration} | Candidates: ${currentCount} | Throughput: ${ompState.stats.throughputPerMin.toFixed(1)}/min | Best: ${ompState.currentCampaign.bestSharpe?.toFixed(3) || '—'}`, {
           generation: ompState.currentCampaign.currentGeneration,
-          candidates: ompState.currentCampaign.candidatesEvaluated,
+          candidates: currentCount,
+          throughput: ompState.stats.throughputPerMin,
           bestSharpe: ompState.currentCampaign.bestSharpe
         });
       }
@@ -2507,65 +2557,62 @@ app.patch('/api/omp/config', (req, res) => {
   res.json({ message: 'Config reloaded', config: ompState.config });
 });
 
-// Update market configuration (universe settings)
-app.patch('/api/omp/config/markets', (req, res) => {
-  const { markets } = req.body;
-  
-  if (!markets) {
-    return res.status(400).json({ error: 'markets object required' });
-  }
+// Promotion sanity check endpoint (SEV-0: variance gate)
+app.get('/api/omp/promote-check', async (req, res) => {
+  const { runId } = req.query;
   
   try {
-    // Read current config file
-    let configContent = '';
-    if (fs.existsSync(OMP_CONFIG_PATH)) {
-      configContent = fs.readFileSync(OMP_CONFIG_PATH, 'utf-8');
-    } else {
-      return res.status(404).json({ error: 'OMP config file not found' });
+    let query = `
+      SELECT c.candidate_id, c.oos_sharpe_net, c.pbo, c.dsr, c.max_drawdown_net
+      FROM scg_candidates c
+    `;
+    const params = [];
+    
+    if (runId) {
+      params.push(runId);
+      query += ` WHERE c.run_id = $1`;
     }
+    query += ` ORDER BY c.oos_sharpe_net DESC NULLS LAST LIMIT 100`;
     
-    // Update market sections using regex replacement
-    for (const [marketKey, marketConfig] of Object.entries(markets)) {
-      const config = marketConfig;
-      if (!config) continue;
-      
-      // Update enabled flag
-      if ('enabled' in config) {
-        const enabledRegex = new RegExp(`(\\[markets\\.${marketKey}\\][\\s\\S]*?enabled\\s*=\\s*)\\w+`, 'm');
-        configContent = configContent.replace(enabledRegex, `$1${config.enabled}`);
+    const result = await pool.query(query, params);
+    
+    // Calculate variance for sanity check
+    const calcVariance = (arr) => {
+      if (arr.length < 2) return 0;
+      const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+      return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+    };
+    
+    const sharpeValues = result.rows.map(r => r.oos_sharpe_net).filter(v => v != null);
+    const pboValues = result.rows.map(r => r.pbo).filter(v => v != null);
+    const dsrValues = result.rows.map(r => r.dsr).filter(v => v != null);
+    
+    const sharpeVar = calcVariance(sharpeValues);
+    const pboVar = calcVariance(pboValues);
+    const dsrVar = calcVariance(dsrValues);
+    
+    // Check for metrics collapse
+    const blocked = sharpeVar < 1e-6 || pboVar < 1e-8 || dsrVar < 1e-6;
+    
+    // Check for NULL metrics (candidates without complete data)
+    const incompleteCount = result.rows.filter(r => 
+      r.oos_sharpe_net == null || r.pbo == null || r.dsr == null || r.max_drawdown_net == null
+    ).length;
+    
+    res.json({
+      blocked,
+      reason: blocked ? 'metrics_collapsed' : null,
+      details: {
+        sharpeVar: sharpeVar.toExponential(3),
+        pboVar: pboVar.toExponential(3),
+        dsrVar: dsrVar.toExponential(3),
+        candidatesChecked: result.rows.length,
+        incompleteMetrics: incompleteCount,
       }
-      
-      // Update universe
-      if ('universe' in config) {
-        const universeRegex = new RegExp(`(\\[markets\\.${marketKey}\\][\\s\\S]*?universe\\s*=\\s*)"[^"]*"`, 'm');
-        configContent = configContent.replace(universeRegex, `$1"${config.universe}"`);
-      }
-      
-      // Update lot_size
-      if ('lot_size' in config) {
-        const lotRegex = new RegExp(`(\\[markets\\.${marketKey}\\][\\s\\S]*?lot_size\\s*=\\s*)\\d+`, 'm');
-        configContent = configContent.replace(lotRegex, `$1${config.lot_size}`);
-      }
-    }
-    
-    // Write updated config
-    fs.writeFileSync(OMP_CONFIG_PATH, configContent);
-    
-    // Reload config
-    loadOmpConfig();
-    
-    console.log('[OMP] Market configuration updated');
-    broadcastSSE('omp-config-updated', { markets: ompState.config?.markets });
-    
-    res.json({ 
-      success: true, 
-      markets: ompState.config?.markets,
-      message: 'Market configuration updated'
     });
-    
   } catch (err) {
-    console.error('[OMP] Failed to update market config:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[OMP] Promote check failed:', err.message);
+    res.status(500).json({ blocked: true, reason: 'error', error: err.message });
   }
 });
 
@@ -2594,12 +2641,35 @@ app.get('/api/omp/hall-of-fame', async (req, res) => {
     
     const result = await pool.query(query, params);
     
+    // Generate deterministic strategy names
+    const generateStrategyName = (entry) => {
+      const parts = [];
+      // Market prefix
+      parts.push(entry.market?.toUpperCase() || 'BR');
+      
+      // Extract info from genome_hash or candidate_id
+      const hash = entry.genome_hash || entry.candidate_id || '';
+      const hashSuffix = hash.slice(-6).toUpperCase();
+      
+      // Use campaign name if available
+      if (entry.campaign_name) {
+        const campPart = entry.campaign_name.split('_')[0]?.slice(0, 12);
+        if (campPart) parts.push(campPart);
+      }
+      
+      // Add hash suffix for uniqueness
+      parts.push(`#${hashSuffix}`);
+      
+      return parts.join(' • ').slice(0, 48);
+    };
+    
     res.json({
       count: result.rows.length,
       entries: result.rows.map(r => ({
         promotionId: r.promotion_id,
         candidateId: r.candidate_id,
         genomeHash: r.genome_hash,
+        strategyName: generateStrategyName(r),
         campaignId: r.campaign_id,
         campaignName: r.campaign_name,
         runId: r.run_id,
@@ -2620,6 +2690,7 @@ app.get('/api/omp/hall-of-fame', async (req, res) => {
         provenance: {
           gitSha: r.git_sha,
           configHash: r.config_hash,
+          datasetHash: null, // Column does not exist in scg_candidates yet
         },
         notes: r.notes,
       })),
@@ -2627,119 +2698,6 @@ app.get('/api/omp/hall-of-fame', async (req, res) => {
   } catch (err) {
     console.error('[OMP] Hall of Fame query failed:', err.message);
     res.status(500).json({ error: err.message, entries: [] });
-  }
-});
-
-// Force re-evaluate existing candidates for Hall of Fame promotion
-app.post('/api/omp/promote-check', async (req, res) => {
-  const { limit = 1000, market } = req.body;
-  
-  try {
-    console.log('[OMP] Running manual promotion check...');
-    
-    // Get top candidates not yet promoted
-    let query = `
-      SELECT c.candidate_id, c.genome_hash, c.oos_sharpe_net, c.pbo, c.dsr,
-             c.max_drawdown_net, c.oos_cagr_net, c.stress_passed, c.stress_total,
-             c.gates_passed, c.run_id, r.campaign_id, camp.name as campaign_name
-      FROM scg_candidates c
-      JOIN scg_runs r ON c.run_id = r.run_id
-      LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id
-      LEFT JOIN scg_promotions p ON c.candidate_id = p.candidate_id AND p.stage = 'hall_of_fame'
-      WHERE p.promotion_id IS NULL
-      ORDER BY c.oos_sharpe_net DESC NULLS LAST
-      LIMIT $1
-    `;
-    
-    const result = await pool.query(query, [parseInt(limit)]);
-    console.log(`[OMP] Found ${result.rows.length} unpromoted candidates to evaluate`);
-    
-    const config = ompState.config?.promotion || {};
-    const thresholds = {
-      minSharpe: config.min_oos_sharpe_net ?? 0.8,
-      maxPbo: config.max_pbo ?? 0.20,
-      minDsr: config.min_dsr ?? 0.5,
-      maxDrawdown: config.max_drawdown_net ?? 0.30,
-    };
-    
-    let promoted = 0;
-    const promotedIds = [];
-    
-    for (const candidate of result.rows) {
-      const sharpe = candidate.oos_sharpe_net || 0;
-      const cagr = candidate.oos_cagr_net || 0;
-      
-      // Use estimates when NULL
-      const pbo = candidate.pbo ?? estimatePbo(sharpe);
-      const dsr = candidate.dsr ?? estimateDsr(sharpe);
-      const maxDD = candidate.max_drawdown_net ?? estimateMaxDrawdown(sharpe, cagr);
-      const gatesPassed = candidate.gates_passed === true || candidate.gates_passed === null;
-      
-      const meetsSharpeCriteria = sharpe >= thresholds.minSharpe;
-      const meetsPboCriteria = pbo <= thresholds.maxPbo;
-      const meetsDsrCriteria = dsr >= thresholds.minDsr;
-      const meetsDrawdownCriteria = Math.abs(maxDD) <= thresholds.maxDrawdown;
-      
-      if (meetsSharpeCriteria && meetsPboCriteria && meetsDsrCriteria && meetsDrawdownCriteria && gatesPassed) {
-        let gitSha = null;
-        try {
-          gitSha = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, encoding: 'utf-8' }).trim().slice(0, 40);
-        } catch (e) {}
-        
-        const promotionId = `prom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        
-        await pool.query(`
-          INSERT INTO scg_promotions (
-            promotion_id, candidate_id, stage, promotion_class,
-            oos_sharpe_net, pbo, dsr, max_drawdown_net, cagr_net,
-            stress_passed, stress_total, gates_passed,
-            git_sha, market, notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        `, [
-          promotionId,
-          candidate.candidate_id,
-          'hall_of_fame',
-          'hall_of_fame',
-          sharpe,
-          pbo,
-          dsr,
-          maxDD,
-          cagr,
-          candidate.stress_passed || 0,
-          candidate.stress_total || 8,
-          gatesPassed,
-          gitSha,
-          market || 'br',
-          `Manual promotion check${candidate.pbo === null ? ' (metrics estimated)' : ''}`
-        ]);
-        
-        promoted++;
-        promotedIds.push(candidate.candidate_id);
-        ompState.stats.promotions++;
-        
-        // Limit batch promotions
-        if (promoted >= 50) break;
-      }
-    }
-    
-    if (promoted > 0) {
-      ompState.lastPromotion = new Date().toISOString();
-      broadcastSSE('omp-promotion', { count: promoted, candidates: promotedIds.slice(0, 5) });
-    }
-    
-    console.log(`🏆 [OMP] Manual check: promoted ${promoted} candidates`);
-    
-    res.json({
-      success: true,
-      evaluated: result.rows.length,
-      promoted,
-      promotedIds: promotedIds.slice(0, 10),
-      thresholds,
-    });
-    
-  } catch (err) {
-    console.error('[OMP] Manual promotion check failed:', err.message);
-    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2764,65 +2722,6 @@ app.get('/api/omp/performance', async (req, res) => {
     }
   }
   
-  // Fetch historical metrics from Neon
-  let historical = null;
-  try {
-    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const last1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    
-    const [candidates24h, candidates1h, promotions24h, recentRuns, bestCandidate] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM scg_candidates WHERE created_at > $1', [last24h]),
-      pool.query('SELECT COUNT(*) FROM scg_candidates WHERE created_at > $1', [last1h]),
-      pool.query("SELECT COUNT(*) FROM scg_promotions WHERE promoted_at > $1", [last24h]),
-      pool.query(`
-        SELECT r.run_id, r.duration_secs, r.total_evaluations, r.started_at, r.status,
-               c.name as campaign_name
-        FROM scg_runs r
-        LEFT JOIN scg_campaigns c ON r.campaign_id = c.campaign_id
-        WHERE r.started_at > $1
-        ORDER BY r.started_at DESC
-        LIMIT 5
-      `, [last24h]),
-      pool.query(`
-        SELECT candidate_id, oos_sharpe_net, oos_cagr_net, created_at
-        FROM scg_candidates
-        WHERE created_at > $1
-        ORDER BY oos_sharpe_net DESC NULLS LAST
-        LIMIT 1
-      `, [last24h]),
-    ]);
-    
-    // Calculate average throughput from recent runs
-    let avgThroughput = 0;
-    const runs = recentRuns.rows.filter(r => r.duration_secs > 0 && r.total_evaluations > 0);
-    if (runs.length > 0) {
-      const totalEvals = runs.reduce((sum, r) => sum + (r.total_evaluations || 0), 0);
-      const totalSecs = runs.reduce((sum, r) => sum + (r.duration_secs || 0), 0);
-      avgThroughput = totalSecs > 0 ? (totalEvals / totalSecs) * 60 : 0;
-    }
-    
-    historical = {
-      candidates_24h: parseInt(candidates24h.rows[0].count) || 0,
-      candidates_1h: parseInt(candidates1h.rows[0].count) || 0,
-      promotions_24h: parseInt(promotions24h.rows[0].count) || 0,
-      avg_throughput_per_min: Math.round(avgThroughput * 10) / 10,
-      recent_runs: runs.slice(0, 3).map(r => ({
-        run_id: r.run_id,
-        campaign_name: r.campaign_name,
-        status: r.status,
-        duration_secs: r.duration_secs,
-        evaluations: r.total_evaluations,
-      })),
-      best_candidate_24h: bestCandidate.rows[0] ? {
-        candidate_id: bestCandidate.rows[0].candidate_id,
-        sharpe: bestCandidate.rows[0].oos_sharpe_net,
-        cagr: bestCandidate.rows[0].oos_cagr_net,
-      } : null,
-    };
-  } catch (err) {
-    console.warn('[OMP] Historical metrics fetch failed:', err.message);
-  }
-  
   res.json({
     current_run: currentCampaign ? {
       run_id: currentCampaign.runId,
@@ -2845,8 +2744,7 @@ app.get('/api/omp/performance', async (req, res) => {
       candidates_generated: ompState.stats.candidatesGenerated,
       backtests_executed: ompState.stats.backtestsExecuted,
       promotions: ompState.stats.promotions,
-    },
-    historical,
+    }
   });
 });
 

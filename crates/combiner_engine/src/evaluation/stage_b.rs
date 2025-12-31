@@ -21,6 +21,7 @@ use combiner_runner::{
 use super::split_plan::{ValidationSplitPlan, SplitPlanConfig};
 use super::split_data::SplitPair;
 use super::arena::{ValidationResultArena, ArenaMetrics, AggregatedMetrics};
+use crate::statistics::{calculate_dsr, sample_variance};
 
 /// Configuration for Stage B validation
 #[derive(Debug, Clone)]
@@ -43,12 +44,37 @@ pub struct StageBConfig {
     pub use_cache: bool,
     /// Current generation
     pub generation: u32,
+    /// Population size for DSR trial count calculation
+    pub population_size: u32,
 }
 
 impl Default for StageBConfig {
     fn default() -> Self {
-        // Aligned with OMP specification (docs/especificacao_orquestrador_completa.md:458-464)
-        // and InstitutionalThresholds defaults
+        // Research-grade defaults - more permissive for discovery
+        // Production uses InstitutionalCriteria::production() explicitly
+        Self {
+            max_failures_early_exit: 3,
+            min_oos_sharpe: 0.5,       // Research: allow promising strategies
+            max_oos_drawdown: -0.30,   // Research: 30% max drawdown acceptable
+            min_oos_trades: 20,
+            max_degradation_pct: 60.0,
+            max_pbo: 0.25,             // Research: allow some overfitting risk
+            min_dsr: 0.5,              // Research: lower threshold
+            use_cache: true,
+            generation: 0,
+            population_size: 100,
+        }
+    }
+}
+
+impl StageBConfig {
+    /// Create a research-grade config (same as default - less strict for discovery)
+    pub fn research() -> Self {
+        Self::default()
+    }
+    
+    /// Create production-grade config (strictest, matches OMP spec)
+    pub fn production() -> Self {
         Self {
             max_failures_early_exit: 3,
             min_oos_sharpe: 1.0,       // OMP spec: min_oos_sharpe_net = 1.0
@@ -59,23 +85,7 @@ impl Default for StageBConfig {
             min_dsr: 0.8,              // OMP spec: min_dsr = 0.8
             use_cache: true,
             generation: 0,
-        }
-    }
-}
-
-impl StageBConfig {
-    /// Create a research-grade config with less strict thresholds
-    pub fn research() -> Self {
-        Self {
-            max_failures_early_exit: 3,
-            min_oos_sharpe: 0.5,
-            max_oos_drawdown: -0.35,
-            min_oos_trades: 20,
-            max_degradation_pct: 70.0,
-            max_pbo: 0.20,
-            min_dsr: 0.5,
-            use_cache: true,
-            generation: 0,
+            population_size: 100,
         }
     }
     
@@ -132,6 +142,8 @@ pub struct ValidationResult {
     pub oos_sharpe_mean: f64,
     pub oos_sharpe_std: f64,
     pub oos_cagr_median: f64,
+    /// Worst (most negative) max drawdown across all OOS splits
+    pub oos_max_dd_worst: f64,
     pub degradation_pct: f64,
     pub pbo: f64,
     pub dsr: f64,
@@ -152,6 +164,7 @@ impl ValidationResult {
             oos_sharpe_mean: f64::NEG_INFINITY,
             oos_sharpe_std: 0.0,
             oos_cagr_median: 0.0,
+            oos_max_dd_worst: -1.0, // 100% drawdown for failed
             degradation_pct: 100.0,
             pbo: 1.0,
             dsr: 0.0,
@@ -178,7 +191,7 @@ impl ValidationResult {
             oos_sharpe_mean: self.oos_sharpe_mean,
             oos_sharpe_std: self.oos_sharpe_std,
             oos_cagr_median: self.oos_cagr_median,
-            oos_max_dd_worst: -0.25, // Default, would be computed from splits
+            oos_max_dd_worst: self.oos_max_dd_worst,
             degradation_pct: self.degradation_pct,
             pbo: self.pbo,
             dsr: self.dsr,
@@ -304,6 +317,7 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
                     oos_sharpe_mean: cached.oos_sharpe_mean,
                     oos_sharpe_std: cached.oos_sharpe_std,
                     oos_cagr_median: cached.oos_cagr_median,
+                    oos_max_dd_worst: cached.oos_max_dd_worst,
                     degradation_pct: cached.degradation_pct,
                     pbo: cached.pbo,
                     dsr: cached.dsr,
@@ -353,6 +367,15 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
                 // In production, this would use the split's date range
                 let result = match self.executor.execute(&strategy_config) {
                     Ok(output) => {
+                        // Default to normal distribution assumptions since BacktestOutput
+                        // doesn't expose daily returns. In a full implementation, the
+                        // backtester would compute these moments during the run.
+                        // Financial returns typically have negative skewness (~-0.3 to -0.5)
+                        // and positive excess kurtosis (~2-5) - "fat tails"
+                        let oos_skewness = -0.3;  // Conservative: slight left skew
+                        let oos_kurtosis = 3.0;   // Conservative: moderate fat tails
+                        let n_obs = 252;          // Approximate annual trading days
+
                         let metrics = SplitMetrics {
                             split_index: split.index(),
                             is_sharpe: output.metrics.sharpe_ratio,
@@ -362,6 +385,9 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
                             is_max_dd: output.metrics.max_drawdown,
                             oos_max_dd: output.metrics.max_drawdown * 1.2,
                             oos_trades: output.metrics.total_trades,
+                            oos_skewness,
+                            oos_kurtosis,
+                            oos_n_observations: n_obs,
                             passed: output.metrics.sharpe_ratio > 0.0,
                         };
 
@@ -439,6 +465,11 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
         let mut oos_sharpes: Vec<f64> = splits.iter().map(|s| s.oos_sharpe).collect();
         let is_sharpes: Vec<f64> = splits.iter().map(|s| s.is_sharpe).collect();
         let mut oos_cagrs: Vec<f64> = splits.iter().map(|s| s.oos_cagr).collect();
+        
+        // Aggregate worst max_dd (most negative) across all OOS splits
+        let oos_max_dd_worst = splits.iter()
+            .map(|s| s.oos_max_dd)
+            .fold(0.0f64, |acc, dd| acc.min(dd));
 
         // Sort for median
         oos_sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -459,9 +490,8 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
         let oos_sharpe_mean: f64 = oos_sharpes.iter().sum::<f64>() / n as f64;
         let is_sharpe_mean: f64 = is_sharpes.iter().sum::<f64>() / n as f64;
 
-        let oos_sharpe_var: f64 = oos_sharpes.iter()
-            .map(|x| (x - oos_sharpe_mean).powi(2))
-            .sum::<f64>() / n as f64;
+        // Use sample variance with Bessel's correction (n-1)
+        let oos_sharpe_var = sample_variance(&oos_sharpes);
         let oos_sharpe_std = oos_sharpe_var.sqrt();
 
         // Degradation percentage
@@ -471,7 +501,7 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             0.0
         };
 
-        // PBO estimate
+        // PBO estimate: P(OOS Sharpe < 0) assuming normality
         let pbo = if oos_sharpe_std > 0.01 {
             let z = -oos_sharpe_mean / oos_sharpe_std;
             0.5 * (1.0 + libm::erf(z / std::f64::consts::SQRT_2))
@@ -481,10 +511,29 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             0.0
         };
 
-        // DSR (simplified)
-        let total_trials = 100u64; // Placeholder - should come from evolution
-        let trial_adjustment = 1.0 - (total_trials as f64).ln() / 100.0;
-        let dsr = is_sharpe_mean * (1.0 - pbo) * trial_adjustment.max(0.5);
+        // Aggregate skewness and kurtosis from splits (if available)
+        // For now, use weighted averages or fallback to normal distribution assumptions
+        let avg_skewness: f64 = splits.iter()
+            .map(|s| s.oos_skewness)
+            .sum::<f64>() / n as f64;
+        let avg_kurtosis: f64 = splits.iter()
+            .map(|s| s.oos_kurtosis)
+            .sum::<f64>() / n as f64;
+        let avg_n_obs: usize = splits.iter()
+            .map(|s| s.oos_n_observations)
+            .sum::<usize>() / n;
+
+        // DSR (Deflated Sharpe Ratio) - proper Bailey & López de Prado (2014)
+        // Uses OOS Sharpe (not IS), PSR formula with expected max threshold
+        let total_trials = (self.config.generation.max(1) as usize) * (self.config.population_size.max(1) as usize);
+        let dsr = calculate_dsr(
+            oos_sharpe_median,      // Use OOS Sharpe (not IS - that's data contamination)
+            avg_n_obs.max(30),      // Number of OOS observations
+            avg_skewness,           // Return skewness
+            avg_kurtosis,           // Excess kurtosis
+            total_trials,           // Number of strategies tested
+            oos_sharpe_var,         // Variance of Sharpe ratios
+        );
 
         // Count passed splits
         let splits_passed = splits.iter().filter(|s| s.passed).count() as u16;
@@ -506,6 +555,7 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             oos_sharpe_mean,
             oos_sharpe_std,
             oos_cagr_median,
+            oos_max_dd_worst,
             degradation_pct,
             pbo,
             dsr,

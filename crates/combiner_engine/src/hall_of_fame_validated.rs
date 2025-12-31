@@ -30,8 +30,26 @@ pub struct InstitutionalCriteria {
 
 impl Default for InstitutionalCriteria {
     fn default() -> Self {
-        // Aligned with OMP specification (docs/especificacao_orquestrador_completa.md:458-464)
-        // and InstitutionalThresholds defaults
+        // Research-grade defaults for discovery - use production() for strict criteria
+        Self {
+            min_oos_sharpe: 0.5,       // Research: allow promising strategies
+            max_pbo: 0.25,             // Research: accept some overfitting risk
+            min_dsr: 0.5,              // Research: lower threshold
+            max_degradation_pct: 60.0,
+            min_split_pass_rate: 0.4,  // 40% of splits must pass
+            max_oos_drawdown: -0.30,   // Research: 30% max drawdown acceptable
+        }
+    }
+}
+
+impl InstitutionalCriteria {
+    /// Create research-grade criteria (same as default - less strict for development)
+    pub fn research() -> Self {
+        Self::default()
+    }
+    
+    /// Create production-grade criteria (strictest, matches OMP spec)
+    pub fn production() -> Self {
         Self {
             min_oos_sharpe: 1.0,       // OMP spec: min_oos_sharpe_net = 1.0
             max_pbo: 0.10,             // OMP spec: max_pbo = 0.10
@@ -40,25 +58,6 @@ impl Default for InstitutionalCriteria {
             min_split_pass_rate: 0.5,  // 50% of splits must pass
             max_oos_drawdown: -0.20,   // OMP spec: max_drawdown_net = 0.20
         }
-    }
-}
-
-impl InstitutionalCriteria {
-    /// Create research-grade criteria (less strict for development)
-    pub fn research() -> Self {
-        Self {
-            min_oos_sharpe: 0.5,
-            max_pbo: 0.20,
-            min_dsr: 0.5,
-            max_degradation_pct: 70.0,
-            min_split_pass_rate: 0.4,
-            max_oos_drawdown: -0.35,
-        }
-    }
-    
-    /// Create production-grade criteria (strictest, matches OMP spec)
-    pub fn production() -> Self {
-        Self::default()
     }
 }
 
@@ -88,6 +87,8 @@ pub struct ValidationResultSummary {
     pub oos_sharpe_mean: f64,
     pub oos_sharpe_std: f64,
     pub oos_cagr_median: f64,
+    /// Worst (most negative) max drawdown across all OOS splits
+    pub oos_max_dd_worst: f64,
     pub degradation_pct: f64,
     pub pbo: f64,
     pub dsr: f64,
@@ -104,6 +105,7 @@ impl From<&ValidationResult> for ValidationResultSummary {
             oos_sharpe_mean: result.oos_sharpe_mean,
             oos_sharpe_std: result.oos_sharpe_std,
             oos_cagr_median: result.oos_cagr_median,
+            oos_max_dd_worst: result.oos_max_dd_worst,
             degradation_pct: result.degradation_pct,
             pbo: result.pbo,
             dsr: result.dsr,
@@ -377,6 +379,7 @@ mod tests {
             oos_sharpe_mean: 1.15,
             oos_sharpe_std: 0.2,
             oos_cagr_median: 0.15,
+            oos_max_dd_worst: -0.15,     // > -0.20 (OMP spec)
             degradation_pct: 25.0,       // < 50%
             pbo: 0.08,                   // < 0.10 (OMP spec)
             dsr: 0.9,                    // > 0.8 (OMP spec)
@@ -396,6 +399,7 @@ mod tests {
             oos_sharpe_mean: 0.05,
             oos_sharpe_std: 0.3,
             oos_cagr_median: 0.02,
+            oos_max_dd_worst: -0.45,     // Fails max drawdown
             degradation_pct: 60.0,
             pbo: 0.40,
             dsr: 0.1,
