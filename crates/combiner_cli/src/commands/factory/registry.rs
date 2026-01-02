@@ -337,24 +337,44 @@ impl Registry {
                 .map(|s| s.trim().to_string())
         }).and_then(|s| if s.len() >= 7 { Some(s[..40.min(s.len())].to_string()) } else { None });
         
+        // Determine machine origin: VPS or local
+        let machine_origin = std::env::var("MACHINE_ORIGIN")
+            .unwrap_or_else(|_| {
+                // Auto-detect: check hostname for common VPS patterns
+                std::process::Command::new("hostname")
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|h| h.trim().to_lowercase())
+                    .map(|h| {
+                        if h.contains("vultr") || h.contains("vps") || h.contains("alpha-forge") {
+                            "vps".to_string()
+                        } else {
+                            "local".to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "local".to_string())
+            });
+        
         self.client
             .execute(
                 r#"
-                INSERT INTO scg_runs (run_id, campaign_id, seed, status, git_sha)
-                VALUES ($1, $2, $3, 'started', $4)
+                INSERT INTO scg_runs (run_id, campaign_id, seed, status, git_sha, machine_origin)
+                VALUES ($1, $2, $3, 'started', $4, $5)
                 ON CONFLICT (run_id) DO UPDATE SET
                     status = 'started',
                     started_at = NOW(),
                     completed_at = NULL,
                     error_message = NULL,
-                    git_sha = COALESCE($4, scg_runs.git_sha)
+                    git_sha = COALESCE($4, scg_runs.git_sha),
+                    machine_origin = COALESCE($5, scg_runs.machine_origin)
                 "#,
-                &[&run_id, &campaign_id, &seed, &git_sha],
+                &[&run_id, &campaign_id, &seed, &git_sha, &machine_origin],
             )
             .await
             .context("Failed to register run start")?;
 
-        info!(run_id, campaign_id, seed, ?git_sha, "Registered run start");
+        info!(run_id, campaign_id, seed, ?git_sha, machine_origin, "Registered run start");
         Ok(())
     }
     
