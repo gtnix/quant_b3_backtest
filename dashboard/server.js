@@ -3157,6 +3157,170 @@ app.get('/api/omp/stats', async (req, res) => {
 });
 
 // =============================================================================
+// PRODUCTION STATS ENDPOINT - Deep Quant Metrics
+// =============================================================================
+
+app.get('/api/stats/production', async (req, res) => {
+  try {
+    const [
+      // Totais gerais
+      totalCandidates,
+      totalRuns,
+      totalCampaigns,
+      totalPromotions,
+      // Por stage
+      stageACount,
+      stageBCount,
+      // Diversidade
+      uniqueSharpe,
+      uniqueGenomes,
+      // Distribuição de valores
+      valueDistribution,
+      // Throughput
+      throughputPerHour,
+      // Campanhas stats
+      campaignStats,
+      // Max drawdown null count
+      maxddNullCount,
+      // Tempo total de processamento
+      processingTime,
+    ] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM scg_candidates'),
+      pool.query('SELECT COUNT(*) as count FROM scg_runs'),
+      pool.query('SELECT COUNT(*) as count FROM scg_campaigns'),
+      pool.query("SELECT COUNT(*) as count FROM scg_promotions WHERE promotion_class = 'hall_of_fame'"),
+      pool.query("SELECT COUNT(*) as count FROM scg_candidates WHERE source_stage = 'A'"),
+      pool.query("SELECT COUNT(*) as count FROM scg_candidates WHERE source_stage = 'B'"),
+      pool.query('SELECT COUNT(DISTINCT oos_sharpe_net) as count FROM scg_candidates WHERE oos_sharpe_net IS NOT NULL'),
+      pool.query('SELECT COUNT(DISTINCT genome_hash) as count FROM scg_candidates'),
+      pool.query(`
+        SELECT oos_sharpe_net, oos_cagr_net, max_drawdown_net, COUNT(*) as count
+        FROM scg_candidates 
+        WHERE oos_sharpe_net IS NOT NULL
+        GROUP BY oos_sharpe_net, oos_cagr_net, max_drawdown_net
+        ORDER BY count DESC
+        LIMIT 10
+      `),
+      pool.query(`
+        SELECT 
+          DATE_TRUNC('hour', created_at) as hour,
+          COUNT(*) as count
+        FROM scg_candidates
+        GROUP BY DATE_TRUNC('hour', created_at)
+        ORDER BY hour DESC
+        LIMIT 24
+      `),
+      pool.query(`
+        SELECT 
+          c.name as campaign_name,
+          COUNT(DISTINCT r.run_id) as runs,
+          COUNT(cand.candidate_id) as candidates,
+          COUNT(DISTINCT cand.oos_sharpe_net) as unique_sharpe,
+          ROUND(AVG(cand.oos_sharpe_net)::numeric, 4) as avg_sharpe,
+          ROUND(STDDEV(cand.oos_sharpe_net)::numeric, 6) as stddev_sharpe
+        FROM scg_campaigns c
+        LEFT JOIN scg_runs r ON c.campaign_id = r.campaign_id
+        LEFT JOIN scg_candidates cand ON r.run_id = cand.run_id
+        GROUP BY c.campaign_id, c.name
+      `),
+      pool.query('SELECT COUNT(*) as count FROM scg_candidates WHERE max_drawdown_net IS NULL'),
+      pool.query(`
+        SELECT 
+          ROUND(EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at)))/3600, 2) as hours,
+          MIN(created_at) as first,
+          MAX(created_at) as last
+        FROM scg_candidates
+      `),
+    ]);
+
+    const total = parseInt(totalCandidates.rows[0].count);
+    const stageA = parseInt(stageACount.rows[0].count);
+    const stageB = parseInt(stageBCount.rows[0].count);
+    const promotions = parseInt(totalPromotions.rows[0].count);
+    const uniqueSharpeCount = parseInt(uniqueSharpe.rows[0].count);
+    const uniqueGenomesCount = parseInt(uniqueGenomes.rows[0].count);
+    const maxddNull = parseInt(maxddNullCount.rows[0].count);
+    const hours = parseFloat(processingTime.rows[0]?.hours || 0);
+    
+    // Calculate rates
+    const validationRate = total > 0 ? (stageB / total * 100).toFixed(2) : 0;
+    const promotionRate = stageB > 0 ? (promotions / stageB * 100).toFixed(2) : 0;
+    const throughputPerHr = hours > 0 ? Math.round(total / hours) : 0;
+    const diversityScore = total > 0 ? (uniqueSharpeCount / total * 100).toFixed(2) : 0;
+    
+    // Calculate candidates needed per strategy
+    const candidatesPerStrategy = promotions > 0 ? Math.round(total / promotions) : null;
+    const hoursPerStrategy = promotions > 0 ? (hours / promotions).toFixed(2) : null;
+    
+    res.json({
+      summary: {
+        totalCandidates: total,
+        totalRuns: parseInt(totalRuns.rows[0].count),
+        totalCampaigns: parseInt(totalCampaigns.rows[0].count),
+        totalPromotions: promotions,
+        processingHours: hours,
+      },
+      funnel: {
+        stageA: stageA,
+        stageB: stageB,
+        hallOfFame: promotions,
+        conversionFunnel: `${total} → ${stageB} → ${promotions}`,
+      },
+      efficiency: {
+        validationRate: `${validationRate}%`,
+        promotionRate: `${promotionRate}%`,
+        throughputPerHour: throughputPerHr,
+        throughputPerMinute: Math.round(throughputPerHr / 60),
+      },
+      resources: {
+        candidatesPerStrategy: candidatesPerStrategy || '∞ (no promotions)',
+        hoursPerStrategy: hoursPerStrategy || 'N/A',
+        estimatedFor100Strategies: candidatesPerStrategy ? Math.round(candidatesPerStrategy * 100) : 'N/A',
+        cpuSecondsPerCandidate: hours > 0 ? ((hours * 3600) / total).toFixed(3) : 'N/A',
+      },
+      diversity: {
+        uniqueSharpeValues: uniqueSharpeCount,
+        uniqueGenomes: uniqueGenomesCount,
+        diversityScore: `${diversityScore}%`,
+        genomeDuplicationRate: total > 0 ? ((1 - uniqueGenomesCount/total) * 100).toFixed(2) + '%' : '0%',
+      },
+      dataQuality: {
+        maxDrawdownNullCount: maxddNull,
+        maxDrawdownNullRate: total > 0 ? ((maxddNull / total) * 100).toFixed(2) + '%' : '0%',
+        stageBWithNullMaxDD: maxddNull - stageA, // Approximation
+      },
+      valueDistribution: valueDistribution.rows.map(r => ({
+        sharpe: parseFloat(r.oos_sharpe_net?.toFixed(4) || 0),
+        cagr: parseFloat(r.oos_cagr_net?.toFixed(4) || 0),
+        maxDD: parseFloat(r.max_drawdown_net?.toFixed(4) || 0),
+        count: parseInt(r.count),
+      })),
+      throughputHistory: throughputPerHour.rows.map(r => ({
+        hour: r.hour,
+        candidates: parseInt(r.count),
+      })),
+      campaigns: campaignStats.rows.map(r => ({
+        name: r.campaign_name,
+        runs: parseInt(r.runs),
+        candidates: parseInt(r.candidates),
+        uniqueSharpe: parseInt(r.unique_sharpe),
+        avgSharpe: parseFloat(r.avg_sharpe || 0),
+        stddevSharpe: parseFloat(r.stddev_sharpe || 0),
+      })),
+      anomalies: {
+        allStageBSameSharpe: stageB > 1 && uniqueSharpeCount === 1,
+        noPromotions: promotions === 0 && stageB > 0,
+        highNullRate: (maxddNull / total) > 0.5,
+        lowDiversity: uniqueSharpeCount < 10 && total > 100,
+      },
+    });
+  } catch (err) {
+    console.error('[Stats] Production stats query failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================================
 // AUDIT ENDPOINTS - Fase 4 Human Reports
 // =============================================================================
 

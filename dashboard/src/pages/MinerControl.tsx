@@ -509,6 +509,103 @@ function QueueItem({ campaign, onToggle, onRemove }: {
 }
 
 // =============================================================================
+// CONVERSION FUNNEL - Visual pipeline metrics
+// =============================================================================
+
+function ConversionFunnel() {
+  const [data, setData] = useState<{
+    stageA: number;
+    stageB: number;
+    hallOfFame: number;
+    validationRate: string;
+    promotionRate: string;
+    candidatesPerStrategy: string | number;
+  } | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch('/api/stats/production');
+        if (res.ok) {
+          const json = await res.json();
+          setData({
+            stageA: json.funnel?.stageA || 0,
+            stageB: json.funnel?.stageB || 0,
+            hallOfFame: json.funnel?.hallOfFame || 0,
+            validationRate: json.efficiency?.validationRate || '0%',
+            promotionRate: json.efficiency?.promotionRate || '0%',
+            candidatesPerStrategy: json.resources?.candidatesPerStrategy || '∞',
+          });
+        }
+      } catch (e) {
+        console.error('Failed to fetch funnel data:', e);
+      }
+    };
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!data) return null;
+
+  const maxWidth = 100;
+  const aWidth = maxWidth;
+  const bWidth = data.stageA > 0 ? Math.max(10, (data.stageB / data.stageA) * maxWidth) : 10;
+  const hofWidth = data.stageB > 0 ? Math.max(5, (data.hallOfFame / data.stageB) * bWidth) : 5;
+
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+      <div className="flex items-center gap-2 mb-3">
+        <TrendingUp className="w-4 h-4 text-slate-500" />
+        <span className="text-xs font-medium text-slate-400">CONVERSION FUNNEL</span>
+      </div>
+      
+      <div className="space-y-2">
+        {/* Stage A */}
+        <div className="flex items-center gap-2">
+          <div className="w-16 text-[10px] text-slate-500 text-right">STAGE A</div>
+          <div 
+            className="h-5 bg-blue-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
+            style={{ width: `${aWidth}%` }}
+          >
+            <span className="text-[10px] font-mono text-white">{data.stageA.toLocaleString()}</span>
+          </div>
+        </div>
+        
+        {/* Stage B */}
+        <div className="flex items-center gap-2">
+          <div className="w-16 text-[10px] text-slate-500 text-right">STAGE B</div>
+          <div 
+            className="h-5 bg-emerald-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
+            style={{ width: `${bWidth}%` }}
+          >
+            <span className="text-[10px] font-mono text-white">{data.stageB.toLocaleString()}</span>
+          </div>
+          <span className="text-[9px] text-slate-600">{data.validationRate}</span>
+        </div>
+        
+        {/* Hall of Fame */}
+        <div className="flex items-center gap-2">
+          <div className="w-16 text-[10px] text-slate-500 text-right">HALL OF FAME</div>
+          <div 
+            className="h-5 bg-amber-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
+            style={{ width: `${hofWidth}%`, minWidth: '30px' }}
+          >
+            <span className="text-[10px] font-mono text-white">{data.hallOfFame}</span>
+          </div>
+          <span className="text-[9px] text-slate-600">{data.promotionRate}</span>
+        </div>
+      </div>
+      
+      <div className="mt-3 pt-2 border-t border-slate-800 text-center">
+        <span className="text-[10px] text-slate-500">Candidates/Strategy: </span>
+        <span className="text-[10px] font-mono text-amber-400">{data.candidatesPerStrategy}</span>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // STATS ROW - Compact metric display
 // =============================================================================
 
@@ -733,6 +830,9 @@ export function MinerControl() {
               <StatRow label="Campaigns Done" value={stats?.campaigns.completed || 0} color="emerald" />
               <StatRow label="Campaigns Failed" value={stats?.campaigns.failed || 0} />
             </div>
+            
+            {/* Conversion Funnel */}
+            <ConversionFunnel />
           </div>
           
           {/* Center Column - Activity Log */}
