@@ -3,7 +3,7 @@
 //! Classifies dates as trading days, holidays, weekends, or extraordinary closures
 //! using data from Neon PostgreSQL.
 
-use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
+use chrono::{Datelike, NaiveDate, NaiveTime, Timelike, Weekday};
 use std::sync::Arc;
 use tokio_postgres::Client;
 use tracing::debug;

@@ -18,7 +18,7 @@ use super::config::{DriftConfig, ThresholdEvaluator};
 use super::statistics::{
     ks_two_sample, jaccard_similarity, sigma_deviation, calculate_baseline, calculate_percentile,
 };
-use super::types::{BaselineStats, CheckCategory, CheckResult, Evidence, Severity};
+use super::types::{CheckCategory, CheckResult, Evidence, Severity};
 
 /// Context for drift checks.
 #[derive(Debug, Clone, Default)]
@@ -104,7 +104,7 @@ impl DriftCheck for ScoreDistributionDrift {
                             Severity::Info
                         };
 
-                        let passed = severity == Severity::Info;
+                        let _passed = severity == Severity::Info;
                         let msg = format!(
                             "KS test {}: D={:.4}, p={:.4} (WARN: p<{}, CRIT: p<{})",
                             self.technique, ks.statistic, ks.p_value,
@@ -185,7 +185,7 @@ impl DriftCheck for MeanScoreDrift {
                             sigma, config.sigma_warn, config.sigma_crit
                         );
 
-                        let passed = severity == Severity::Info;
+                        let _passed = severity == Severity::Info;
                         let msg = format!(
                             "Mean drift {}: current={:.4}, baseline={:.4}, sigma={:.2}",
                             self.technique, current_mean, base_stats.mean, sigma
@@ -248,7 +248,7 @@ impl DriftCheck for SelectionStabilityCheck {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Selection overlap: {:.1}% (WARN: <{}%, CRIT: <{}%)",
             overlap, config.selection_overlap_warn, config.selection_overlap_crit
@@ -326,7 +326,7 @@ impl DriftCheck for ExclusionReasonsDrift {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Exclusion drift: worst='{}' at {:.1}x baseline (WARN: >{}x, CRIT: >{}x)",
             worst_reason, max_multiplier,
@@ -360,7 +360,7 @@ impl DriftCheck for TurnoverDrift {
         "TurnoverDrift"
     }
 
-    fn run(&self, ctx: &DriftContext, config: &DriftConfig) -> CheckResult {
+    fn run(&self, ctx: &DriftContext, _config: &DriftConfig) -> CheckResult {
         if ctx.historical_turnover.is_empty() {
             return CheckResult::pass("TurnoverDrift", CheckCategory::Drift)
                 .with_evidence(Evidence::new("no_historical_turnover"));
@@ -377,7 +377,7 @@ impl DriftCheck for TurnoverDrift {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Turnover: {:.1}% (p95: {:.1}%, p99: {:.1}%)",
             ctx.current_turnover, p95, p99
@@ -414,7 +414,7 @@ impl DriftCheck for CostDrift {
         "CostDrift"
     }
 
-    fn run(&self, ctx: &DriftContext, config: &DriftConfig) -> CheckResult {
+    fn run(&self, ctx: &DriftContext, _config: &DriftConfig) -> CheckResult {
         if ctx.historical_cost.is_empty() {
             return CheckResult::pass("CostDrift", CheckCategory::Drift)
                 .with_evidence(Evidence::new("no_historical_cost"));
@@ -431,7 +431,7 @@ impl DriftCheck for CostDrift {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Cost: {:.3}% (p95: {:.3}%, p99: {:.3}%)",
             ctx.current_cost, p95, p99

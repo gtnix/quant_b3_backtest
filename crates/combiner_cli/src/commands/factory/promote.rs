@@ -2,10 +2,8 @@
 
 use anyhow::Result;
 use tokio::runtime::Runtime;
-use tracing::info;
 
 use super::bundle::BundleGenerator;
-use super::config::CampaignConfig;
 use super::registry::{generate_promotion_id, Registry};
 
 /// Promotion stage.

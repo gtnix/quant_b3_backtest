@@ -55,6 +55,7 @@ fn determinism_splitter_same_config_same_splits() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter1 = RollingSplitter::new(&config);
@@ -165,6 +166,7 @@ fn determinism_runner_same_input_same_output() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let start = date(2020, 1, 1);
@@ -384,6 +386,7 @@ fn determinism_cross_run_simulation() {
             embargo_days: 5,
             market: Market::BR,
             grid: None,
+        execution_config: None,
         };
 
         let start = date(2020, 1, 1);
@@ -416,6 +419,7 @@ fn determinism_cross_run_simulation() {
         }
     }
 }
+
 
 
 

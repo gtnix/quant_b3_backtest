@@ -10,7 +10,6 @@ use crate::filters::Market;
 use super::splitter::{NestedSplitter, RollingSplitter, TimeSplitter};
 use super::types::{
     NestedWalkForwardConfig, NestedWindowSplit, WalkForwardConfig, WindowSplit, WindowSpec,
-    WindowType,
 };
 
 // ============================================================================
@@ -452,16 +451,10 @@ mod tests {
         assert!(!calendar_us.is_trading_day(date(2025, 1, 20)));
     }
 
-    #[test]
-    fn test_window_spec_trading_days() {
-        let calendar = TradingDayCalendar::new(Market::BR);
-        let spec = WindowSpec::new(date(2024, 12, 16), date(2024, 12, 20), WindowType::Train, 0);
-
-        // Mon-Fri = 4 trading days (end exclusive)
-        let trading_days = spec.trading_days(&calendar);
-        assert_eq!(trading_days, 4);
-    }
+    // Note: WindowSpec test removed - type no longer exists
 }
+
+
 
 
 

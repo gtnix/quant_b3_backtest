@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { Cpu, Save, RefreshCw, Zap, Clock, Hash } from 'lucide-react';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 interface BudgetConfig {
   maxRuntimeSeconds: number;
@@ -201,7 +202,10 @@ export function ConfigBudget() {
           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label className="text-sm text-slate-400 mb-2 block">Population Size</label>
+              <label className="text-sm text-slate-400 mb-2 flex items-center">
+                Population Size
+                <QuickTooltip termKey="population" size="sm" />
+              </label>
               <input
                 type="number"
                 value={config.populationSize}
@@ -210,7 +214,10 @@ export function ConfigBudget() {
               />
             </div>
             <div>
-              <label className="text-sm text-slate-400 mb-2 block">Max Generations</label>
+              <label className="text-sm text-slate-400 mb-2 flex items-center">
+                Max Generations
+                <QuickTooltip termKey="generation" size="sm" />
+              </label>
               <input
                 type="number"
                 value={config.maxGenerations}
@@ -219,7 +226,10 @@ export function ConfigBudget() {
               />
             </div>
             <div>
-              <label className="text-sm text-slate-400 mb-2 block">Convergence Gens</label>
+              <label className="text-sm text-slate-400 mb-2 flex items-center">
+                Convergence Gens
+                <QuickTooltip termKey="convergence" size="sm" />
+              </label>
               <input
                 type="number"
                 value={config.convergenceGenerations}
@@ -265,6 +275,9 @@ export function ConfigBudget() {
 }
 
 export default ConfigBudget;
+
+
+
 
 
 

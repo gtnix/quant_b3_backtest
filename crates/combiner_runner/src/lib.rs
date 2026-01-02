@@ -40,5 +40,6 @@ pub use cache::{
     make_split_key, genome_hash_from_key, split_index_from_key,
 };
 pub use metrics::MetricsParser;
-pub use data_loader::{MmapOhlcv, SharedMmapOhlcv, MockOhlcv, load_shared};
+pub use data_loader::{MmapOhlcv, SharedMmapOhlcv, load_shared};
+// MockOhlcv removido - PROIBIDO mock em producao
 

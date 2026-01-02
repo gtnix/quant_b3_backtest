@@ -1,0 +1,28 @@
+# Test Strategy Config for market data integration
+
+[strategy]
+id = "test_momentum_v1"
+version = "1.0.0"
+description = "Test strategy for market data integration"
+
+# Pipeline steps
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+
+[pipeline.params]
+lookback = 20
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+
+[pipeline.params]
+max_positions = 5
+max_weight = 0.25
+
+[rebalance]
+frequency = "monthly"
+
+[constraints]
+max_weight_per_asset = 0.25

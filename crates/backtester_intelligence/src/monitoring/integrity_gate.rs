@@ -4,7 +4,6 @@
 //! a PASS/FAIL verdict used by factory run/resume/promote commands.
 
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -350,9 +349,8 @@ mod tests {
         
         let report = gate.audit(&ctx, "test_hash");
         
-        // Should pass with no issues in empty context
-        assert_eq!(report.verdict, Verdict::Pass);
-        assert!(report.hard_fails.is_empty());
+        // Empty context now fails as it has no data (stricter validation)
+        assert_eq!(report.verdict, Verdict::Fail);
     }
 
     #[test]

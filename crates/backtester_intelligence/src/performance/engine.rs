@@ -339,7 +339,7 @@ impl PerformanceEngine {
         &self,
         date: NaiveDate,
         cash: Decimal,
-        exposure: &super::ExposureBreakdown,
+        _exposure: &super::ExposureBreakdown,
         prices: &BTreeMap<String, Decimal>,
     ) -> (Option<Currency>, Option<Decimal>, Option<Decimal>, Option<BTreeMap<String, FxRateInfo>>) {
         let base = match self.config.base_currency {

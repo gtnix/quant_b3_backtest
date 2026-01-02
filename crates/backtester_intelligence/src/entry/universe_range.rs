@@ -21,7 +21,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use thiserror::Error;
 use tracing::{debug, warn};
 

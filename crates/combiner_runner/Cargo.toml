@@ -6,6 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 description = "Backtest execution runner for the Generative Combiner (SCG) - library/CLI integration, caching"
 
+[features]
+default = []
+# Enable test utilities including BacktestOutput::mock()
+# Use this feature in dev-dependencies for tests that need mock data
+test-utils = []
+
 [dependencies]
 # Workspace dependencies
 combiner_core = { path = "../combiner_core" }

@@ -19,6 +19,7 @@ import { ConfigUniverse } from './pages/ConfigUniverse';
 import { ConfigTrading } from './pages/ConfigTrading';
 import { ConfigBudget } from './pages/ConfigBudget';
 import { ConfigGates } from './pages/ConfigGates';
+import { AuditReport } from './pages/AuditReport';
 import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
 import { platform, features } from './lib/platform';
@@ -42,7 +43,8 @@ export type Page =
   | 'comparison'
   | 'walkforward'
   | 'montecarlo'
-  | 'regimes';
+  | 'regimes'
+  | 'audit';
 
 function App() {
   // Default to miner control panel
@@ -101,7 +103,7 @@ function App() {
       const validPages = [
         'miner', 'hall-of-fame', 'config-universe', 'config-trading', 'config-budget', 'config-gates',
         'cockpit', 'campaigns', 'dashboard', 'evolution', 'candidates', 'strategy', 
-        'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes'
+        'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes', 'audit'
       ];
       if (validPages.includes(e.detail)) {
         setCurrentPage(e.detail as Page);
@@ -150,6 +152,8 @@ function App() {
         return <MonteCarlo />;
       case 'regimes':
         return <RegimeAnalysis />;
+      case 'audit':
+        return <AuditReport />;
       default:
         return <MinerControl />;
     }

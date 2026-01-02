@@ -6,7 +6,6 @@
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::filters::Market;
@@ -425,7 +424,7 @@ impl NestedWalkForwardRunner {
 
         for params in &param_sets {
             // Run on train (to get train metrics)
-            let train_metrics = self.simulate_window(
+            let _train_metrics = self.simulate_window(
                 &split.train.start_date,
                 &split.train.end_date,
                 candidates,
@@ -497,7 +496,7 @@ impl NestedWalkForwardRunner {
         let n_trials = param_sets.len();
 
         // Update DSR for all candidates
-        for (i, candidate) in selection_candidates.iter_mut().enumerate() {
+        for (_i, candidate) in selection_candidates.iter_mut().enumerate() {
             let dsr = calculate_dsr(
                 candidate.sharpe,
                 self.config.psr_threshold,
@@ -743,7 +742,7 @@ impl NestedWalkForwardRunner {
         let mut metrics = self.metrics_calc.from_equity_curve(&equity_curve, costs, turnover);
         
         if self.config.execution_config.is_some() {
-            use backtester_execution::cost_report::{CostReport, FeeBreakdown, SlippageBreakdown};
+            use backtester_execution::cost_report::CostReport;
             let mut cost_report = CostReport::new();
             cost_report.total_costs = costs.to_string().parse().unwrap_or(0.0);
             cost_report.total_slippage = (slippage_cost * Decimal::from(num_trades)).to_string().parse().unwrap_or(0.0);
@@ -804,6 +803,7 @@ impl NestedWalkForwardRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()

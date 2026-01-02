@@ -6,8 +6,6 @@
 //! - Performance metrics for regression checks
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use tokio_postgres::Client;
 
@@ -178,7 +176,7 @@ impl<'a> ContextBuilder<'a> {
 
     /// Get OHLCV audit data for a market.
     async fn get_ohlcv_audit(&self, market: Market) -> BuilderResult<Vec<OhlcvAudit>> {
-        let pattern = match market {
+        let _pattern = match market {
             Market::BR => "%", // BR symbols like PETR4, VALE3
             Market::US => "%", // US symbols - will filter differently
         };
@@ -364,10 +362,10 @@ impl<'a> ContextBuilder<'a> {
     /// Get previous watermarks for regression detection.
     pub async fn get_previous_watermarks(
         &self,
-        as_of: NaiveDate,
-        lookback_days: i32,
+        _as_of: NaiveDate,
+        _lookback_days: i32,
     ) -> BuilderResult<HashMap<Market, NaiveDate>> {
-        let mut prev = HashMap::new();
+        let prev = HashMap::new();
         
         // This would require historical watermark tracking which we don't have
         // For now, return empty - watermark regression check will pass

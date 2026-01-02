@@ -137,64 +137,52 @@ pub fn load_shared<P: AsRef<Path>>(path: P) -> io::Result<SharedMmapOhlcv> {
     Ok(Arc::new(MmapOhlcv::open(path)?))
 }
 
-/// Mock OHLCV data for testing (generates synthetic returns)
-pub struct MockOhlcv {
-    /// Daily returns
-    pub returns: Vec<f64>,
-    /// Start date
-    pub start_date: NaiveDate,
-}
-
-impl MockOhlcv {
-    /// Generate mock data with specified characteristics
-    pub fn generate(num_days: usize, mean_return: f64, volatility: f64, seed: u64) -> Self {
-        let mut returns = Vec::with_capacity(num_days);
-        let mut state = seed;
-
-        for _ in 0..num_days {
-            // Simple LCG for deterministic pseudo-random
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let uniform = ((state >> 33) as f64) / (u32::MAX as f64);
-            
-            // Box-Muller transform for normal distribution (simplified)
-            let z = (uniform - 0.5) * 3.46; // Approximation
-            returns.push(mean_return + z * volatility);
-        }
-
-        Self {
-            returns,
-            start_date: NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
-        }
-    }
-
-    /// Get returns slice for a row range
-    pub fn slice(&self, start: usize, end: usize) -> &[f64] {
-        let end = end.min(self.returns.len());
-        if start >= end {
-            return &[];
-        }
-        &self.returns[start..end]
-    }
-
-    /// Get all returns
-    pub fn all_returns(&self) -> &[f64] {
-        &self.returns
-    }
-
-    /// Get number of days
-    pub fn num_days(&self) -> usize {
-        self.returns.len()
-    }
-}
+// MockOhlcv moved to #[cfg(test)] module below - PROIBIDO em producao
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
+
+    /// Mock OHLCV data for testing ONLY (generates synthetic returns)
+    /// PROIBIDO usar fora de testes
+    pub struct MockOhlcv {
+        pub returns: Vec<f64>,
+        pub start_date: NaiveDate,
+    }
+
+    impl MockOhlcv {
+        pub fn generate(num_days: usize, mean_return: f64, volatility: f64, seed: u64) -> Self {
+            let mut returns = Vec::with_capacity(num_days);
+            let mut state = seed;
+
+            for _ in 0..num_days {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let uniform = ((state >> 33) as f64) / (u32::MAX as f64);
+                let z = (uniform - 0.5) * 3.46;
+                returns.push(mean_return + z * volatility);
+            }
+
+            Self {
+                returns,
+                start_date: NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
+            }
+        }
+
+        pub fn slice(&self, start: usize, end: usize) -> &[f64] {
+            let end = end.min(self.returns.len());
+            if start >= end { return &[]; }
+            &self.returns[start..end]
+        }
+
+        pub fn num_days(&self) -> usize {
+            self.returns.len()
+        }
+    }
 
     #[test]
     fn test_mock_ohlcv_generation() {
         let mock = MockOhlcv::generate(252, 0.0005, 0.015, 42);
-        
         assert_eq!(mock.num_days(), 252);
         assert!(mock.returns.iter().all(|&r| r.is_finite()));
     }
@@ -202,18 +190,14 @@ mod tests {
     #[test]
     fn test_mock_ohlcv_slice() {
         let mock = MockOhlcv::generate(1000, 0.0003, 0.01, 123);
-        
         let slice = mock.slice(100, 200);
         assert_eq!(slice.len(), 100);
-        
         let empty = mock.slice(1000, 1100);
         assert!(empty.is_empty());
     }
 
     #[test]
     fn test_date_row_conversion() {
-        // This test would need a real mmap to work
-        // For now, just test the mock
         let mock = MockOhlcv::generate(2520, 0.0003, 0.01, 42);
         assert_eq!(mock.num_days(), 2520);
     }

@@ -1,6 +1,5 @@
 //! Dividend loader from database and cache.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::NaiveDate;

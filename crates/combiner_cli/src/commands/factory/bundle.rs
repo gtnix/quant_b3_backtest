@@ -1,6 +1,6 @@
 //! Candidate bundle generation - Create production-ready artifacts.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -138,7 +138,7 @@ max_participation = 0.05
             git_branch: super::config::CampaignConfig::git_branch(),
             config_hash: config_hash.to_string(),
             dataset_hash: dataset_hash.map(String::from),
-            created_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
             scg_version: env!("CARGO_PKG_VERSION").to_string(),
             original_report_path: Some(format!(
                 "output/scg/{}/final_report.json",
@@ -190,7 +190,7 @@ fi
 echo "Replay complete. Compare results in output/replay/$RUN_ID"
 "#,
             candidate.candidate_id,
-            Utc::now().to_rfc3339(),
+            Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
             seed,
             candidate.run_id,
             campaign_id,

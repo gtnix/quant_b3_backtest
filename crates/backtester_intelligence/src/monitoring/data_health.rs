@@ -206,7 +206,7 @@ impl DataHealthCheck for CoverageCheck {
             coverage, config.coverage_warn_pct, config.coverage_min_pct
         );
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let total = *ctx.symbol_count.get(&self.market).unwrap_or(&0);
         let with_data = *ctx.symbols_with_data.get(&self.market).unwrap_or(&0);
 
@@ -336,7 +336,7 @@ impl DataHealthCheck for OutlierCheck {
         "Outliers"
     }
 
-    fn run(&self, ctx: &DataContext, config: &DataHealthConfig) -> CheckResult {
+    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
         let total_outliers: usize = ctx.outlier_counts.values().sum();
         let outlier_rate = if ctx.total_rows > 0 {
             Decimal::from(total_outliers * 100) / Decimal::from(ctx.total_rows)
@@ -772,7 +772,7 @@ impl DataHealthCheck for CalendarGapCheck {
             coverage, config.coverage_warn_pct, config.coverage_min_pct
         );
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Calendar-aware gap check {:?}: {:.1}% coverage",
             self.market, coverage

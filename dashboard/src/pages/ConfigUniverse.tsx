@@ -147,15 +147,19 @@ export function ConfigUniverse() {
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
+                  {/* Toggle Switch */}
                   <button
                     onClick={() => toggleMarket(key)}
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
+                    className={`relative w-14 h-8 rounded-full transition-colors ${
                       market.enabled 
-                        ? key === 'br' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
-                        : 'bg-slate-700 text-slate-500'
+                        ? key === 'br' ? 'bg-green-500' : 'bg-blue-500'
+                        : 'bg-slate-600'
                     }`}
+                    title={market.enabled ? 'Click to disable' : 'Click to enable'}
                   >
-                    {market.enabled ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
+                    <span className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-transform ${
+                      market.enabled ? 'left-7' : 'left-1'
+                    }`} />
                   </button>
                   <div>
                     <h3 className="text-lg font-semibold text-white">{market.name}</h3>
@@ -164,14 +168,6 @@ export function ConfigUniverse() {
                     </p>
                   </div>
                 </div>
-                
-                <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                  market.enabled 
-                    ? 'bg-emerald-500/20 text-emerald-400' 
-                    : 'bg-slate-700 text-slate-500'
-                }`}>
-                  {market.enabled ? 'ENABLED' : 'DISABLED'}
-                </span>
               </div>
               
               {market.enabled && (

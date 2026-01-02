@@ -1,0 +1,55 @@
+# =============================================================================
+# Campaign de Teste para Auditoria
+# =============================================================================
+# Este arquivo é usado para testar o processo de auditoria SCG.
+
+[campaign]
+name = "audit_test_campaign"
+tag = "audit"
+owner = "auditoria"
+notes = "Campanha de teste para validar o processo de auditoria"
+
+[dataset]
+market = "BR"
+start_date = "2020-01-01"
+end_date = "2024-12-01"
+universe = "ibov"
+
+[evolution]
+# base_config = "configs/optimization/scg_base.toml"
+population_size = 50
+max_generations = 10
+convergence_generations = 5
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+slippage_bps = 10.0
+delay_bars = 1
+
+[seeds]
+count = 2
+base_seed = 42
+
+[budget]
+max_runs = 2
+top_k = 5
+persist_stage_a_top_n = 100
+timeout_per_run_secs = 600
+stress_enabled = true
+
+[promotion]
+min_oos_sharpe_net = 0.5
+max_pbo = 0.20
+min_stress_passed = 3
+gates_required = true
+
+[data_integrity]
+mode = "fast"
+max_gap_days = 5
+jump_threshold_pct = 30.0
+price_adjustment = "adjusted"
+universe_type = "point_in_time"
+enabled = true
+
+
+

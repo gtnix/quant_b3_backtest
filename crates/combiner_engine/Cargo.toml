@@ -33,6 +33,8 @@ thread_local = "1.1"
 
 [dev-dependencies]
 backtester_strategy = { path = "../backtester_strategy" }
+# Enable test-utils for BacktestOutput::mock() in tests
+combiner_runner = { path = "../combiner_runner", features = ["test-utils"] }
 tempfile = "3.0"
 criterion = { workspace = true }
 

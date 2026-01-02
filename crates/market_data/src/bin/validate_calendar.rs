@@ -11,7 +11,7 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::error;
 
 /// Calendar Validator CLI
 #[derive(Parser, Debug)]
@@ -245,6 +245,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 }
+
+
+
 
 
 

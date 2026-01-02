@@ -128,6 +128,29 @@ enum Commands {
         #[command(subcommand)]
         action: FactoryAction,
     },
+    
+    /// Institutional-grade audit of SCG run (all 6 marcos)
+    Audit {
+        /// Path to SCG run directory
+        #[arg(short = 'r', long)]
+        run_dir: std::path::PathBuf,
+        
+        /// Output directory for audit results
+        #[arg(short, long, default_value = "artifacts/audits")]
+        output: std::path::PathBuf,
+        
+        /// Strict mode - warnings become failures
+        #[arg(long)]
+        strict: bool,
+        
+        /// Stop on first failing marco
+        #[arg(long)]
+        stop_on_fail: bool,
+        
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 /// Factory subcommands for campaign management.
@@ -167,6 +190,25 @@ enum FactoryAction {
         /// Audit mode: fast or strict
         #[arg(short, long, default_value = "fast")]
         mode: String,
+    },
+
+    /// Full process audit with evidence for each marco (0-5)
+    Audit {
+        /// Path to campaign config file
+        #[arg(short, long)]
+        campaign: String,
+
+        /// Run only up to specific marco (0-5). Omit to run all.
+        #[arg(short, long)]
+        marco: Option<u8>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Dry run mode - validate without executing actual operations
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Export top N candidates with deterministic ranking
@@ -255,6 +297,25 @@ enum FactoryAction {
         /// Force re-promotion (ignore duplicates)
         #[arg(short, long)]
         force: bool,
+    },
+
+    /// Validate output artifacts (schema, sanity, cross-check, attribution)
+    ValidateOutput {
+        /// Path to run directory (containing metrics.json, nav_history.csv, etc.)
+        #[arg(short, long)]
+        run_dir: String,
+
+        /// Output directory for validation artifacts
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Strict mode - warnings become failures
+        #[arg(long)]
+        strict: bool,
+
+        /// Disable cross-check (faster but less thorough)
+        #[arg(long)]
+        no_crosscheck: bool,
     },
 }
 
@@ -380,6 +441,10 @@ fn main() -> Result<()> {
                 commands::factory::execute_audit(&campaign, &mode)
             }
 
+            FactoryAction::Audit { campaign, marco, verbose, dry_run } => {
+                commands::factory::execute_audit_process(&campaign, marco, verbose, dry_run)
+            }
+
             FactoryAction::ExportTop { run, top, format, class } => {
                 let class_filter = commands::factory::CandidateClassFilter::from_str(&class);
                 commands::factory::execute_export_top(&run, top, &format, class_filter)
@@ -392,7 +457,24 @@ fn main() -> Result<()> {
             FactoryAction::Validate { campaign, verbose } => {
                 commands::factory::execute_validate(&campaign, verbose)
             }
+
+            FactoryAction::ValidateOutput {
+                run_dir,
+                output,
+                strict,
+                no_crosscheck,
+            } => {
+                commands::validate_output::execute(&run_dir, output.as_deref(), strict, no_crosscheck)
+            }
         },
+        
+        Commands::Audit {
+            run_dir,
+            output,
+            strict,
+            stop_on_fail,
+            verbose,
+        } => commands::audit::execute(run_dir, output, strict, stop_on_fail, verbose),
     }
 }
 

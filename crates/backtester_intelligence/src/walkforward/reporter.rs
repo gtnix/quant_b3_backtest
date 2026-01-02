@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::types::{
     AggregateMetrics, AggregateReport, ParamSet, WindowResult,
-    NestedAggregateReport, NestedWindowResult, SelectionCriteria,
+    NestedAggregateReport, NestedWindowResult,
 };
 
 /// Reporter for walk-forward validation results.

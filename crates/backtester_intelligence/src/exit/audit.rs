@@ -8,7 +8,7 @@ use std::fmt::Write;
 use crate::entry::Order;
 use crate::filters::Market;
 
-use super::types::{ExitDiagnostics, ExitReason, ExitResult, RiskViolation};
+use super::types::{ExitDiagnostics, ExitReason, ExitResult};
 
 /// Record of an exited position.
 #[derive(Debug, Clone)]
@@ -255,6 +255,9 @@ mod tests {
         assert_eq!(counts.get(&ExitReason::TimeExit), None);
     }
 }
+
+
+
 
 
 

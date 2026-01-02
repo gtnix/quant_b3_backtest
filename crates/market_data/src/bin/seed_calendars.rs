@@ -3,14 +3,11 @@
 //! Usage:
 //!   cargo run --bin seed_calendars
 
-use chrono::Datelike;
 use market_data::calendar::db_provider::SourceLayer;
 use market_data::calendar::rules_engine::{B3RulesEngine, NYSERulesEngine, RulesEngine};
-use market_data::calendar::Market;
 use std::env;
 use std::sync::Arc;
-use tokio_postgres::NoTls;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 const START_YEAR: i32 = 2005;
@@ -385,6 +382,9 @@ async fn print_summary(client: &tokio_postgres::Client) -> Result<(), Box<dyn st
 
     Ok(())
 }
+
+
+
 
 
 

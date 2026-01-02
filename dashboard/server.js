@@ -103,6 +103,150 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', artifacts_root: ARTIFACTS_ROOT });
 });
 
+// Overview endpoint - aggregated dashboard statistics
+app.get('/api/overview', async (req, res) => {
+  try {
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const last7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    // Run all queries in parallel for efficiency
+    const [
+      hallOfFameResult,
+      bestCandidateResult,
+      totalCandidatesResult,
+      candidates24hResult,
+      campaignsResult,
+      generationStatsResult,
+      recentCandidatesResult
+    ] = await Promise.all([
+      // Total Hall of Fame strategies
+      pool.query("SELECT COUNT(*) as count FROM scg_promotions WHERE promotion_class = 'hall_of_fame'"),
+      // Best candidate stats (from validated candidates with good metrics)
+      pool.query(`
+        SELECT 
+          MAX(oos_sharpe_net) as best_sharpe,
+          MAX(oos_cagr_net) as best_cagr,
+          MIN(max_drawdown_net) as worst_drawdown,
+          AVG(oos_sharpe_net) as avg_sharpe
+        FROM scg_candidates 
+        WHERE source_stage = 'stage_b' 
+          AND oos_sharpe_net IS NOT NULL 
+          AND oos_sharpe_net <= 10
+      `),
+      // Total candidates
+      pool.query('SELECT COUNT(*) as count FROM scg_candidates'),
+      // Candidates last 24h
+      pool.query('SELECT COUNT(*) as count FROM scg_candidates WHERE created_at > $1', [last24h]),
+      // Campaign stats
+      pool.query(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+        FROM scg_campaigns
+      `),
+      // Generation evolution (last 50 generations)
+      pool.query(`
+        SELECT 
+          r.run_id,
+          c.name as campaign_name,
+          MAX(cand.oos_sharpe_net) as best_sharpe,
+          AVG(cand.oos_sharpe_net) as mean_sharpe,
+          COUNT(cand.candidate_id) as candidates_count,
+          r.started_at
+        FROM scg_runs r
+        LEFT JOIN scg_campaigns c ON r.campaign_id = c.campaign_id
+        LEFT JOIN scg_candidates cand ON cand.run_id = r.run_id
+        WHERE cand.oos_sharpe_net IS NOT NULL AND cand.oos_sharpe_net <= 10
+        GROUP BY r.run_id, c.name, r.started_at
+        ORDER BY r.started_at DESC
+        LIMIT 50
+      `),
+      // Recent validated candidates for equity data
+      pool.query(`
+        SELECT candidate_id, oos_sharpe_net, oos_cagr_net, max_drawdown_net, created_at
+        FROM scg_candidates
+        WHERE source_stage = 'stage_b' AND oos_sharpe_net IS NOT NULL AND oos_sharpe_net <= 10
+        ORDER BY created_at DESC
+        LIMIT 100
+      `)
+    ]);
+    
+    // Process best candidate stats
+    const bestStats = bestCandidateResult.rows[0] || {};
+    const bestSharpe = parseFloat(bestStats.best_sharpe) || 0;
+    const bestCagr = parseFloat(bestStats.best_cagr) || 0;
+    const worstDrawdown = parseFloat(bestStats.worst_drawdown) || 0;
+    const avgSharpe = parseFloat(bestStats.avg_sharpe) || 0;
+    
+    // Process campaign stats
+    const campaignStats = campaignsResult.rows[0] || {};
+    
+    // Build generation evolution data for chart
+    const generationData = generationStatsResult.rows.map((row, idx) => ({
+      generation: generationStatsResult.rows.length - idx,
+      bestSharpe: parseFloat(row.best_sharpe) || 0,
+      meanSharpe: parseFloat(row.mean_sharpe) || 0,
+      paretoSize: parseInt(row.candidates_count) || 0,
+      runId: row.run_id,
+      campaignName: row.campaign_name
+    })).reverse();
+    
+    // Build simulated equity curve from recent candidates
+    let cumulativeValue = 100000;
+    const equityData = recentCandidatesResult.rows.reverse().map((c, idx) => {
+      const cagr = parseFloat(c.oos_cagr_net) || 0;
+      const dailyReturn = cagr / 252; // Approximate daily return
+      cumulativeValue *= (1 + dailyReturn);
+      const date = new Date(c.created_at);
+      return {
+        time: date.toISOString().split('T')[0],
+        value: cumulativeValue
+      };
+    });
+    
+    // If no equity data, generate placeholder
+    const finalEquityData = equityData.length > 0 ? equityData : 
+      Array.from({ length: 30 }, (_, i) => ({
+        time: new Date(Date.now() - (30 - i) * 86400000).toISOString().split('T')[0],
+        value: 100000
+      }));
+    
+    res.json({
+      metrics: {
+        totalReturn: bestCagr,
+        sharpeRatio: bestSharpe,
+        avgSharpeRatio: avgSharpe,
+        maxDrawdown: worstDrawdown,
+        winRate: 0, // Would need trade-level data
+        totalTrades: 0, // Would need trade-level data
+        activeCandidates: parseInt(hallOfFameResult.rows[0].count) || 0,
+        totalCandidates: parseInt(totalCandidatesResult.rows[0].count) || 0,
+        candidates24h: parseInt(candidates24hResult.rows[0].count) || 0,
+        currentGeneration: generationData.length,
+        bestCagr: bestCagr
+      },
+      campaigns: {
+        total: parseInt(campaignStats.total) || 0,
+        completed: parseInt(campaignStats.completed) || 0,
+        running: parseInt(campaignStats.running) || 0,
+        failed: parseInt(campaignStats.failed) || 0
+      },
+      equityData: finalEquityData,
+      generationData: generationData,
+      ompStatus: ompState.status,
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[API] Overview query failed:', err.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch overview data',
+      details: err.message 
+    });
+  }
+});
+
 // Set artifacts root
 app.post('/api/set-root', (req, res) => {
   const { path: newPath } = req.body;
@@ -3013,6 +3157,152 @@ app.get('/api/omp/stats', async (req, res) => {
 });
 
 // =============================================================================
+// AUDIT ENDPOINTS - Fase 4 Human Reports
+// =============================================================================
+
+// Get audit report for a run (all audit artifacts including new institutional reports)
+app.get('/api/audit/:runId', async (req, res) => {
+  const { runId } = req.params;
+  
+  // SCG runs are in PROJECT_ROOT/output/scg
+  const scgDir = path.join(PROJECT_ROOT, 'output', 'scg');
+  
+  // Find the run directory
+  const possiblePaths = [
+    path.join(scgDir, runId),
+    path.join(scgDir, `scg_${runId}`),
+    path.join(scgDir, `run_${runId}`),
+  ];
+  
+  let runDir = null;
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      runDir = p;
+      break;
+    }
+  }
+  
+  // Also try searching for run that contains the ID
+  if (!runDir && fs.existsSync(scgDir)) {
+    const entries = fs.readdirSync(scgDir);
+    for (const entry of entries) {
+      if (entry.includes(runId)) {
+        runDir = path.join(scgDir, entry);
+        break;
+      }
+    }
+  }
+  
+  if (!runDir) {
+    return res.status(404).json({ error: 'Run not found', runId });
+  }
+  
+  // Read audit artifacts - now includes new institutional audit files
+  const artifacts = {};
+  const artifactFiles = [
+    'sanity.json', 
+    'human_report.json', 
+    'attribution.json', 
+    'manifest.json', 
+    'report.json',
+    // New institutional audit artifacts
+    'asset_attribution.json',
+    'audit_crosscheck.json',
+    'validation_overview.json',
+    'audit_marcos.json'
+  ];
+  
+  for (const file of artifactFiles) {
+    const filePath = path.join(runDir, file);
+    if (fs.existsSync(filePath)) {
+      try {
+        const key = file.replace('.json', '').replace(/_/g, '_');
+        artifacts[key] = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      } catch (e) {
+        console.error(`[Audit] Failed to parse ${file}:`, e.message);
+      }
+    }
+  }
+  
+  // Build response with all artifacts
+  res.json({
+    runId,
+    runDir,
+    hasAuditData: !!artifacts.sanity && !!artifacts.human_report,
+    // Original artifacts
+    sanity: artifacts.sanity || null,
+    humanReport: artifacts.human_report || null,
+    attribution: artifacts.attribution || null,
+    manifest: artifacts.manifest || null,
+    report: artifacts.report || null,
+    // New institutional audit artifacts
+    assetAttribution: artifacts.asset_attribution || null,
+    crosscheck: artifacts.audit_crosscheck || null,
+    validationOverview: artifacts.validation_overview || null,
+    auditMarcos: artifacts.audit_marcos || null,
+  });
+});
+
+// Get list of runs with audit data
+app.get('/api/audits', async (req, res) => {
+  // SCG runs are in PROJECT_ROOT/output/scg, not ARTIFACTS_ROOT
+  const scgDir = path.join(PROJECT_ROOT, 'output', 'scg');
+  if (!fs.existsSync(scgDir)) {
+    return res.json({ runs: [] });
+  }
+  
+  const runs = [];
+  const entries = fs.readdirSync(scgDir);
+  
+  for (const entry of entries) {
+    const entryPath = path.join(scgDir, entry);
+    const stat = fs.statSync(entryPath);
+    
+    if (stat.isDirectory()) {
+      // Check if this run has audit data
+      const hasSanity = fs.existsSync(path.join(entryPath, 'sanity.json'));
+      const hasHumanReport = fs.existsSync(path.join(entryPath, 'human_report.json'));
+      const hasManifest = fs.existsSync(path.join(entryPath, 'manifest.json'));
+      
+      let sanityPassed = null;
+      let recommendation = null;
+      let timestamp = stat.mtime.toISOString();
+      
+      if (hasSanity) {
+        try {
+          const sanity = JSON.parse(fs.readFileSync(path.join(entryPath, 'sanity.json'), 'utf-8'));
+          sanityPassed = sanity.passed;
+        } catch (e) {}
+      }
+      
+      if (hasHumanReport) {
+        try {
+          const humanReport = JSON.parse(fs.readFileSync(path.join(entryPath, 'human_report.json'), 'utf-8'));
+          recommendation = humanReport.recommendation;
+          if (humanReport.timestamp) {
+            timestamp = humanReport.timestamp;
+          }
+        } catch (e) {}
+      }
+      
+      runs.push({
+        runId: entry,
+        path: entryPath,
+        hasAuditData: hasSanity || hasHumanReport,
+        sanityPassed,
+        recommendation,
+        timestamp,
+      });
+    }
+  }
+  
+  // Sort by timestamp descending
+  runs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  
+  res.json({ runs });
+});
+
+// =============================================================================
 // START SERVER
 // =============================================================================
 
@@ -3044,6 +3334,9 @@ app.listen(PORT, () => {
   console.log(`   POST /api/scg/stop/:runId`);
   console.log(`   GET  /api/scg/active-runs`);
   console.log(`   GET  /api/cockpit-candidates/:runId`);
+  console.log(`\n📋 Audit Reports:`);
+  console.log(`   GET  /api/audits`);
+  console.log(`   GET  /api/audit/:runId`);
   console.log(`\n⛏️ OMP (Perpetual Mining):`);
   console.log(`   GET  /api/omp/status`);
   console.log(`   POST /api/omp/start`);

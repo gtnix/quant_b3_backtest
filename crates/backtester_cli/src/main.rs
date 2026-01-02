@@ -79,6 +79,10 @@ enum Commands {
         /// Path to execution model config (TOML) for cost/slippage modeling
         #[arg(short = 'e', long)]
         execution: Option<PathBuf>,
+        
+        /// Path to market data CSV file for backtesting
+        #[arg(short = 'm', long)]
+        market_data: Option<PathBuf>,
     },
 
     /// Run all strategy configs in a folder
@@ -94,6 +98,10 @@ enum Commands {
         /// Strict mode (fail on NaN, invalid weights)
         #[arg(long)]
         strict: bool,
+        
+        /// Path to market data CSV file for backtesting
+        #[arg(short = 'm', long)]
+        market_data: Option<PathBuf>,
     },
 
     /// Compare two experiment runs
@@ -152,6 +160,29 @@ enum Commands {
         /// Load thresholds from config file
         #[arg(long)]
         thresholds_file: Option<PathBuf>,
+    },
+
+    /// Validate a backtest run (sanity checks, cross-check, attribution)
+    ValidateRun {
+        /// Path to run directory (containing metrics.json, nav_history.csv, etc.)
+        #[arg(short, long)]
+        run_dir: PathBuf,
+
+        /// Run ID (optional, defaults to directory name)
+        #[arg(long)]
+        run_id: Option<String>,
+
+        /// Output directory for validation artifacts
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Strict mode (fail on any warning)
+        #[arg(long)]
+        strict: bool,
+
+        /// Disable cross-check (recompute metrics from nav_history)
+        #[arg(long)]
+        no_crosscheck: bool,
     },
 
     /// Generate block catalog documentation
@@ -349,6 +380,7 @@ fn run_command(
     dry_run: bool,
     strict: bool,
     execution_config: Option<PathBuf>,
+    market_data: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    STRATEGY RUNNER                           ║");
@@ -359,8 +391,14 @@ fn run_command(
         println!("Execution config: {}", exec_path.display());
     }
     
+    // Log market data if provided
+    if let Some(ref md_path) = market_data {
+        println!("Market data: {}", md_path.display());
+    }
+    
     let runner_config = RunnerConfig {
         output_dir: output_dir.to_string_lossy().into(),
+        market_data_csv_path: market_data.map(|p| p.to_string_lossy().into_owned()),
         ..Default::default()
     };
 
@@ -413,13 +451,20 @@ fn run_batch_command(
     folder: PathBuf,
     output_dir: PathBuf,
     strict: bool,
+    market_data: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    BATCH RUNNER                              ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
+    // Log market data if provided
+    if let Some(ref md_path) = market_data {
+        println!("Market data: {}", md_path.display());
+    }
+
     let runner_config = RunnerConfig {
         output_dir: output_dir.to_string_lossy().into(),
+        market_data_csv_path: market_data.map(|p| p.to_string_lossy().into_owned()),
         ..Default::default()
     };
 
@@ -605,6 +650,141 @@ fn generate_catalog_command(output: PathBuf, json: bool) -> Result<(), Box<dyn s
     Ok(())
 }
 
+fn validate_run_command(
+    run_dir: PathBuf,
+    run_id: Option<String>,
+    output_dir: Option<PathBuf>,
+    strict: bool,
+    no_crosscheck: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use backtester_validation::{BacktestArtifacts, ValidationPipeline, ValidationConfig, Verdict};
+
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║                 BACKTEST VALIDATION                          ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    let run_id = run_id.unwrap_or_else(|| {
+        run_dir.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+
+    println!("Run directory: {}", run_dir.display());
+    println!("Run ID: {}", run_id);
+    println!("Strict mode: {}", strict);
+    println!();
+
+    // Create artifacts
+    let artifacts = BacktestArtifacts::from_dir(&run_dir, &run_id);
+
+    // Check if files exist
+    if !artifacts.metrics_path.exists() {
+        eprintln!("Error: metrics.json not found at {}", artifacts.metrics_path.display());
+        return Err("Missing metrics.json".into());
+    }
+
+    // Create config
+    let config = ValidationConfig {
+        strict_mode: strict,
+        crosscheck_enabled: !no_crosscheck,
+        ..Default::default()
+    };
+
+    let pipeline = ValidationPipeline::new(config);
+    let result = pipeline.validate(&artifacts)?;
+
+    // Print results
+    println!("═══════════════════════════════════════════════════════════════");
+    let verdict_icon = match result.verdict {
+        Verdict::Pass => "✅",
+        Verdict::Warn => "⚠️",
+        Verdict::Fail => "❌",
+    };
+    println!("VERDICT: {} {:?}", verdict_icon, result.verdict);
+    println!("═══════════════════════════════════════════════════════════════\n");
+
+    // Schema check
+    println!("Schema Check:");
+    if result.schema_check.has_failures() {
+        println!("  ❌ FAILED");
+        println!("     Missing: {:?}", result.schema_check.missing_fields);
+        println!("     Null: {:?}", result.schema_check.null_fields);
+    } else {
+        println!("  ✅ PASSED ({} fields validated)", result.schema_check.validated_fields.len());
+    }
+
+    // Sanity check
+    println!("\nSanity Check:");
+    match result.sanity_check.verdict {
+        Verdict::Pass => println!("  ✅ PASSED"),
+        Verdict::Warn => println!("  ⚠️  WARNINGS"),
+        Verdict::Fail => println!("  ❌ FAILED"),
+    }
+    println!("  {}", result.sanity_check.message);
+
+    // Cross-check
+    if let Some(ref cc) = result.crosscheck {
+        println!("\nCross-check:");
+        if cc.passed {
+            println!("  ✅ PASSED");
+        } else {
+            println!("  ❌ FAILED");
+            for cmp in &cc.comparisons {
+                if !cmp.passed {
+                    println!("     {} mismatch: reported {:.4}, recomputed {:.4}",
+                        cmp.name, cmp.reported, cmp.recomputed);
+                }
+            }
+        }
+    }
+
+    // Attribution
+    if let Some(ref attr) = result.attribution {
+        println!("\nAttribution:");
+        println!("  Assets: {}", attr.attributions.len());
+        println!("  Total Net PnL: {:.2}", attr.total_net_pnl);
+        println!("  Total Trades: {}", attr.total_trades);
+        println!("  Top 1 concentration: {:.1}%", attr.concentration.top_1_pct * 100.0);
+    }
+
+    // Warnings
+    if !result.warnings.is_empty() {
+        println!("\nWarnings ({}):", result.warnings.len());
+        for warn in &result.warnings {
+            println!("  ⚠️  {}: {}", warn.code, warn.message);
+        }
+    }
+
+    // Errors
+    if !result.errors.is_empty() {
+        println!("\nErrors ({}):", result.errors.len());
+        for err in &result.errors {
+            println!("  ❌ {}", err);
+        }
+    }
+
+    // Generate artifacts if output dir specified
+    if let Some(output) = output_dir {
+        println!("\nGenerating artifacts to: {}", output.display());
+        pipeline.generate_artifacts(&result, &output)?;
+        println!("  ✓ validation_summary.json");
+        println!("  ✓ sanity.json");
+        if result.attribution.is_some() {
+            println!("  ✓ asset_attribution.csv");
+        }
+        println!("  ✓ backtest_report.md");
+    }
+
+    println!();
+
+    // Exit with error if failed
+    if result.verdict == Verdict::Fail {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
 fn stress_candidate_command(
     candidate_path: PathBuf,
     execution_config_path: Option<PathBuf>,
@@ -705,12 +885,14 @@ fn main() {
             dry_run,
             strict,
             execution,
-        } => run_command(config, output, dry_run, strict, execution),
+            market_data,
+        } => run_command(config, output, dry_run, strict, execution, market_data),
         Commands::RunBatch {
             folder,
             output,
             strict,
-        } => run_batch_command(folder, output, strict),
+            market_data,
+        } => run_batch_command(folder, output, strict, market_data),
         Commands::Compare { 
             run_a, 
             run_b,
@@ -728,6 +910,13 @@ fn main() {
             dd_threshold,
             thresholds_file,
         } => compare_to_golden_command(run, golden, golden_dir, sharpe_threshold, cagr_threshold, dd_threshold, thresholds_file),
+        Commands::ValidateRun {
+            run_dir,
+            run_id,
+            output,
+            strict,
+            no_crosscheck,
+        } => validate_run_command(run_dir, run_id, output, strict, no_crosscheck),
         Commands::StressCandidate {
             candidate,
             execution,

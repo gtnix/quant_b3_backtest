@@ -437,6 +437,9 @@ fn stress_test_cache_contention() {
                             is_max_dd: -0.10,
                             oos_max_dd: -0.12,
                             oos_trades: 100,
+                            oos_skewness: 0.1,
+                            oos_kurtosis: 0.2,
+                            oos_n_observations: 252,
                             passed: true,
                         });
                     }

@@ -10,13 +10,11 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
-use combiner_core::{StrategyGenome, GenomeConverter, ConversionError};
+use combiner_core::{GenomeConverter, ConversionError};
 use crate::config::EvolutionConfig;
-use crate::hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry, ValidatedHofSummary};
+use crate::hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry};
 use crate::performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot};
-use crate::persistence::ExperimentManifest;
 
 /// Final report structure
 #[derive(Debug, Clone, Serialize, Deserialize)]

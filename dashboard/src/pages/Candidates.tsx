@@ -428,14 +428,40 @@ export function Candidates() {
     );
   }
 
+  // Get the selected run info
+  const selectedRunInfo = recentRuns.find(r => r.run_id === selectedRunId);
+
   return (
     <div className="space-y-4">
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2 text-sm">
+        <button 
+          onClick={() => {
+            useDataStore.getState().clearSelectedRun?.();
+            window.location.hash = '#/candidates';
+          }}
+          className="text-terminal-muted hover:text-white transition-colors"
+        >
+          Runs
+        </button>
+        <ChevronDown className="w-4 h-4 text-terminal-muted -rotate-90" />
+        <span className="text-accent-cyan font-mono">{selectedRunInfo?.campaign_name || selectedRunId?.slice(0, 12)}</span>
+        {selectedCandidate && (
+          <>
+            <ChevronDown className="w-4 h-4 text-terminal-muted -rotate-90" />
+            <span className="text-profit">{selectedCandidate.display_name}</span>
+          </>
+        )}
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Candidate Explorer</h1>
           <p className="text-terminal-muted text-sm mt-1">
-            Run: <span className="font-mono text-accent-cyan">{selectedRunId}</span>
+            <span className="font-medium">{selectedRunInfo?.campaign_name || 'Campaign'}</span>
+            {' — '}
+            <span className="font-mono text-accent-cyan">{selectedRunId}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">

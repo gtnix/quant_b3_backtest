@@ -30,11 +30,14 @@ pub mod hall_of_fame_validated;
 pub mod engine;
 pub mod persistence;
 pub mod validation;
+pub mod validation_reports;
 pub mod evaluation;
 pub mod performance_metrics;
 pub mod report;
 pub mod institutional_thresholds;
 pub mod statistics;
+pub mod audit_framework;
+pub mod audit_checks;
 
 pub use config::EvolutionConfig;
 pub use population::Population;
@@ -56,4 +59,8 @@ pub use hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry, Institu
 pub use performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot, IntegrityStatus};
 pub use report::{FinalReportGenerator, FinalReport};
 pub use institutional_thresholds::InstitutionalThresholds;
+pub use validation_reports::{
+    WfaReport, PboDsrReport, StressReport, ValidationBundle,
+    ValidationVerdict as ReportVerdict,
+};
 

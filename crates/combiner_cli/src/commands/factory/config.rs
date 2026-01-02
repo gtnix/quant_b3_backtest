@@ -72,6 +72,10 @@ pub struct DatasetConfig {
     /// Path to data files (for hash computation).
     #[serde(default)]
     pub data_path: Option<String>,
+    /// Path to market data CSV for backtesting.
+    /// When set, passes --market-data to backtester CLI for real data simulation.
+    #[serde(default)]
+    pub market_data_path: Option<String>,
 }
 
 fn default_market() -> String {

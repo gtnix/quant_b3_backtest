@@ -427,7 +427,7 @@ impl BaselineAggregator {
 
     fn calculate_category_breakdown(
         &self,
-        top_warn: &[CheckFrequency],
+        _top_warn: &[CheckFrequency],
         top_crit: &[CheckFrequency],
         n: usize,
     ) -> CategoryBreakdown {
@@ -535,7 +535,7 @@ impl BaselineAggregator {
         &self,
         top_warn: &[CheckFrequency],
         top_crit: &[CheckFrequency],
-        n: usize,
+        _n: usize,
     ) -> Vec<ThresholdRecommendation> {
         let mut recs = vec![];
 

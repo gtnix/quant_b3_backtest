@@ -24,6 +24,7 @@ fn make_golden_report() -> AggregateReport {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let make_window = |idx: usize, train_end: NaiveDate, test_end: NaiveDate, sharpe: f64, ret: f64, dd: f64| -> WindowResult {
@@ -402,6 +403,7 @@ fn make_golden_nested_report() -> NestedAggregateReport {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
         selection_criteria: SelectionCriteria::PSR,
         psr_threshold: dec!(0.5),
         penalties: PenaltyConfig::default(),

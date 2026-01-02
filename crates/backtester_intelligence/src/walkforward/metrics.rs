@@ -5,7 +5,7 @@ use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 
 use super::types::{AggregateMetrics, WindowMetrics, WindowResult, NestedWindowResult};
-use super::statistics::{calculate_skewness, calculate_kurtosis, calculate_psr, calculate_dsr, sharpe_variance};
+use super::statistics::{calculate_skewness, calculate_kurtosis, calculate_psr, calculate_dsr};
 
 /// Calculates metrics from equity curve and trade data.
 #[derive(Debug, Clone, Default)]
@@ -61,14 +61,17 @@ impl MetricsCalculator {
             returns.iter().sum::<Decimal>() / Decimal::from(returns.len())
         };
 
-        // Sharpe ratio (annualized)
+        // Sharpe ratio (annualized, clamped to [-10, 10])
         let rf_daily = self.risk_free_rate / Decimal::from(self.trading_days);
         let excess_return = mean_return - rf_daily;
-        let sharpe = if vol_daily > Decimal::ZERO {
+        let sharpe_raw = if vol_daily > Decimal::ZERO {
             excess_return / vol_daily * ann_factor
         } else {
             Decimal::ZERO
         };
+        // Clamp to realistic bounds - any value beyond [-10, 10] indicates
+        // calculation error or unrealistic data (low volatility, short period)
+        let sharpe = sharpe_raw.max(dec!(-10)).min(dec!(10));
 
         // CAGR
         let days = equity.len() as f64;

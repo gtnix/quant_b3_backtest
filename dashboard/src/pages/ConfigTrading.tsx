@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { DollarSign, Save, RefreshCw, Info } from 'lucide-react';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 interface TradingParams {
   market: 'br' | 'us';
@@ -17,13 +18,53 @@ interface TradingParams {
   lotSize: number;
 }
 
-const FEE_TIERS: Record<string, { label: string; rate: number; market: string }> = {
-  'b3-retail': { label: 'B3 Retail', rate: 0.0003, market: 'br' },
-  'b3-day-trade': { label: 'B3 Day Trade', rate: 0.00025, market: 'br' },
-  'b3-institutional': { label: 'B3 Institutional', rate: 0.0002, market: 'br' },
-  'us-retail': { label: 'US Retail (Zero)', rate: 0.0, market: 'us' },
-  'us-ibkr-lite': { label: 'IBKR Lite', rate: 0.0, market: 'us' },
-  'us-ibkr-pro': { label: 'IBKR Pro', rate: 0.0005, market: 'us' },
+/**
+ * B3 Fee Structure (2024/2025):
+ * - Emolumentos: 0.003186% (negociação) + 0.0025% (registro)
+ * - Taxa de Liquidação: 0.0275% para swing trade, 0.02% para day trade
+ * - ISS: 5% sobre corretagem
+ * - Total típico retail: ~0.030% por operação (ida e volta = 0.06%)
+ * 
+ * Corretoras Zero: XP, Clear, Rico, Inter (sem corretagem, apenas taxas B3)
+ * Corretoras Tradicionais: ~R$15-20 por ordem
+ */
+const FEE_TIERS: Record<string, { label: string; rate: number; market: string; details: string }> = {
+  'b3-retail': { 
+    label: 'B3 Retail (Zero)', 
+    rate: 0.0003, 
+    market: 'br',
+    details: 'Corretoras zero: emolumentos 0.0032% + liquidação 0.0275% ≈ 0.030%'
+  },
+  'b3-day-trade': { 
+    label: 'B3 Day Trade', 
+    rate: 0.00022, 
+    market: 'br',
+    details: 'Emolumentos 0.0032% + liquidação reduzida 0.020% ≈ 0.022%'
+  },
+  'b3-institutional': { 
+    label: 'B3 Institutional', 
+    rate: 0.0002, 
+    market: 'br',
+    details: 'Volume alto: emolumentos reduzidos + liquidação ≈ 0.020%'
+  },
+  'us-retail': { 
+    label: 'US Retail (Zero)', 
+    rate: 0.0, 
+    market: 'us',
+    details: 'Robinhood, Webull: zero commission, PFOF model'
+  },
+  'us-ibkr-lite': { 
+    label: 'IBKR Lite', 
+    rate: 0.0, 
+    market: 'us',
+    details: 'Interactive Brokers Lite: zero commission on US stocks'
+  },
+  'us-ibkr-pro': { 
+    label: 'IBKR Pro', 
+    rate: 0.0005, 
+    market: 'us',
+    details: '$0.005/share, min $1. Best execution, no PFOF.'
+  },
 };
 
 const POSITION_SIZING: Record<string, { label: string; description: string }> = {
@@ -159,6 +200,7 @@ export function ConfigTrading() {
                     <p className="text-sm text-slate-400 mt-1">
                       {info.rate === 0 ? 'Zero commission' : `${(info.rate * 100).toFixed(3)}% per trade`}
                     </p>
+                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">{info.details}</p>
                   </button>
                 ))}
             </div>
@@ -175,7 +217,10 @@ export function ConfigTrading() {
                 />
               </div>
               <div>
-                <label className="text-sm text-slate-400 mb-2 block">Slippage (bps)</label>
+                <label className="text-sm text-slate-400 mb-2 flex items-center">
+                  Slippage (bps)
+                  <QuickTooltip termKey="slippage" size="sm" />
+                </label>
                 <input
                   type="number"
                   value={current.slippageBps}
@@ -223,7 +268,10 @@ export function ConfigTrading() {
                 />
               </div>
               <div>
-                <label className="text-sm text-slate-400 mb-2 block">Max Drawdown (%)</label>
+                <label className="text-sm text-slate-400 mb-2 flex items-center">
+                  Max Drawdown (%)
+                  <QuickTooltip termKey="max_drawdown" size="sm" />
+                </label>
                 <input
                   type="number"
                   value={current.maxDrawdownPct}
@@ -268,6 +316,9 @@ export function ConfigTrading() {
 }
 
 export default ConfigTrading;
+
+
+
 
 
 

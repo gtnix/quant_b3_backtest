@@ -20,7 +20,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::types::{EquityPoint, RunMetrics, TradeRecord, TradeSide};
+use super::types::{EquityPoint, RunMetrics, TradeRecord};
 
 /// Volatility calculation type.
 ///
@@ -73,7 +73,8 @@ pub const MIN_VOLATILITY_THRESHOLD: f64 = 0.0001;
 
 /// Maximum value for ratios that would otherwise be infinity.
 /// Used when denominator is zero (e.g., no losses for profit factor).
-pub const MAX_RATIO_VALUE: f64 = 999.99;
+/// Clamped to 20.0 for Sortino/Calmar (more realistic than 999.99).
+pub const MAX_RATIO_VALUE: f64 = 20.0;
 
 /// Square root of trading days (precomputed for performance).
 const SQRT_TRADING_DAYS: f64 = 15.874507866387544; // sqrt(252)
@@ -224,6 +225,8 @@ impl MetricsCalculator {
     ///
     /// - `risk_free_rate`: Expected as annualized (e.g., 0.05 for 5%)
     /// - Returns 0.0 if volatility is below threshold to avoid division issues
+    /// - CLAMPED to [-10, 10] to prevent unrealistic values from low volatility
+    ///   or short time series (per Harvey et al. 2016: "Backtesting").
     pub fn sharpe(returns: &[f64], risk_free_rate: f64) -> f64 {
         if returns.is_empty() {
             return 0.0;
@@ -237,7 +240,10 @@ impl MetricsCalculator {
             return 0.0;
         }
 
-        (annualized_return - risk_free_rate) / vol
+        let raw = (annualized_return - risk_free_rate) / vol;
+        // Clamp to realistic bounds: any value beyond [-10, 10] indicates
+        // calculation error, insufficient data, or unrealistic low volatility.
+        raw.clamp(-10.0, 10.0)
     }
 
     /// Sortino ratio: (annualized return - risk_free) / downside deviation.
@@ -274,7 +280,8 @@ impl MetricsCalculator {
         }
 
         let ratio = (annualized_return - risk_free_rate) / downside_vol;
-        ratio.min(MAX_RATIO_VALUE) // Cap to avoid serialization issues
+        // Clamp to [-20, 20] (Sortino can be higher than Sharpe with good risk control)
+        ratio.clamp(-20.0, 20.0)
     }
 
     /// Maximum drawdown and duration.
@@ -435,6 +442,7 @@ impl MetricsCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::experiment::TradeSide;
     use chrono::NaiveDate;
     use rust_decimal_macros::dec;
 

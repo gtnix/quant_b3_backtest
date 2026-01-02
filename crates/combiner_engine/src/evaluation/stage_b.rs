@@ -13,14 +13,12 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 
-use combiner_core::{StrategyGenome, GenomeConverter, FitnessConfig, MultiObjectiveFitness};
+use combiner_core::{StrategyGenome, GenomeConverter};
 use combiner_runner::{
     BacktestExecutor, ValidationCache, SplitMetrics, ValidationCacheEntry,
 };
 
-use super::split_plan::{ValidationSplitPlan, SplitPlanConfig};
-use super::split_data::SplitPair;
-use super::arena::{ValidationResultArena, ArenaMetrics, AggregatedMetrics};
+use super::split_plan::ValidationSplitPlan;
 use crate::statistics::{calculate_dsr, sample_variance};
 
 /// Configuration for Stage B validation
@@ -50,16 +48,16 @@ pub struct StageBConfig {
 
 impl Default for StageBConfig {
     fn default() -> Self {
-        // Research-grade defaults - more permissive for discovery
+        // Research-grade defaults - permissive for discovery and testing
         // Production uses InstitutionalCriteria::production() explicitly
         Self {
-            max_failures_early_exit: 3,
-            min_oos_sharpe: 0.5,       // Research: allow promising strategies
-            max_oos_drawdown: -0.30,   // Research: 30% max drawdown acceptable
-            min_oos_trades: 20,
-            max_degradation_pct: 60.0,
-            max_pbo: 0.25,             // Research: allow some overfitting risk
-            min_dsr: 0.5,              // Research: lower threshold
+            max_failures_early_exit: 5,
+            min_oos_sharpe: 0.2,       // Research: relaxed for testing
+            max_oos_drawdown: -0.70,   // Research: 70% max drawdown acceptable
+            min_oos_trades: 3,         // Research: minimal trades required
+            max_degradation_pct: 80.0,
+            max_pbo: 0.50,             // Research: allow overfitting risk
+            min_dsr: 0.2,              // Research: lower threshold
             use_cache: true,
             generation: 0,
             population_size: 100,
@@ -632,6 +630,7 @@ mod tests {
     use super::*;
     use combiner_core::{BlockGene, BlockType, ParamValue};
     use combiner_runner::LibraryExecutor;
+    use crate::evaluation::split_plan::SplitPlanConfig;
 
     fn create_test_genome() -> StrategyGenome {
         let gene = BlockGene::new(

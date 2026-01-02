@@ -12,6 +12,7 @@ members = [
     "crates/backtester_cli",
     "crates/backtester_intelligence",
     "crates/backtester_strategy",
+    "crates/backtester_validation",
     "crates/market_data",
     # Generative Combiner (SCG)
     "crates/combiner_core",
@@ -36,6 +37,7 @@ backtester_execution = { path = "crates/backtester_execution" }
 backtester_reports = { path = "crates/backtester_reports" }
 backtester_intelligence = { path = "crates/backtester_intelligence" }
 backtester_strategy = { path = "crates/backtester_strategy" }
+backtester_validation = { path = "crates/backtester_validation" }
 
 # Combiner crates (SCG)
 combiner_core = { path = "crates/combiner_core" }
@@ -86,7 +88,8 @@ strip = "none"        # Keep symbols for profiling
 
 [profile.dev]
 opt-level = 0
-debug = true
+debug = 1              # Minimal debug symbols (saves disk space)
+incremental = false    # Disable incremental compilation (saves ~50% disk)
 
 [profile.test]
 inherits = "dev"
@@ -100,4 +103,11 @@ codegen-units = 1
 panic = "abort"
 strip = "symbols"
 opt-level = 3
+
+# Fast development profile - faster compile + minimal disk usage
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1          # Light optimization for faster execution
+incremental = false    # No incremental cache (saves disk space)
+debug = 0              # No debug symbols (saves disk space)
 

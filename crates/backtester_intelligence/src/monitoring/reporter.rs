@@ -10,7 +10,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::types::{CheckCategory, CheckResult, CircuitAction, MonitoringReport, Severity};
+use super::types::{CheckCategory, CheckResult, MonitoringReport, Severity};
 
 /// Output format for reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -17,6 +17,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Proxy API requests to the Express server
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
   },
 
   // Env variables prefix

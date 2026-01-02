@@ -52,6 +52,66 @@ interface QuickTooltipProps {
 
 export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
   // ═══════════════════════════════════════════════════════════════════════════
+  // MINER CONTROL METRICS
+  // ═══════════════════════════════════════════════════════════════════════════
+  loops: {
+    term: 'Mining Loops',
+    definition: 'Number of complete mining cycles executed. Each loop checks for resources, starts campaigns if possible, and monitors progress.',
+    interpretation: 'Higher = more mining activity. Loops run every 30 seconds when mining is active.'
+  },
+  uptime: {
+    term: 'Mining Uptime',
+    definition: 'Total time the mining orchestrator has been running since the last start.',
+    interpretation: 'Longer uptime means more continuous mining. Resets when you stop/start mining.'
+  },
+  candidates_24h: {
+    term: 'Candidates Generated (24h)',
+    definition: 'Total number of strategy candidates created in the last 24 hours across all campaigns.',
+    benchmark: '1000+ per day is healthy mining activity',
+    interpretation: 'Higher = more strategies evaluated. Quality over quantity though!'
+  },
+  promotions_24h: {
+    term: 'Promotions (24h)',
+    definition: 'Strategies that passed all validation gates and were promoted to Hall of Fame in the last 24 hours.',
+    benchmark: '5-50 promotions per day depending on gate strictness',
+    interpretation: 'Low promotions = strict gates (good for quality). Zero = may need to tune gates or run longer.'
+  },
+  hall_of_fame_count: {
+    term: 'Hall of Fame Size',
+    definition: 'Total number of elite strategies that have passed all institutional validation criteria.',
+    interpretation: 'These are production-ready strategies with high confidence of real-world performance.'
+  },
+  throughput_min: {
+    term: 'Throughput per Minute',
+    definition: 'Number of strategy genomes evaluated per minute. Measures mining speed.',
+    benchmark: '10-100 genomes/min typical depending on hardware',
+    interpretation: 'Higher = faster exploration. Limited by CPU, backtesting complexity, and data size.'
+  },
+  cpu_usage: {
+    term: 'CPU Usage',
+    definition: 'Percentage of CPU being used by the mining process.',
+    benchmark: '80-100% is normal during active mining',
+    interpretation: 'High CPU = mining is working hard. Low CPU during mining may indicate waiting for I/O.'
+  },
+  memory_usage: {
+    term: 'Memory Usage',
+    definition: 'Percentage of system memory being used.',
+    benchmark: '<80% is healthy. >90% may cause issues.',
+    interpretation: 'Memory grows with population size and cached backtests.'
+  },
+  disk_free: {
+    term: 'Disk Free',
+    definition: 'Available disk space on the mining server.',
+    benchmark: '>5 GB required for safe operation',
+    interpretation: 'Low disk = artifacts may fail to save. Clean old outputs periodically.'
+  },
+  campaign_queue: {
+    term: 'Campaign Queue',
+    definition: 'Number of campaigns waiting to be executed.',
+    interpretation: 'Queue processes one campaign at a time. Add campaigns to automate overnight mining.'
+  },
+  
+  // ═══════════════════════════════════════════════════════════════════════════
   // PERFORMANCE METRICS
   // ═══════════════════════════════════════════════════════════════════════════
   sharpe: {

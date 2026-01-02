@@ -1,0 +1,48 @@
+# Auditoria Real - Campanha com dados IBOV
+# Uso: combiner factory run --campaign configs/campaigns/scg_audit_real.toml
+
+[campaign]
+name = "scg_audit_real"
+tag = "audit"
+owner = "quant_team"
+notes = "Campanha de auditoria com dados reais IBOV para validacao do pipeline"
+
+[dataset]
+market = "BR"
+start_date = "2022-01-01"
+end_date = "2024-06-01"
+universe = "ibov"
+
+[evolution]
+population_size = 50
+max_generations = 20
+convergence_generations = 5
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+delay_bars = 1
+
+[seeds]
+count = 1
+base_seed = 2025
+
+[budget]
+max_runs = 1
+top_k = 10
+timeout_per_run_secs = 300
+stress_enabled = false
+
+[promotion]
+min_oos_sharpe_net = 0.5
+max_pbo = 0.15
+min_stress_passed = 0
+gates_required = false
+
+[data_integrity]
+mode = "fast"
+max_gap_days = 5
+jump_threshold_pct = 25.0
+price_adjustment = "adjusted"
+universe_type = "static"
+enabled = true
+

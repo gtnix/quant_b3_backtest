@@ -364,7 +364,7 @@ impl RegimeSummaryJson {
 // COMPLIANCE JSON (NEW in v1.3)
 // =============================================================================
 
-use super::compliance::{BreachEvent, ComplianceReport, ComplianceSummary};
+use super::compliance::{BreachEvent, ComplianceReport};
 use super::constraints::ConstraintsConfig;
 use std::collections::BTreeMap;
 

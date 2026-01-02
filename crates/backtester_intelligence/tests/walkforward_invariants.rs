@@ -27,6 +27,7 @@ fn invariant_no_train_test_overlap() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -54,6 +55,7 @@ fn invariant_purge_gap_respected() {
         embargo_days: 0,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -81,6 +83,7 @@ fn invariant_embargo_gap_respected() {
         embargo_days,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -108,6 +111,7 @@ fn invariant_windows_cover_expected_range() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -192,6 +196,7 @@ fn invariant_grid_uses_only_train_data() {
         embargo_days: 5,
         market: Market::BR,
         grid: Some(grid.clone()),
+        execution_config: None,
     };
 
     // Grid combinations should only come from defined ranges

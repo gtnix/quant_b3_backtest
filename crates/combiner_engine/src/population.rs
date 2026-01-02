@@ -1,7 +1,7 @@
 //! Population management.
 
 use combiner_core::{
-    BlockGene, BlockType, MultiObjectiveFitness, ParamRanges, ParamValue, StrategyGenome,
+    BlockGene, BlockType, ParamRanges, ParamValue, StrategyGenome,
 };
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;

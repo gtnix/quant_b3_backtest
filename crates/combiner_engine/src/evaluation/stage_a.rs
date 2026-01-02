@@ -14,14 +14,12 @@ use std::time::Instant;
 use rayon::prelude::*;
 
 use combiner_core::{
-    StrategyGenome, PopulationFitnessSoA, FitnessData,
-    calculate_all_metrics, GenomeConverter,
+    StrategyGenome, PopulationFitnessSoA, FitnessData, GenomeConverter,
 };
 use combiner_runner::{
-    BacktestExecutor, BacktestOutput, GenomeCache, ValidationCache,
+    BacktestExecutor, BacktestOutput, ValidationCache,
 };
 
-use super::split_plan::ValidationSplitPlan;
 
 /// Configuration for Stage A evaluation
 #[derive(Debug, Clone)]

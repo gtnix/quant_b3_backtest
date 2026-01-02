@@ -137,25 +137,27 @@ impl BacktestResult {
             result.annual_return = mean * 252.0;
             result.annual_volatility = std_dev * annualization_factor;
 
-            // Sharpe Ratio
+            // Sharpe Ratio (clamped to [-10, 10] to prevent unrealistic values)
             if result.annual_volatility > 0.0 {
-                result.sharpe_ratio =
-                    (result.annual_return - risk_free_rate) / result.annual_volatility;
+                let sharpe_raw = (result.annual_return - risk_free_rate) / result.annual_volatility;
+                result.sharpe_ratio = sharpe_raw.clamp(-10.0, 10.0);
             }
 
-            // Sortino Ratio (downside volatility)
+            // Sortino Ratio (downside volatility, clamped to [-20, 20])
             let downside_returns: Vec<f64> =
                 returns.iter().filter(|&&r| r < 0.0).copied().collect();
             if !downside_returns.is_empty() {
                 let downside_vol = std_dev_of(&downside_returns) * annualization_factor;
                 if downside_vol > 0.0 {
-                    result.sortino_ratio = (result.annual_return - risk_free_rate) / downside_vol;
+                    let sortino_raw = (result.annual_return - risk_free_rate) / downside_vol;
+                    result.sortino_ratio = sortino_raw.clamp(-20.0, 20.0);
                 }
             }
 
-            // Calmar Ratio
+            // Calmar Ratio (clamped to [-20, 20])
             if result.max_drawdown > 0.0 {
-                result.calmar_ratio = result.annual_return / result.max_drawdown;
+                let calmar_raw = result.annual_return / result.max_drawdown;
+                result.calmar_ratio = calmar_raw.clamp(-20.0, 20.0);
             }
         }
 

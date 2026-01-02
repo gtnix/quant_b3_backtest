@@ -187,7 +187,7 @@ impl ConcentrationCalculator {
         weights.sort_by(|a, b| b.cmp(a));
 
         let n = weights.len();
-        let n_dec = Decimal::from(n as u32);
+        let _n_dec = Decimal::from(n as u32);
 
         // HHI: sum of squared weights (normalized to 0-1 scale)
         let hhi: Decimal = weights

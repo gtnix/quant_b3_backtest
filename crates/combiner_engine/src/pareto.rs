@@ -1,6 +1,6 @@
 //! Pareto frontier calculation using NSGA-II.
 
-use combiner_core::{MultiObjectiveFitness, StrategyGenome};
+use combiner_core::StrategyGenome;
 
 /// Pareto frontier calculator.
 pub struct ParetoFrontier;
@@ -197,7 +197,7 @@ impl ParetoFrontier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use combiner_core::{BlockGene, BlockType, FitnessConfig, ParamValue};
+    use combiner_core::{BlockGene, BlockType, FitnessConfig, MultiObjectiveFitness};
 
     fn create_genome_with_fitness(cagr: f64, sharpe: f64, dd: f64) -> StrategyGenome {
         let config = FitnessConfig::default();

@@ -2,10 +2,11 @@ import { ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface MetricCardProps {
-  label: string;
+  label: string | ReactNode;
   value: string | number;
   change?: number;
   changeLabel?: string;
+  subtitle?: string;
   icon?: ReactNode;
   format?: 'percent' | 'currency' | 'number' | 'ratio';
   size?: 'sm' | 'md' | 'lg';
@@ -16,6 +17,7 @@ export function MetricCard({
   value, 
   change, 
   changeLabel,
+  subtitle,
   icon,
   format = 'number',
   size = 'md'
@@ -71,6 +73,10 @@ export function MetricCard({
         {formatValue(value)}
       </div>
       
+      {subtitle && (
+        <div className="text-xs text-terminal-muted mt-1">{subtitle}</div>
+      )}
+      
       {change !== undefined && (
         <div className={`flex items-center gap-1 mt-2 text-xs ${getChangeColor()}`}>
           {getChangeIcon()}
@@ -81,6 +87,9 @@ export function MetricCard({
     </div>
   );
 }
+
+
+
 
 
 

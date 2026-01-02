@@ -8,11 +8,11 @@ use backtester_execution::{
     StressSuite, StressResult, StressSuiteResult,
     cost_report::CostReport,
 };
-use combiner_core::{MultiObjectiveFitness, StrategyGenome};
-use combiner_runner::{BacktestExecutor, BacktestOutput, ExecutionError};
+use combiner_core::StrategyGenome;
+use combiner_runner::BacktestExecutor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 /// Errors during validation.
@@ -528,7 +528,8 @@ fn determine_discard_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use combiner_core::{BlockGene, BlockType, FitnessConfig, ParamValue};
+    use combiner_core::{BlockGene, BlockType, FitnessConfig, MultiObjectiveFitness};
+    use combiner_runner::{BacktestExecutor, BacktestOutput, ExecutionError};
     use backtester_strategy::config::StrategyConfig;
 
     /// Mock executor for testing.

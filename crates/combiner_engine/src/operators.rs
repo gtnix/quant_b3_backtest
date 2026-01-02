@@ -1,7 +1,7 @@
 //! Genetic operators: selection, crossover, mutation.
 
 use combiner_core::{
-    BlockGene, BlockType, MultiObjectiveFitness, ParamRanges, ParamValue, StrategyGenome,
+    BlockGene, BlockType, ParamRanges, ParamValue, StrategyGenome,
 };
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -178,7 +178,7 @@ impl Mutation {
     pub fn mutate(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
         for gene in &mut genome.genes {
             // Parameter mutation
-            for (param_name, param_value) in &mut gene.params {
+            for (_param_name, param_value) in &mut gene.params {
                 if rng.gen_bool(self.rate) {
                     self.mutate_param(param_value, rng);
                 }

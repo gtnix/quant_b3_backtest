@@ -50,6 +50,7 @@ const navItems: { id: Page; label: string; icon: React.ElementType; group?: stri
   // System
   { id: 'evolution', label: 'Evolution', icon: TrendingUp, group: 'System' },
   { id: 'risk', label: 'Risk Analytics', icon: Activity, group: 'System' },
+  { id: 'audit', label: 'Audit Report', icon: Shield, group: 'System' },
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, group: 'System' },
   
   // Legacy (keep for compatibility)

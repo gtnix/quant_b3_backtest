@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
-use super::registry::{Campaign, Candidate, Registry, Run};
+use super::registry::{Candidate, Registry};
 
 /// Site index - entry point for web consumption.
 #[derive(Debug, Clone, Serialize, Deserialize)]

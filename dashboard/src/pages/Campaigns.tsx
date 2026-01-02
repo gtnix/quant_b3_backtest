@@ -585,14 +585,14 @@ function RunRow({ run }: { run: Run }) {
 
 function StatusBadge({ status }: { status: Campaign['status'] }) {
   const config = {
-    completed: 'bg-profit/20 text-profit',
-    running: 'bg-accent-cyan/20 text-accent-cyan',
-    failed: 'bg-loss/20 text-loss',
-    pending: 'bg-terminal-muted/20 text-terminal-muted',
+    completed: 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50',
+    running: 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 animate-pulse',
+    failed: 'bg-red-500/30 text-red-300 border border-red-500/50',
+    pending: 'bg-slate-500/30 text-slate-300 border border-slate-500/50',
   };
   
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${config[status]}`}>
+    <span className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider ${config[status]}`}>
       {status}
     </span>
   );

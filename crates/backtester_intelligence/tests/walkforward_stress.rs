@@ -56,6 +56,7 @@ fn stress_splitter_80_windows_under_10ms() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -137,6 +138,7 @@ fn stress_runner_20_windows_100_assets_under_5s() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let start = date(2020, 1, 1);
@@ -185,6 +187,7 @@ fn stress_runner_with_small_grid_under_10s() {
         embargo_days: 5,
         market: Market::BR,
         grid: Some(grid),
+        execution_config: None,
     };
 
     let start = date(2020, 1, 1);
@@ -264,6 +267,7 @@ fn stress_many_windows_20_years() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -289,6 +293,7 @@ fn stress_short_period_no_windows() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let splitter = RollingSplitter::new(&config);
@@ -461,6 +466,7 @@ fn perf_smoke_walkforward_under_2s() {
         embargo_days: 5,
         market: Market::BR,
         grid: None,
+        execution_config: None,
     };
 
     let start = date(2020, 1, 1);

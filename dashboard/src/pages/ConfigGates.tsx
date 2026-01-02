@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { Shield, Save, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Trophy } from 'lucide-react';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 interface GateConfig {
   enabled: boolean;
@@ -12,6 +13,7 @@ interface GateConfig {
   label: string;
   description: string;
   unit: string;
+  tooltipKey?: string;
 }
 
 interface GatesConfig {
@@ -43,6 +45,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'OOS Sharpe NET',
     description: 'Minimum out-of-sample Sharpe ratio after costs',
     unit: '',
+    tooltipKey: 'sharpe_net',
   },
   maxPbo: {
     enabled: true,
@@ -51,6 +54,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'PBO',
     description: 'Maximum Probability of Backtest Overfitting',
     unit: '%',
+    tooltipKey: 'pbo',
   },
   minDsr: {
     enabled: true,
@@ -59,6 +63,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'DSR',
     description: 'Minimum Deflated Sharpe Ratio',
     unit: '',
+    tooltipKey: 'dsr',
   },
   maxDegradation: {
     enabled: true,
@@ -67,6 +72,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'IS→OOS Degradation',
     description: 'Maximum performance drop from in-sample to out-of-sample',
     unit: '%',
+    tooltipKey: 'degradation_ratio',
   },
   minTradesOos: {
     enabled: true,
@@ -75,6 +81,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'OOS Trades',
     description: 'Minimum number of trades in out-of-sample period',
     unit: '',
+    tooltipKey: 'turnover',
   },
   maxDrawdownNet: {
     enabled: true,
@@ -83,6 +90,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'Max Drawdown',
     description: 'Maximum drawdown after costs',
     unit: '%',
+    tooltipKey: 'max_drawdown',
   },
   minStressPassed: {
     enabled: true,
@@ -91,6 +99,7 @@ const DEFAULT_GATES: GatesConfig = {
     label: 'Stress Tests',
     description: 'Minimum stress scenarios passed (out of 8)',
     unit: '/8',
+    tooltipKey: 'stress_test',
   },
 };
 
@@ -194,7 +203,10 @@ export function ConfigGates() {
                     {gate.enabled ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
                   </button>
                   <div>
-                    <p className="font-medium text-white">{gate.label}</p>
+                    <p className="font-medium text-white flex items-center">
+                      {gate.label}
+                      {gate.tooltipKey && <QuickTooltip termKey={gate.tooltipKey as any} size="sm" />}
+                    </p>
                     <p className="text-xs text-slate-500">{gate.description}</p>
                   </div>
                 </div>
@@ -338,6 +350,9 @@ export function ConfigGates() {
 }
 
 export default ConfigGates;
+
+
+
 
 
 

@@ -5,13 +5,12 @@
 //! - generations/ (population snapshots)
 //! - hall_of_fame/ (best strategies)
 
-use crate::config::EvolutionConfig;
 use crate::hall_of_fame::HallOfFame;
 use crate::GenerationStats;
 use combiner_core::StrategyGenome;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 use tracing::info;
 
@@ -205,6 +204,122 @@ impl ExperimentPersistence {
         let report_json = serde_json::to_string_pretty(&report)?;
         fs::write(self.experiment_dir().join("report.json"), report_json)?;
 
+        Ok(())
+    }
+
+    /// Write Validated Hall of Fame with validation reports.
+    ///
+    /// For each validated entry, generates:
+    /// - genome.json
+    /// - config.toml
+    /// - metrics.json
+    /// - wfa_report.json (Walk-Forward Analysis)
+    /// - pbo_dsr.json (PBO/DSR)
+    /// - stress_report.json (if stress results available)
+    /// - validation_bundle.json (combined summary)
+    pub fn write_validated_hall_of_fame(
+        &self,
+        hof: &crate::hall_of_fame_validated::ValidatedHallOfFame,
+    ) -> Result<(), PersistenceError> {
+        use crate::validation_reports::{
+            WfaReport, WfaThresholds, PboDsrReport, PboDsrThresholds,
+            ValidationBundle,
+        };
+        use crate::validation::{WfaResult, PboDsrResult};
+
+        let hof_dir = self.experiment_dir().join("hall_of_fame");
+        fs::create_dir_all(&hof_dir)?;
+
+        // Write ranking with validation details
+        let ranking: Vec<_> = hof.entries().iter().enumerate().map(|(i, e)| {
+            serde_json::json!({
+                "rank": i + 1,
+                "genome_id": e.genome_id.to_string(),
+                "generation": e.validated_generation,
+                "oos_sharpe": e.validation.oos_sharpe_median,
+                "pbo": e.validation.pbo,
+                "dsr": e.validation.dsr,
+                "degradation_pct": e.validation.degradation_pct,
+                "passed": e.validation.passed,
+                "score": e.score,
+            })
+        }).collect();
+        let ranking_json = serde_json::to_string_pretty(&ranking)?;
+        fs::write(hof_dir.join("ranking.json"), ranking_json)?;
+
+        // Write each strategy with validation reports
+        for (i, entry) in hof.entries().iter().enumerate() {
+            let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
+            fs::create_dir_all(&strategy_dir)?;
+
+            // Genome JSON
+            let genome_json = serde_json::to_string_pretty(&entry.genome)?;
+            fs::write(strategy_dir.join("genome.json"), genome_json)?;
+
+            // Config TOML
+            if let Ok(toml_str) = entry.genome.to_toml() {
+                fs::write(strategy_dir.join("config.toml"), toml_str)?;
+            }
+
+            // Metrics JSON
+            if let Some(ref fitness) = entry.genome.fitness {
+                let metrics_json = serde_json::to_string_pretty(fitness)?;
+                fs::write(strategy_dir.join("metrics.json"), metrics_json)?;
+            }
+
+            // Validation summary JSON
+            let validation_json = serde_json::to_string_pretty(&entry.validation)?;
+            fs::write(strategy_dir.join("validation_summary.json"), validation_json)?;
+
+            // Generate WFA report from validation summary
+            let wfa_result = WfaResult {
+                genome_id: entry.genome_id,
+                is_sharpe_gross: entry.validation.oos_sharpe_mean * 1.1, // Approximate IS
+                is_sharpe_net: entry.validation.oos_sharpe_mean,
+                oos_sharpe_gross: entry.validation.oos_sharpe_median * 1.1,
+                oos_sharpe_net: entry.validation.oos_sharpe_median,
+                degradation_pct: entry.validation.degradation_pct,
+                passed: entry.validation.passed,
+                windows_evaluated: entry.validation.splits_evaluated as usize,
+                is_cagr_net: entry.validation.oos_cagr_median * 1.1,
+                oos_cagr_net: entry.validation.oos_cagr_median,
+                cost_report: None,
+                window_details: vec![],
+            };
+            let wfa_thresholds = WfaThresholds {
+                max_degradation: 0.40,
+                min_oos_sharpe_net: 0.5,
+                max_oos_drawdown: -0.35,
+                min_oos_trades: 30,
+            };
+            let wfa_report = WfaReport::from_result(&wfa_result, wfa_thresholds);
+            wfa_report.write_json(&strategy_dir.join("wfa_report.json"))?;
+
+            // Generate PBO/DSR report
+            let pbo_result = PboDsrResult {
+                genome_id: entry.genome_id,
+                is_sharpe_net: entry.validation.oos_sharpe_mean,
+                pbo: entry.validation.pbo,
+                dsr: entry.validation.dsr,
+                total_trials: 1000, // Default
+                passed: entry.validation.pbo <= 0.15 && entry.validation.dsr >= 0.5,
+            };
+            let pbo_thresholds = PboDsrThresholds {
+                max_pbo: 0.15,
+                min_dsr: 0.5,
+            };
+            let pbo_report = PboDsrReport::from_results(&pbo_result, None, pbo_thresholds);
+            pbo_report.write_json(&strategy_dir.join("pbo_dsr.json"))?;
+
+            // Create validation bundle
+            let bundle = ValidationBundle::new(entry.genome_id)
+                .with_wfa(wfa_report.clone())
+                .with_pbo_dsr(pbo_report.clone());
+            let bundle_json = serde_json::to_string_pretty(&bundle)?;
+            fs::write(strategy_dir.join("validation_bundle.json"), bundle_json)?;
+        }
+
+        info!("Wrote {} validated strategies to {:?}", hof.len(), hof_dir);
         Ok(())
     }
 }

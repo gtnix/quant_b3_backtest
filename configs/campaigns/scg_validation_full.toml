@@ -1,0 +1,50 @@
+# Validação Completa - Campanha de Produção
+# Tempo estimado: 15-25 minutos
+# Uso: combiner factory run --campaign configs/campaigns/scg_validation_full.toml
+
+[campaign]
+name = "scg_validation_full"
+tag = "production"
+owner = "quant_team"
+notes = "Validacao completa com dados IBOV reais - 3 seeds para robustez"
+
+[dataset]
+market = "BR"
+start_date = "2021-01-01"
+end_date = "2024-12-01"
+universe = "ibov"
+market_data_path = "data/market_data_ibov.csv"
+
+[evolution]
+population_size = 80
+max_generations = 40
+convergence_generations = 8
+
+[execution]
+config_path = "configs/execution_institutional.toml"
+delay_bars = 1
+
+[seeds]
+count = 3
+base_seed = 2025
+
+[budget]
+max_runs = 3
+top_k = 15
+timeout_per_run_secs = 600
+stress_enabled = true
+
+[promotion]
+min_oos_sharpe_net = 0.5
+max_pbo = 0.20
+min_stress_passed = 2
+gates_required = true
+
+[data_integrity]
+mode = "strict"
+max_gap_days = 5
+jump_threshold_pct = 25.0
+price_adjustment = "adjusted"
+universe_type = "static"
+enabled = true
+

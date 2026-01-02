@@ -8,14 +8,14 @@
 //! 5. VolatilityRegression - vs baseline multiplier
 //! 6. LatencyCheck - execution time
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::time::Duration;
 
 use super::config::{RegressionConfig, ThresholdEvaluator};
-use super::statistics::{calculate_baseline, calculate_percentile};
-use super::types::{BaselineStats, CheckCategory, CheckResult, Evidence, Severity};
+use super::statistics::calculate_percentile;
+use super::types::{CheckCategory, CheckResult, Evidence, Severity};
 
 /// Context for regression checks.
 #[derive(Debug, Clone, Default)]
@@ -86,7 +86,7 @@ impl RegressionCheck for DrawdownGuardrail {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Drawdown: {:.1}% (WARN: {}%, CRIT: {}%, HALT: {}%)",
             dd, warn, crit, halt
@@ -136,7 +136,7 @@ impl RegressionCheck for TurnoverBudget {
 
         let severity = ThresholdEvaluator::dynamic_threshold_severity(turnover, p95, hard_cap);
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Turnover: {:.1}% (p95: {:.1}%, hard cap: {}%)",
             turnover, p95, hard_cap
@@ -185,7 +185,7 @@ impl RegressionCheck for CostBudget {
 
         let severity = ThresholdEvaluator::dynamic_threshold_severity(cost, p95, hard_cap);
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Cost: {:.3}% AUM (p95: {:.3}%, hard cap: {}%)",
             cost, p95, hard_cap
@@ -241,7 +241,7 @@ impl RegressionCheck for SharpeRegression {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Sharpe: {:.2} (min: {}, p10: {:.2})",
             sharpe, min_sharpe, p10
@@ -296,7 +296,7 @@ impl RegressionCheck for VolatilityRegression {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Volatility: {:.1}% ({:.1}x baseline {:.1}%) - WARN: >{}x, CRIT: >{}x",
             vol, multiplier, baseline,
@@ -346,7 +346,7 @@ impl RegressionCheck for LatencyCheck {
             Severity::Info
         };
 
-        let passed = severity == Severity::Info;
+        let _passed = severity == Severity::Info;
         let msg = format!(
             "Latency: {}s (WARN: >{}s, CRIT: >{}s)",
             latency_secs, warn, crit

@@ -17,6 +17,7 @@ combiner_engine = { path = "../combiner_engine" }
 combiner_runner = { path = "../combiner_runner" }
 backtester_execution = { path = "../backtester_execution" }
 backtester_intelligence = { path = "../backtester_intelligence" }
+backtester_validation = { path = "../backtester_validation" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -47,3 +48,4 @@ hex = "0.4"
 uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
+tempfile = "3.10"

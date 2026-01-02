@@ -16,6 +16,7 @@ import {
 import { useOmpStore } from '../stores/ompStore';
 import type { OmpStatus, CurrentCampaign, QueuedCampaign, ActivityLogEntry } from '../stores/ompStore';
 import { Sparkline } from '../components/charts/Sparkline';
+import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 // =============================================================================
 // STATUS INDICATOR
@@ -52,7 +53,12 @@ function StatusIndicator({ status, sseConnected }: { status: OmpStatus; sseConne
 // LIVE COUNTER - Animated incrementing number
 // =============================================================================
 
-function LiveCounter({ value, label, format = 'number' }: { value: number; label: string; format?: 'number' | 'decimal' | 'time' }) {
+function LiveCounter({ value, label, format = 'number', tooltipKey }: { 
+  value: number; 
+  label: string; 
+  format?: 'number' | 'decimal' | 'time';
+  tooltipKey?: string;
+}) {
   const prevValueRef = useRef(value);
   const [displayValue, setDisplayValue] = useState(() => formatValue(value, format));
   const [isUpdating, setIsUpdating] = useState(false);
@@ -85,7 +91,10 @@ function LiveCounter({ value, label, format = 'number' }: { value: number; label
       >
         {displayValue}
       </div>
-      <div className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</div>
+      <div className="text-[10px] text-slate-500 uppercase tracking-wider flex items-center justify-center gap-0.5">
+        {label}
+        {tooltipKey && <QuickTooltip termKey={tooltipKey as any} size="sm" />}
+      </div>
     </div>
   );
 }
@@ -150,12 +159,25 @@ function CircularGauge({ value, max = 100, label, unit = '%', size = 60, warning
 function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxHeight?: number }) {
   const logRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const lastUserScrollRef = useRef<number>(0);
   
   useEffect(() => {
     if (autoScroll && logRef.current) {
       logRef.current.scrollTop = 0;
     }
   }, [logs, autoScroll]);
+  
+  // Re-enable auto-scroll after 30 seconds of inactivity
+  useEffect(() => {
+    if (!autoScroll) {
+      const timer = setInterval(() => {
+        if (Date.now() - lastUserScrollRef.current > 30000) {
+          setAutoScroll(true);
+        }
+      }, 5000);
+      return () => clearInterval(timer);
+    }
+  }, [autoScroll]);
   
   const levelColors: Record<string, string> = {
     info: 'text-blue-400',
@@ -181,8 +203,12 @@ function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxH
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-600">{logs.length} entries</span>
           <button
-            onClick={() => setAutoScroll(!autoScroll)}
+            onClick={() => {
+              setAutoScroll(!autoScroll);
+              lastUserScrollRef.current = Date.now();
+            }}
             className={`text-xs px-2 py-0.5 rounded ${autoScroll ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}
+            title={autoScroll ? 'Click to pause auto-scroll' : 'Click to resume (or wait 30s)'}
           >
             {autoScroll ? 'AUTO' : 'PAUSED'}
           </button>
@@ -194,7 +220,10 @@ function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxH
         style={{ maxHeight }}
         onScroll={(e) => {
           const target = e.target as HTMLDivElement;
-          if (target.scrollTop > 10) setAutoScroll(false);
+          if (target.scrollTop > 10) {
+            setAutoScroll(false);
+            lastUserScrollRef.current = Date.now();
+          }
         }}
       >
         {logs.length === 0 ? (
@@ -626,27 +655,27 @@ export function MinerControl() {
         {/* Top Stats Bar */}
         <div className="grid grid-cols-6 gap-3 mb-4 animate-fade-in">
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
-            <LiveCounter value={loopCount} label="LOOPS" />
+            <LiveCounter value={loopCount} label="LOOPS" tooltipKey="loops" />
             <RefreshCw className={`w-5 h-5 text-slate-600 ${isRunning ? 'animate-spin' : ''}`} />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
-            <LiveCounter value={uptimeSeconds} label="UPTIME" format="time" />
+            <LiveCounter value={uptimeSeconds} label="UPTIME" format="time" tooltipKey="uptime" />
             <Clock className="w-5 h-5 text-slate-600" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-blue-500/50">
-            <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATES 24H" />
+            <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATES 24H" tooltipKey="candidates_24h" />
             <BarChart2 className="w-5 h-5 text-blue-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-amber-500/50">
-            <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOTIONS 24H" />
+            <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOTIONS 24H" tooltipKey="promotions_24h" />
             <Trophy className="w-5 h-5 text-amber-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-emerald-500/50">
-            <LiveCounter value={stats?.promotions.total || 0} label="HALL OF FAME" />
+            <LiveCounter value={stats?.promotions.total || 0} label="HALL OF FAME" tooltipKey="hall_of_fame_count" />
             <Trophy className="w-5 h-5 text-emerald-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-violet-500/50">
-            <LiveCounter value={stats?.throughput.candidatesPerMin || 0} label="THROUGHPUT/MIN" format="decimal" />
+            <LiveCounter value={stats?.throughput.candidatesPerMin || 0} label="THROUGHPUT/MIN" format="decimal" tooltipKey="throughput_min" />
             <TrendingUp className="w-5 h-5 text-violet-500" />
           </div>
         </div>

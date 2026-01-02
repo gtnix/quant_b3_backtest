@@ -67,6 +67,8 @@ pub struct RunnerConfig {
     pub initial_capital: Decimal,
     /// Path to dividend CSV file (optional, for testing)
     pub dividend_csv_path: Option<String>,
+    /// Path to market data CSV file (optional, for backtesting)
+    pub market_data_csv_path: Option<String>,
 }
 
 impl Default for RunnerConfig {
@@ -81,6 +83,7 @@ impl Default for RunnerConfig {
             enable_dividends: true,
             initial_capital: Decimal::from(1_000_000),
             dividend_csv_path: None,
+            market_data_csv_path: None,
         }
     }
 }
@@ -92,6 +95,8 @@ pub struct ExperimentRunner {
     strict_mode: bool,
     dry_run: bool,
     execution_mode: ExecutionMode,
+    /// Market data for simulation (optional).
+    market_data: Option<super::market_data::MarketDataProvider>,
 }
 
 impl ExperimentRunner {
@@ -103,18 +108,42 @@ impl ExperimentRunner {
             strict_mode: false,
             dry_run: false,
             execution_mode: ExecutionMode::Auto,
+            market_data: None,
         }
+    }
+    
+    /// Set market data for simulation.
+    pub fn with_market_data(mut self, data: super::market_data::MarketDataProvider) -> Self {
+        self.market_data = Some(data);
+        self
+    }
+    
+    /// Load market data from CSV file.
+    pub fn load_market_data_csv(&mut self, path: &std::path::Path) -> Result<(), RunnerError> {
+        let data = super::market_data::MarketDataProvider::from_csv(path)
+            .map_err(|e| RunnerError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        self.market_data = Some(data);
+        Ok(())
+    }
+    
+    /// Check if market data is loaded.
+    pub fn has_market_data(&self) -> bool {
+        self.market_data.is_some()
     }
 
     /// Create runner with custom configuration.
     pub fn with_config(config: RunnerConfig) -> Self {
         let execution_mode = config.execution_mode;
+        let market_data = config.market_data_csv_path.as_ref().and_then(|path| {
+            super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
+        });
         Self {
             registry: BlockRegistry::with_builtins(),
             config,
             strict_mode: false,
             dry_run: false,
             execution_mode,
+            market_data,
         }
     }
 
@@ -472,12 +501,12 @@ impl ExperimentRunner {
             );
         }
 
-        // Generate timeseries from context (simplified for now)
-        let timeseries = self.generate_timeseries(&compositor_result);
+        // Generate timeseries and trades from context
+        let (timeseries, trades) = self.generate_timeseries_and_trades(&compositor_result);
 
-        // Calculate metrics
+        // Calculate metrics using real trades
         let metrics =
-            MetricsCalculator::compute(&timeseries, &[], self.config.risk_free_rate);
+            MetricsCalculator::compute(&timeseries, &trades, self.config.risk_free_rate);
 
         let duration = start_time.elapsed();
 
@@ -509,7 +538,7 @@ impl ExperimentRunner {
             metrics,
             timeseries,
             trace,
-            Vec::new(), // trades would come from actual execution
+            trades,
         ))
     }
 
@@ -612,12 +641,18 @@ impl ExperimentRunner {
     }
 
     /// Create initial context for strategy execution.
+    /// 
+    /// Uses real market data when available, otherwise falls back to placeholder.
     fn create_initial_context(
         &self,
         _config: &StrategyConfig,
     ) -> Result<StrategyContext, RunnerError> {
-        // For now, create a mock context
-        // In production, this would load actual market data
+        // Use real market data if available
+        if let Some(ref market_data) = self.market_data {
+            return self.create_context_from_market_data(market_data);
+        }
+        
+        // Fallback to placeholder (for backwards compatibility)
         let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let cash = Decimal::from(100_000);
 
@@ -627,7 +662,7 @@ impl ExperimentRunner {
             cash,
         );
 
-        // Add some mock candidates
+        // Candidatos de placeholder
         let symbols = vec!["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3"];
         let candidates: Vec<StrategyCandidate> = symbols
             .iter()
@@ -645,6 +680,97 @@ impl ExperimentRunner {
         ctx = ctx.with_candidates(candidates);
         ctx.universe = symbols.iter().map(|s| s.to_string()).collect();
 
+        Ok(ctx)
+    }
+    
+    /// Create context from real market data.
+    fn create_context_from_market_data(
+        &self,
+        market_data: &super::market_data::MarketDataProvider,
+    ) -> Result<StrategyContext, RunnerError> {
+        let (start_date, _end_date) = market_data.date_range()
+            .ok_or_else(|| RunnerError::InvalidPath("Market data has no date range".to_string()))?;
+        
+        let cash = self.config.initial_capital;
+        
+        let mut ctx = StrategyContext::new(
+            start_date,
+            backtester_intelligence::filters::Market::BR,
+            cash,
+        );
+        
+        // Build candidates from market data
+        let mut candidates: Vec<StrategyCandidate> = Vec::new();
+        
+        for symbol in market_data.symbols() {
+            if let Some(bars) = market_data.bars_for_symbol(symbol) {
+                if bars.is_empty() {
+                    continue;
+                }
+                
+                let mut candidate = StrategyCandidate::new(symbol, backtester_intelligence::filters::Market::BR);
+                
+                // Set current price (last bar)
+                if let Some(last_bar) = bars.last() {
+                    candidate.price = Some(last_bar.close);
+                }
+                
+                // Calculate momentum return (using all available prices)
+                if bars.len() >= 2 {
+                    let first_price = bars.first().map(|b| b.close).unwrap_or(Decimal::ONE);
+                    let last_price = bars.last().map(|b| b.close).unwrap_or(Decimal::ONE);
+                    if !first_price.is_zero() {
+                        let ret = ((last_price - first_price) / first_price)
+                            .to_f64()
+                            .unwrap_or(0.0);
+                        candidate.momentum_return = Some(ret);
+                    }
+                }
+                
+                // Calculate volatility from returns
+                if bars.len() >= 10 {
+                    let returns: Vec<f64> = bars.windows(2)
+                        .filter_map(|w| {
+                            let prev = w[0].close;
+                            let curr = w[1].close;
+                            if !prev.is_zero() {
+                                Some(((curr - prev) / prev).to_f64().unwrap_or(0.0))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    
+                    if !returns.is_empty() {
+                        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+                        let variance = returns.iter()
+                            .map(|r| (r - mean).powi(2))
+                            .sum::<f64>() / returns.len() as f64;
+                        let daily_vol = variance.sqrt();
+                        let annual_vol = daily_vol * 252.0_f64.sqrt();
+                        candidate.volatility = Some(annual_vol);
+                    }
+                }
+                
+                // Store price history
+                candidate.prices = bars.iter()
+                    .filter_map(|b| b.close.to_f64())
+                    .collect();
+                
+                candidates.push(candidate);
+            }
+        }
+        
+        let symbols: Vec<String> = candidates.iter().map(|c| c.symbol.clone()).collect();
+        ctx = ctx.with_candidates(candidates);
+        ctx.universe = symbols;
+        
+        tracing::info!(
+            "Created context from market data: {} symbols, start_date={}",
+            ctx.candidates.len(),
+            start_date
+        );
+        
         Ok(ctx)
     }
 
@@ -806,18 +932,158 @@ impl ExperimentRunner {
         }
     }
 
-    /// Generate timeseries from execution result.
+    /// Generate timeseries and trades from execution result.
     ///
-    /// Uses UnifiedEngine for real simulation when market data is available.
+    /// Uses real market data simulation when available.
     /// Falls back to placeholder curve when no market data is loaded.
-    fn generate_timeseries(
+    fn generate_timeseries_and_trades(
+        &self,
+        result: &crate::compositor::CompositorResult,
+    ) -> (Vec<EquityPoint>, Vec<TradeRecord>) {
+        // Check if we have real market data
+        if let Some(ref market_data) = self.market_data {
+            return self.simulate_with_real_data(result, market_data);
+        }
+        
+        // Fallback to placeholder (for backwards compatibility)
+        let timeseries = self.generate_placeholder_timeseries(result);
+        (timeseries, Vec::new())
+    }
+    
+    /// Simulate strategy with real market data.
+    fn simulate_with_real_data(
+        &self,
+        result: &crate::compositor::CompositorResult,
+        market_data: &super::market_data::MarketDataProvider,
+    ) -> (Vec<EquityPoint>, Vec<TradeRecord>) {
+        let mut equity = self.config.initial_capital;
+        let mut peak_equity = equity;
+        let mut timeseries = Vec::new();
+        let mut trades = Vec::new();
+        
+        // Target weights from compositor
+        let target_weights: HashMap<String, f64> = result.weights.clone();
+        
+        // Current positions: symbol -> (shares, avg_price)
+        let mut positions: HashMap<String, (i64, Decimal)> = HashMap::new();
+        
+        for date in market_data.trading_dates() {
+            let bars = match market_data.bars_for_date(*date) {
+                Some(b) => b,
+                None => continue,
+            };
+            
+            // Calculate current portfolio value
+            let mut portfolio_value = equity;
+            for (symbol, (shares, _)) in &positions {
+                if let Some(bar) = bars.get(symbol) {
+                    portfolio_value += Decimal::from(*shares) * bar.close;
+                }
+            }
+            
+            // Rebalance to target weights
+            let total_value = portfolio_value;
+            for (symbol, target_weight) in &target_weights {
+                if let Some(bar) = bars.get(symbol) {
+                    let target_value = total_value * Decimal::try_from(*target_weight).unwrap_or(Decimal::ZERO);
+                    let target_shares = (target_value / bar.close).to_i64().unwrap_or(0);
+                    
+                    let current_shares = positions.get(symbol).map(|(s, _)| *s).unwrap_or(0);
+                    let delta = target_shares - current_shares;
+                    
+                    if delta != 0 {
+                        let (side, quantity) = if delta > 0 {
+                            (TradeSide::Buy, delta)
+                        } else {
+                            (TradeSide::Sell, -delta)
+                        };
+                        
+                        let trade_value = Decimal::from(quantity.abs()) * bar.close;
+                        
+                        trades.push(TradeRecord {
+                            date: *date,
+                            symbol: symbol.clone(),
+                            side,
+                            quantity: quantity.abs(),
+                            price: bar.close,
+                            value: trade_value,
+                            pnl: None,
+                        });
+                        
+                        // Update position and cash
+                        if delta > 0 {
+                            // Buying: subtract cash
+                            equity -= trade_value;
+                            
+                            let (old_shares, old_avg) = positions.get(symbol).cloned().unwrap_or((0, Decimal::ZERO));
+                            let new_shares = old_shares + delta;
+                            let new_avg = if new_shares > 0 {
+                                (Decimal::from(old_shares) * old_avg + trade_value) / Decimal::from(new_shares)
+                            } else {
+                                Decimal::ZERO
+                            };
+                            positions.insert(symbol.clone(), (new_shares, new_avg));
+                        } else {
+                            // Selling: add cash
+                            equity += trade_value;
+                            
+                            let (old_shares, avg_price) = positions.get(symbol).cloned().unwrap_or((0, Decimal::ZERO));
+                            let new_shares = old_shares + delta; // delta is negative
+                            if new_shares <= 0 {
+                                positions.remove(symbol);
+                            } else {
+                                positions.insert(symbol.clone(), (new_shares, avg_price));
+                            }
+                        }
+                        
+                        // Apply trading costs
+                        let cost = trade_value * Decimal::try_from(self.config.costs.trading_fee_pct / 100.0).unwrap_or(Decimal::ZERO);
+                        equity -= cost;
+                    }
+                }
+            }
+            
+            // Recalculate equity at end of day
+            let mut eod_equity = equity;
+            for (symbol, (shares, _)) in &positions {
+                if let Some(bar) = bars.get(symbol) {
+                    eod_equity += Decimal::from(*shares) * bar.close;
+                }
+            }
+            
+            peak_equity = peak_equity.max(eod_equity);
+            let drawdown = if peak_equity.is_zero() {
+                0.0
+            } else {
+                ((eod_equity - peak_equity) / peak_equity).to_f64().unwrap_or(0.0)
+            };
+            
+            let exposure = if total_value.is_zero() {
+                0.0
+            } else {
+                ((total_value - equity) / total_value).to_f64().unwrap_or(0.0)
+            };
+            
+            timeseries.push(EquityPoint {
+                date: *date,
+                equity: eod_equity,
+                drawdown,
+                exposure,
+                vol_exante: None,
+                vol_expost: None,
+                dividend_cashflow: None,
+                dividend_cumulative: None,
+            });
+        }
+        
+        (timeseries, trades)
+    }
+    
+    /// Generate placeholder timeseries (fallback when no market data).
+    fn generate_placeholder_timeseries(
         &self,
         result: &crate::compositor::CompositorResult,
     ) -> Vec<EquityPoint> {
-        // Check if we have real market data
-        // For now, generate placeholder since market data loading is external
-        // The run_unified_simulation is ready for integration when market data is available
-        
         let start = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let num_points = 252; // 1 year of trading days
 
@@ -857,7 +1123,7 @@ impl ExperimentRunner {
     /// - Weight sum validation
     /// - Empty results
     fn validate_strict(&self, result: &ExperimentResult) -> Result<(), RunnerError> {
-        use super::metrics::WEIGHT_SUM_TOLERANCE;
+        
         
         // ====================================================================
         // Check metrics for NaN/Inf
@@ -1042,6 +1308,7 @@ impl ExperimentRunner {
                 enable_dividends: self.config.enable_dividends,
                 initial_capital: self.config.initial_capital,
                 dividend_csv_path: self.config.dividend_csv_path.clone(),
+                market_data_csv_path: self.config.market_data_csv_path.clone(),
             };
 
             let stressed_runner = ExperimentRunner::with_config(stressed_runner_config);

@@ -100,8 +100,10 @@ pub fn execute(
     let output_path = Path::new(output_dir);
     fs::create_dir_all(output_path)?;
 
-    // Create executor
-    let executor = CliExecutor::new()
+    // Create executor with validation (fail-fast if backtester not found)
+    let executor = CliExecutor::try_new()
+        .map_err(|e| anyhow::anyhow!("Failed to initialize backtester: {}. \
+            Build with `cargo build --release --bin backtest` or set BACKTEST_CLI_PATH.", e))?
         .with_output_dir(output_path.join("backtests"));
 
     // Track start time

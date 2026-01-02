@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bell, RefreshCw, Clock, Wifi, WifiOff } from 'lucide-react';
-import { AlertsPanel } from '../AlertsPanel';
+import { RefreshCw, Clock, Wifi, WifiOff } from 'lucide-react';
 import { useDataStore } from '../../stores/dataStore';
 
 interface HeaderProps {
@@ -10,7 +9,6 @@ interface HeaderProps {
 export function Header({ sseConnected = false }: HeaderProps) {
   const [time, setTime] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showAlerts, setShowAlerts] = useState(false);
   
   const { loadIndex, selectedRunId, listCandidates } = useDataStore();
 
@@ -33,51 +31,36 @@ export function Header({ sseConnected = false }: HeaderProps) {
   };
 
   return (
-    <>
-      <header className="h-16 bg-terminal-surface border-b border-terminal-border flex items-center justify-between px-6">
-        {/* Left side - SSE Connection Status */}
-        <div className="flex items-center gap-6">
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-            sseConnected ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'
-          }`}>
-            {sseConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-            <span>{sseConnected ? 'Connected' : 'Offline'}</span>
-          </div>
+    <header className="h-16 bg-terminal-surface border-b border-terminal-border flex items-center justify-between px-6">
+      {/* Left side - SSE Connection Status */}
+      <div className="flex items-center gap-6">
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+          sseConnected ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'
+        }`}>
+          {sseConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+          <span>{sseConnected ? 'Connected' : 'Offline'}</span>
+        </div>
+      </div>
+
+      {/* Right side - Actions */}
+      <div className="flex items-center gap-4">
+        {/* Clock */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-terminal-bg border border-terminal-border">
+          <Clock className="w-4 h-4 text-terminal-muted" />
+          <span className="font-mono text-sm">
+            {time.toLocaleTimeString('en-US', { hour12: false })}
+          </span>
         </div>
 
-        {/* Right side - Actions */}
-        <div className="flex items-center gap-4">
-          {/* Clock */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-terminal-bg border border-terminal-border">
-            <Clock className="w-4 h-4 text-terminal-muted" />
-            <span className="font-mono text-sm">
-              {time.toLocaleTimeString('en-US', { hour12: false })}
-            </span>
-          </div>
-
-          {/* Refresh */}
-          <button
-            onClick={handleRefresh}
-            className="p-2 rounded hover:bg-terminal-border/50 transition-colors"
-            title="Refresh data"
-          >
-            <RefreshCw className={`w-5 h-5 text-terminal-muted ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
-
-          {/* Notifications */}
-          <button 
-            onClick={() => setShowAlerts(true)}
-            className="relative p-2 rounded hover:bg-terminal-border/50 transition-colors"
-            title="Alerts"
-          >
-            <Bell className="w-5 h-5 text-terminal-muted" />
-            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-loss animate-pulse" />
-          </button>
-        </div>
-      </header>
-
-      {/* Alerts Panel */}
-      <AlertsPanel isOpen={showAlerts} onClose={() => setShowAlerts(false)} />
-    </>
+        {/* Refresh */}
+        <button
+          onClick={handleRefresh}
+          className="p-2 rounded hover:bg-terminal-border/50 transition-colors"
+          title="Refresh data"
+        >
+          <RefreshCw className={`w-5 h-5 text-terminal-muted ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+    </header>
   );
 }

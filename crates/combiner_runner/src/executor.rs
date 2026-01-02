@@ -102,6 +102,11 @@ impl BacktestOutput {
     /// This should NEVER be used in production code paths.
     /// It exists only for unit tests and development.
     /// Production code should always return real backtest results or errors.
+    /// 
+    /// # Availability
+    /// This function is ONLY available in test builds (`#[cfg(test)]`).
+    /// Attempting to use it in production will result in a compile error.
+    #[cfg(any(test, feature = "test-utils"))]
     #[doc(hidden)]
     pub fn mock() -> Self {
         Self {
@@ -175,13 +180,21 @@ impl BacktestExecutor for LibraryExecutor {
 }
 
 /// CLI-based executor using backtester_cli.
+#[derive(Debug)]
 pub struct CliExecutor {
     cli_path: PathBuf,
     output_dir: PathBuf,
     timeout: Duration,
+    /// Path to market data CSV file for real backtesting
+    market_data_path: Option<PathBuf>,
 }
 
 impl CliExecutor {
+    /// Create a new CLI executor without validation.
+    /// 
+    /// # Warning
+    /// This does NOT validate that the backtester binary exists.
+    /// Prefer using `try_new()` or `validated()` for production code.
     pub fn new() -> Self {
         let cli_path = std::env::var("BACKTEST_CLI_PATH")
             .map(PathBuf::from)
@@ -193,7 +206,35 @@ impl CliExecutor {
             cli_path,
             output_dir: PathBuf::from("output/scg/backtests"),
             timeout: Duration::from_secs(60),
+            market_data_path: None,
         }
+    }
+    
+    /// Create a new CLI executor with validation (fail-fast).
+    /// 
+    /// This constructor validates that the backtester binary exists and is executable
+    /// BEFORE returning. This prevents silent failures during evolution.
+    /// 
+    /// # Errors
+    /// Returns `ExecutionError::BacktesterNotFound` if the binary doesn't exist.
+    pub fn try_new() -> Result<Self, ExecutionError> {
+        let executor = Self::new();
+        executor.validate()?;
+        Ok(executor)
+    }
+    
+    /// Create a new validated CLI executor (panics if validation fails).
+    /// 
+    /// Use this for scripts and CLI applications where failure is fatal.
+    /// For library code, prefer `try_new()`.
+    /// 
+    /// # Panics
+    /// Panics if the backtester binary doesn't exist or is not executable.
+    pub fn validated() -> Self {
+        Self::try_new().expect(
+            "Backtester binary not found. Build with `cargo build --release --bin backtest` \
+             or set BACKTEST_CLI_PATH environment variable."
+        )
     }
 
     pub fn with_cli_path(mut self, path: &str) -> Self {
@@ -212,9 +253,28 @@ impl CliExecutor {
         self
     }
     
+    /// Set the market data CSV path for real backtesting.
+    /// When set, the executor will pass `--market-data <path>` to the CLI.
+    pub fn with_market_data(mut self, path: impl Into<PathBuf>) -> Self {
+        self.market_data_path = Some(path.into());
+        info!("Market data path set to: {:?}", self.market_data_path);
+        self
+    }
+    
+    /// Get the market data path if set
+    pub fn market_data_path(&self) -> Option<&PathBuf> {
+        self.market_data_path.as_ref()
+    }
+    
     /// Validate backtester exists and is executable.
     pub fn validate(&self) -> Result<String, ExecutionError> {
         if !self.cli_path.exists() {
+            error!(
+                "CRITICAL: Backtester binary not found at {:?}. \
+                 Build with `cargo build --release --bin backtest` \
+                 or set BACKTEST_CLI_PATH environment variable.",
+                self.cli_path
+            );
             return Err(ExecutionError::BacktesterNotFound(format!(
                 "Backtester not found at {:?}. Set BACKTEST_CLI_PATH correctly.",
                 self.cli_path
@@ -308,15 +368,25 @@ impl BacktestExecutor for CliExecutor {
         let toml_path = self.write_temp_toml(config)?;
         debug!("Wrote temp TOML to {:?}", toml_path);
 
+        // Build CLI arguments
+        let mut args = vec![
+            "run".to_string(),
+            "--config".to_string(),
+            toml_path.to_str().unwrap().to_string(),
+            "--output".to_string(),
+            self.output_dir.to_str().unwrap().to_string(),
+        ];
+        
+        // Add market data path if configured
+        if let Some(ref market_data) = self.market_data_path {
+            args.push("--market-data".to_string());
+            args.push(market_data.to_str().unwrap().to_string());
+            debug!("Using market data from: {:?}", market_data);
+        }
+
         // Execute CLI
         let output = Command::new(&self.cli_path)
-            .args([
-                "run",
-                "--config",
-                toml_path.to_str().unwrap(),
-                "--output",
-                self.output_dir.to_str().unwrap(),
-            ])
+            .args(&args)
             .output();
 
         let output = match output {
@@ -704,5 +774,68 @@ Config: output/scg/run_1f7cc580cf86/strategy_001.toml
     fn test_executor_creation() {
         let executor = CliExecutor::new();
         assert_eq!(executor.timeout, Duration::from_secs(60));
+    }
+    
+    // === Regression Tests for Bug Fix (SCG mock executor issue) ===
+    
+    #[test]
+    fn test_try_new_fails_with_missing_binary() {
+        // Save current path and set to non-existent path
+        std::env::set_var("BACKTEST_CLI_PATH", "/nonexistent/path/backtest");
+        
+        let result = CliExecutor::try_new();
+        
+        // Restore default
+        std::env::remove_var("BACKTEST_CLI_PATH");
+        
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ExecutionError::BacktesterNotFound(_)));
+    }
+    
+    #[test]
+    fn test_validate_fails_with_missing_binary() {
+        let executor = CliExecutor::new().with_cli_path("/nonexistent/path/backtest");
+        let result = executor.validate();
+        
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ExecutionError::BacktesterNotFound(_)));
+    }
+    
+    #[test]
+    fn test_mock_output_only_available_in_test_builds() {
+        // This test verifies that BacktestOutput::mock() returns mock data
+        // It will only compile in test builds due to #[cfg(any(test, feature = "test-utils"))]
+        let output = BacktestOutput::mock();
+        assert!(output.is_mock());
+        assert_eq!(output.source, EvaluationSource::Mock);
+        // Verify the exact mock values that caused the bug
+        assert!((output.metrics.sharpe_ratio - 0.8).abs() < 1e-10);
+        assert!((output.metrics.cagr - 0.10).abs() < 1e-10);
+    }
+    
+    #[test]
+    fn test_execute_fails_with_missing_binary() {
+        // This test verifies that execute() fails properly when the binary doesn't exist
+        // instead of silently returning mock data (which was the bug)
+        
+        let executor = CliExecutor::new().with_cli_path("/nonexistent/path/backtest");
+        
+        // Create a minimal valid config using genome conversion
+        use combiner_core::{BlockGene, BlockType, StrategyGenome};
+        let genome = StrategyGenome::new(vec![
+            BlockGene::with_defaults(BlockType::Selection, "momentum"),
+            BlockGene::with_defaults(BlockType::Sizing, "equal_weight"),
+        ]);
+        
+        let config = genome.to_strategy_config().expect("Should create valid config");
+        
+        let result = executor.execute(&config);
+        
+        assert!(result.is_err());
+        // Should be BacktesterNotFound, not a mock success
+        let err = result.unwrap_err();
+        assert!(matches!(err, ExecutionError::BacktesterNotFound(_)));
     }
 }

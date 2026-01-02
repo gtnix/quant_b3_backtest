@@ -3,7 +3,7 @@
 //! Runs data health, drift, and regression checks in sequence,
 //! evaluates circuit breaker, and generates report.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{NaiveDate, Utc};
 use std::time::Instant;
 
 use crate::filters::Market;
@@ -118,10 +118,10 @@ impl MonitoringEngine {
         let summary = MonitoringSummary::from_results(&results);
         let no_trade = matches!(action, CircuitAction::FlagNoTrade | CircuitAction::HaltWithError);
 
-        let elapsed = start.elapsed();
+        let _elapsed = start.elapsed();
         
         // Add latency to regression context if needed
-        let mut final_results = results;
+        let final_results = results;
         
         MonitoringReport {
             timestamp: Utc::now(),

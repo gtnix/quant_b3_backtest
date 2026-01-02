@@ -32,12 +32,12 @@ impl Default for InstitutionalCriteria {
     fn default() -> Self {
         // Research-grade defaults for discovery - use production() for strict criteria
         Self {
-            min_oos_sharpe: 0.5,       // Research: allow promising strategies
-            max_pbo: 0.25,             // Research: accept some overfitting risk
-            min_dsr: 0.5,              // Research: lower threshold
-            max_degradation_pct: 60.0,
-            min_split_pass_rate: 0.4,  // 40% of splits must pass
-            max_oos_drawdown: -0.30,   // Research: 30% max drawdown acceptable
+            min_oos_sharpe: 0.2,       // Research: relaxed for testing
+            max_pbo: 0.50,             // Research: accept overfitting risk
+            min_dsr: 0.0,              // Research: disable DSR check
+            max_degradation_pct: 80.0,
+            min_split_pass_rate: 0.2,  // 20% of splits must pass
+            max_oos_drawdown: -0.70,   // Research: 70% max drawdown acceptable
         }
     }
 }

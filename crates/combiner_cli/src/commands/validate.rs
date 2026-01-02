@@ -36,8 +36,10 @@ pub fn execute(experiment_id: &str, top_k: usize, full: bool, stress_enabled: bo
     println!("Stress testing: {}", if stress_enabled { "ENABLED" } else { "disabled" });
     println!();
 
-    // Create validator with execution config
-    let executor = CliExecutor::new();
+    // Create validator with execution config (fail-fast if backtester not found)
+    let executor = CliExecutor::try_new()
+        .map_err(|e| anyhow::anyhow!("Backtester not found: {}. \
+            Build with `cargo build --release --bin backtest` or set BACKTEST_CLI_PATH.", e))?;
     let mut config = ValidationConfig::default();
     config.execution = ExecutionModelConfig::mvp();
     config.stress_testing_enabled = stress_enabled;

@@ -216,7 +216,7 @@ impl ExitEngine {
     }
 
     /// Generate sell orders from exit targets.
-    fn generate_orders(&self, exits: &[ExitTarget], market: Market) -> Vec<Order> {
+    fn generate_orders(&self, exits: &[ExitTarget], _market: Market) -> Vec<Order> {
         exits
             .iter()
             .filter(|e| e.shares_to_sell > 0)
@@ -394,6 +394,9 @@ mod tests {
         assert!(result.exits.iter().all(|e| e.reason == ExitReason::DrawdownGuard));
     }
 }
+
+
+
 
 
 

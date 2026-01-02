@@ -1,30 +1,30 @@
 //! Evolution engine - Main evolution loop.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use thiserror::Error;
-use tracing::{info, warn, debug};
+use tracing::{info, debug, warn};
 
 use combiner_core::{
-    FitnessConfig, GenomeValidator, MultiObjectiveFitness, ParamRanges, StrategyGenome,
+    FitnessConfig, GenomeValidator, MultiObjectiveFitness, ParamRanges,
     PopulationFitnessSoA, repair_genome, RepairConfig, GenomeRepairStats,
 };
 use combiner_runner::{BacktestExecutor, BacktestOutput, ValidationCache};
 
 use crate::config::EvolutionConfig;
 use crate::hall_of_fame::HallOfFame;
-use crate::hall_of_fame_validated::{ValidatedHallOfFame, InstitutionalCriteria};
+use crate::hall_of_fame_validated::ValidatedHallOfFame;
 use crate::operators::{Crossover, Mutation, Selection};
 use crate::pareto::ParetoFrontier;
 use crate::pareto_simd::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
 use crate::population::Population;
 use crate::performance_metrics::{PerformanceMetrics, GenerationSnapshot};
 use crate::evaluation::{
-    StageBParallelValidator, StageBConfig, ValidationResult, ValidationSplitPlan,
+    StageBConfig, ValidationResult, ValidationSplitPlan,
     split_plan::SplitPlanConfig,
 };
 
@@ -143,6 +143,16 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                 self.hall_of_fame.len()
             );
             self.generation_stats.push(stats);
+            
+            // Check for degenerate population (zero diversity)
+            if self.check_diversity_degenerate() {
+                warn!(
+                    "Evolution stopped early at generation {} due to degenerate population. \
+                     Check backtester configuration and executor.",
+                    gen
+                );
+                // Continue but log warning - don't fail silently
+            }
 
             // Check stopping criteria
             if self.should_stop(gen) {
@@ -339,6 +349,48 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         }
     }
 
+    /// Check for degenerate population (zero diversity).
+    /// 
+    /// Returns true if the population has collapsed to identical fitness values,
+    /// which indicates a bug in the evolution process (e.g., mock executor, 
+    /// incorrect fitness calculation, or lack of genetic diversity).
+    fn check_diversity_degenerate(&self) -> bool {
+        const MIN_GENERATIONS_FOR_CHECK: usize = 5;
+        const DIVERSITY_EPSILON: f64 = 1e-6;
+        
+        if self.generation_stats.len() < MIN_GENERATIONS_FOR_CHECK {
+            return false;
+        }
+        
+        // Check last N generations for diversity collapse
+        let recent_stats: Vec<_> = self.generation_stats
+            .iter()
+            .rev()
+            .take(MIN_GENERATIONS_FOR_CHECK)
+            .collect();
+        
+        let all_degenerate = recent_stats.iter().all(|s| {
+            // Diversity collapse: mean_sharpe ≈ best_sharpe
+            let diversity = (s.best_sharpe - s.mean_sharpe).abs();
+            diversity < DIVERSITY_EPSILON
+        });
+        
+        if all_degenerate {
+            let last = recent_stats.first().unwrap();
+            warn!(
+                "CRITICAL: Population diversity collapsed for {} consecutive generations. \
+                 best_sharpe={:.6}, mean_sharpe={:.6}. \
+                 This likely indicates a bug: mock executor, incorrect fitness, or degenerate genomes.",
+                MIN_GENERATIONS_FOR_CHECK,
+                last.best_sharpe,
+                last.mean_sharpe
+            );
+            true
+        } else {
+            false
+        }
+    }
+    
     /// Check if evolution should stop.
     fn should_stop(&self, generation: u32) -> bool {
         // Max generations
@@ -636,6 +688,18 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                             && pbo <= stage_b_config.max_pbo
                             && degradation_pct <= stage_b_config.max_degradation_pct
                             && oos_max_dd >= stage_b_config.max_oos_drawdown;
+                        
+                        // Debug logging for Stage B validation
+                        if !passes {
+                            debug!(
+                                "Stage B FAIL: oos_sharpe={:.3} (min={:.3}), pbo={:.3} (max={:.3}), \
+                                 degrad={:.1}% (max={:.1}%), dd={:.3} (max={:.3})",
+                                oos_sharpe, stage_b_config.min_oos_sharpe,
+                                pbo, stage_b_config.max_pbo,
+                                degradation_pct, stage_b_config.max_degradation_pct,
+                                oos_max_dd, stage_b_config.max_oos_drawdown
+                            );
+                        }
 
                         let result = ValidationResult {
                             genome_index: 0,

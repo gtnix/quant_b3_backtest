@@ -15,7 +15,7 @@
 use combiner_core::MultiObjectiveFitness;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use std::hash::{BuildHasher, Hasher};
+use std::hash::Hasher;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
