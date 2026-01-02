@@ -52,151 +52,151 @@ interface QuickTooltipProps {
 
 export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
   // ═══════════════════════════════════════════════════════════════════════════
-  // MINER CONTROL METRICS
+  // MÉTRICAS DO MINERADOR
   // ═══════════════════════════════════════════════════════════════════════════
   loops: {
-    term: 'Mining Loops',
-    definition: 'Number of complete mining cycles executed. Each loop checks for resources, starts campaigns if possible, and monitors progress.',
-    interpretation: 'Higher = more mining activity. Loops run every 30 seconds when mining is active.'
+    term: 'Ciclos de Mineração',
+    definition: 'Quantidade de ciclos completos de mineração executados. Cada ciclo verifica recursos disponíveis, inicia campanhas quando possível e monitora o progresso.',
+    interpretation: 'Mais ciclos = mais atividade de mineração. Os ciclos rodam a cada 30 segundos quando a mineração está ativa.'
   },
   uptime: {
-    term: 'Mining Uptime',
-    definition: 'Total time the mining orchestrator has been running since the last start.',
-    interpretation: 'Longer uptime means more continuous mining. Resets when you stop/start mining.'
+    term: 'Tempo de Execução',
+    definition: 'Tempo total que o orquestrador de mineração está rodando desde a última inicialização.',
+    interpretation: 'Maior tempo = mineração mais contínua. Zera quando você para/inicia a mineração.'
   },
   candidates_24h: {
-    term: 'Candidates Generated (24h)',
-    definition: 'Total number of strategy candidates created in the last 24 hours across all campaigns.',
-    benchmark: '1000+ per day is healthy mining activity',
-    interpretation: 'Higher = more strategies evaluated. Quality over quantity though!'
+    term: 'Candidatos Gerados (24h)',
+    definition: 'Total de estratégias candidatas criadas nas últimas 24 horas em todas as campanhas.',
+    benchmark: '1000+ por dia indica atividade saudável',
+    interpretation: 'Mais candidatos = mais estratégias avaliadas. Porém, qualidade importa mais que quantidade!'
   },
   promotions_24h: {
-    term: 'Promotions (24h)',
-    definition: 'Strategies that passed all validation gates and were promoted to Hall of Fame in the last 24 hours.',
-    benchmark: '5-50 promotions per day depending on gate strictness',
-    interpretation: 'Low promotions = strict gates (good for quality). Zero = may need to tune gates or run longer.'
+    term: 'Promoções (24h)',
+    definition: 'Estratégias que passaram em todos os gates de validação e foram promovidas ao Hall da Fama nas últimas 24 horas.',
+    benchmark: '5-50 promoções por dia dependendo da rigidez dos gates',
+    interpretation: 'Poucas promoções = gates rigorosos (bom para qualidade). Zero = pode precisar ajustar gates ou rodar mais tempo.'
   },
   hall_of_fame_count: {
-    term: 'Hall of Fame Size',
-    definition: 'Total number of elite strategies that have passed all institutional validation criteria.',
-    interpretation: 'These are production-ready strategies with high confidence of real-world performance.'
+    term: 'Tamanho do Hall da Fama',
+    definition: 'Total de estratégias de elite que passaram em todos os critérios institucionais de validação.',
+    interpretation: 'São estratégias prontas para produção com alta confiança de performance real.'
   },
   throughput_min: {
-    term: 'Throughput per Minute',
-    definition: 'Number of strategy genomes evaluated per minute. Measures mining speed.',
-    benchmark: '10-100 genomes/min typical depending on hardware',
-    interpretation: 'Higher = faster exploration. Limited by CPU, backtesting complexity, and data size.'
+    term: 'Throughput por Minuto',
+    definition: 'Quantidade de genomas de estratégia avaliados por minuto. Mede a velocidade de mineração.',
+    benchmark: '10-100 genomas/min é típico dependendo do hardware',
+    interpretation: 'Maior = exploração mais rápida. Limitado pela CPU, complexidade do backtest e tamanho dos dados.'
   },
   cpu_usage: {
-    term: 'CPU Usage',
-    definition: 'Percentage of CPU being used by the mining process.',
-    benchmark: '80-100% is normal during active mining',
-    interpretation: 'High CPU = mining is working hard. Low CPU during mining may indicate waiting for I/O.'
+    term: 'Uso de CPU',
+    definition: 'Percentual da CPU sendo utilizado pelo processo de mineração.',
+    benchmark: '80-100% é normal durante mineração ativa',
+    interpretation: 'Alta CPU = mineração trabalhando forte. Baixa CPU durante mineração pode indicar espera por I/O.'
   },
   memory_usage: {
-    term: 'Memory Usage',
-    definition: 'Percentage of system memory being used.',
-    benchmark: '<80% is healthy. >90% may cause issues.',
-    interpretation: 'Memory grows with population size and cached backtests.'
+    term: 'Uso de Memória',
+    definition: 'Percentual da memória do sistema sendo utilizado.',
+    benchmark: '<80% é saudável. >90% pode causar problemas.',
+    interpretation: 'A memória cresce com o tamanho da população e backtests em cache.'
   },
   disk_free: {
-    term: 'Disk Free',
-    definition: 'Available disk space on the mining server.',
-    benchmark: '>5 GB required for safe operation',
-    interpretation: 'Low disk = artifacts may fail to save. Clean old outputs periodically.'
+    term: 'Disco Livre',
+    definition: 'Espaço em disco disponível no servidor de mineração.',
+    benchmark: '>5 GB necessário para operação segura',
+    interpretation: 'Pouco disco = artefatos podem falhar ao salvar. Limpe outputs antigos periodicamente.'
   },
   campaign_queue: {
-    term: 'Campaign Queue',
-    definition: 'Number of campaigns waiting to be executed.',
-    interpretation: 'Queue processes one campaign at a time. Add campaigns to automate overnight mining.'
+    term: 'Fila de Campanhas',
+    definition: 'Número de campanhas aguardando para serem executadas.',
+    interpretation: 'A fila processa uma campanha por vez. Adicione campanhas para automatizar mineração noturna.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // PERFORMANCE METRICS
+  // MÉTRICAS DE PERFORMANCE
   // ═══════════════════════════════════════════════════════════════════════════
   sharpe: {
     term: 'Sharpe Ratio',
-    definition: 'Risk-adjusted return measuring excess return per unit of volatility. Higher means better reward for the risk taken.',
-    formula: '(Return - RiskFreeRate) / Volatility',
-    benchmark: '≥1.0 good, ≥2.0 excellent',
-    interpretation: 'A Sharpe of 1.5 means 1.5% extra return for each 1% of risk.'
+    definition: 'Retorno ajustado ao risco. Mede quanto retorno extra você ganha por cada unidade de volatilidade assumida. Quanto maior, melhor a relação risco-retorno.',
+    formula: '(Retorno - Taxa Livre de Risco) / Volatilidade',
+    benchmark: '≥1.0 é bom, ≥2.0 é excelente',
+    interpretation: 'Sharpe 1.5 significa 1.5% de retorno extra para cada 1% de risco. É a métrica mais usada para comparar estratégias.'
   },
   sharpe_oos: {
-    term: 'Out-of-Sample Sharpe',
-    definition: 'Sharpe Ratio calculated on data the strategy never saw during optimization. The real test of strategy quality.',
-    benchmark: 'Should be close to In-Sample Sharpe. Big drops suggest overfitting.'
+    term: 'Sharpe Out-of-Sample',
+    definition: 'Sharpe Ratio calculado em dados que a estratégia nunca viu durante a otimização. É o teste real de qualidade da estratégia.',
+    benchmark: 'Deve ser próximo ao Sharpe In-Sample. Quedas grandes indicam overfitting.'
   },
   sharpe_net: {
-    term: 'Net Sharpe Ratio',
-    definition: 'Sharpe Ratio after deducting all trading costs (fees, slippage). The actual performance you would achieve.',
-    interpretation: 'Always use NET for trading decisions. GROSS is misleading.'
+    term: 'Sharpe Ratio Líquido',
+    definition: 'Sharpe Ratio após descontar todos os custos de operação (taxas, slippage). É a performance real que você teria.',
+    interpretation: 'Sempre use NET para decisões de trading. GROSS é enganoso pois ignora custos.'
   },
   cagr: {
-    term: 'CAGR (Compound Annual Growth Rate)',
-    definition: 'Annualized return accounting for compounding. How much your investment grows per year on average.',
-    formula: '(EndValue/StartValue)^(1/years) - 1',
-    benchmark: '15%+ is strong for equities',
-    interpretation: '15% CAGR doubles money in ~5 years. 25% in ~3 years.'
+    term: 'CAGR (Taxa de Crescimento Anual Composta)',
+    definition: 'Retorno anualizado considerando juros compostos. Quanto seu investimento cresce por ano em média.',
+    formula: '(ValorFinal/ValorInicial)^(1/anos) - 1',
+    benchmark: '15%+ é forte para renda variável',
+    interpretation: '15% CAGR dobra o dinheiro em ~5 anos. 25% dobra em ~3 anos.'
   },
   max_drawdown: {
-    term: 'Maximum Drawdown (MDD)',
-    definition: 'Largest peak-to-trough decline before recovery. The worst loss you would have experienced.',
-    formula: 'Max((Peak - Trough) / Peak)',
-    benchmark: '<20% conservative, <30% moderate',
-    interpretation: '-25% MDD means at worst you were down 25% from your peak.'
+    term: 'Drawdown Máximo (MDD)',
+    definition: 'Maior queda do pico ao vale antes da recuperação. É a pior perda que você teria experimentado.',
+    formula: 'Max((Pico - Vale) / Pico)',
+    benchmark: '<20% é conservador, <30% é moderado',
+    interpretation: '-25% MDD significa que no pior momento você estava 25% abaixo do seu pico.'
   },
   volatility: {
-    term: 'Volatility (Annualized)',
-    definition: 'Standard deviation of returns annualized. Measures how much returns fluctuate around the mean.',
-    formula: 'StdDev(DailyReturns) × √252',
-    benchmark: '10-20% typical for equity strategies',
-    interpretation: '15% vol means returns typically stay within ±15% of expected.'
+    term: 'Volatilidade (Anualizada)',
+    definition: 'Desvio padrão dos retornos anualizado. Mede quanto os retornos oscilam em torno da média.',
+    formula: 'DesvioPadrão(RetornosDiários) × √252',
+    benchmark: '10-20% é típico para estratégias de ações',
+    interpretation: '15% de vol significa que os retornos tipicamente ficam dentro de ±15% do esperado.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // RISK-ADJUSTED RATIOS
+  // ÍNDICES AJUSTADOS AO RISCO
   // ═══════════════════════════════════════════════════════════════════════════
   sortino: {
     term: 'Sortino Ratio',
-    definition: 'Like Sharpe but only penalizes downside volatility. Ignores upside "risk" which is actually good.',
-    formula: '(Return - RiskFree) / DownsideDeviation',
-    benchmark: '≥1.5 good, ≥2.0 excellent',
-    interpretation: 'Better than Sharpe for strategies with asymmetric returns.'
+    definition: 'Similar ao Sharpe, mas só penaliza volatilidade negativa. Ignora o "risco" de subida, que na verdade é bom.',
+    formula: '(Retorno - Livre de Risco) / Desvio Negativo',
+    benchmark: '≥1.5 é bom, ≥2.0 é excelente',
+    interpretation: 'Melhor que Sharpe para estratégias com retornos assimétricos (mais ganhos que perdas extremas).'
   },
   calmar: {
     term: 'Calmar Ratio',
-    definition: 'Annual return divided by maximum drawdown. Measures reward per unit of worst-case loss.',
-    formula: 'CAGR / |MaxDrawdown|',
-    benchmark: '≥1.0 good, ≥3.0 excellent',
-    interpretation: 'Calmar 2.0 means you earned 2% return for each 1% of max loss risk.'
+    definition: 'Retorno anual dividido pelo drawdown máximo. Mede recompensa por unidade de pior perda possível.',
+    formula: 'CAGR / |DrawdownMáximo|',
+    benchmark: '≥1.0 é bom, ≥3.0 é excelente',
+    interpretation: 'Calmar 2.0 significa que você ganhou 2% para cada 1% de risco de perda máxima.'
   },
   omega: {
     term: 'Omega Ratio',
-    definition: 'Probability-weighted ratio of gains to losses above a threshold. Captures entire return distribution.',
-    formula: '∫(gains above threshold) / ∫(losses below threshold)',
-    benchmark: '≥1.5 good, ≥2.0 excellent',
-    interpretation: 'Omega 1.8 means gains are 80% larger than losses on average.'
+    definition: 'Razão ponderada por probabilidade entre ganhos e perdas acima de um limite. Captura toda a distribuição de retornos.',
+    formula: '∫(ganhos acima do limite) / ∫(perdas abaixo do limite)',
+    benchmark: '≥1.5 é bom, ≥2.0 é excelente',
+    interpretation: 'Omega 1.8 significa que os ganhos são 80% maiores que as perdas em média.'
   },
   profit_factor: {
-    term: 'Profit Factor',
-    definition: 'Sum of all winning trades divided by sum of all losing trades. Simple profitability measure.',
-    formula: 'Σ(Wins) / Σ(Losses)',
-    benchmark: '≥1.5 good, ≥2.0 excellent',
-    interpretation: 'PF 2.0 means you make $2 for every $1 you lose.'
+    term: 'Fator de Lucro',
+    definition: 'Soma de todas as operações vencedoras dividida pela soma das perdedoras. Medida simples de lucratividade.',
+    formula: 'Σ(Ganhos) / Σ(Perdas)',
+    benchmark: '≥1.5 é bom, ≥2.0 é excelente',
+    interpretation: 'PF 2.0 significa que você ganha R$2 para cada R$1 que perde.'
   },
   win_rate: {
-    term: 'Win Rate',
-    definition: 'Percentage of trades that are profitable. Must be considered with average win/loss size.',
-    formula: 'WinningTrades / TotalTrades × 100',
-    benchmark: 'Depends on payoff ratio. 40% can be excellent with 3:1 reward/risk.',
-    interpretation: 'High win rate with small wins can underperform low win rate with big wins.'
+    term: 'Taxa de Acerto',
+    definition: 'Percentual de operações que são lucrativas. Deve ser considerado junto com o tamanho médio de ganho/perda.',
+    formula: 'OperaçõesVencedoras / TotalOperações × 100',
+    benchmark: 'Depende do payoff. 40% pode ser excelente com relação 3:1.',
+    interpretation: 'Alta taxa com ganhos pequenos pode render menos que baixa taxa com ganhos grandes.'
   },
   payoff_ratio: {
-    term: 'Payoff Ratio (Reward/Risk)',
-    definition: 'Average winning trade size divided by average losing trade size.',
-    formula: 'AvgWin / AvgLoss',
-    benchmark: '≥1.5 good, ≥2.0 excellent',
-    interpretation: 'Combined with win rate determines if strategy is profitable.'
+    term: 'Payoff Ratio (Risco/Retorno)',
+    definition: 'Tamanho médio da operação vencedora dividido pelo tamanho médio da perdedora.',
+    formula: 'GanhoMédio / PerdaMédia',
+    benchmark: '≥1.5 é bom, ≥2.0 é excelente',
+    interpretation: 'Combinado com taxa de acerto, determina se a estratégia é lucrativa.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
@@ -204,456 +204,462 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
   // ═══════════════════════════════════════════════════════════════════════════
   var_95: {
     term: 'Value at Risk (95%)',
-    definition: 'Maximum expected daily loss at 95% confidence. On 95% of days, losses won\'t exceed this.',
-    formula: '5th percentile of daily returns',
-    benchmark: 'Depends on risk tolerance',
-    interpretation: 'VaR 2% means 1 in 20 days you might lose more than 2%.'
+    definition: 'Perda máxima diária esperada com 95% de confiança. Em 95% dos dias, as perdas não ultrapassarão esse valor.',
+    formula: 'Percentil 5 dos retornos diários',
+    benchmark: 'Depende da tolerância ao risco',
+    interpretation: 'VaR 2% significa que 1 em cada 20 dias você pode perder mais de 2%.'
   },
   var_99: {
     term: 'Value at Risk (99%)',
-    definition: 'Maximum expected daily loss at 99% confidence. More conservative than VaR95.',
-    formula: '1st percentile of daily returns',
-    interpretation: 'Captures more extreme tail events than VaR95.'
+    definition: 'Perda máxima diária esperada com 99% de confiança. Mais conservador que VaR95.',
+    formula: 'Percentil 1 dos retornos diários',
+    interpretation: 'Captura eventos de cauda mais extremos que o VaR95.'
   },
   cvar_95: {
     term: 'CVaR / Expected Shortfall (95%)',
-    definition: 'Average loss in the worst 5% of cases. Better captures tail risk than VaR.',
-    formula: 'E[Loss | Loss > VaR95]',
-    benchmark: 'Should be ~1.5x VaR for normal distribution',
-    interpretation: 'If VaR is 2%, CVaR might be 3% - the average bad day loss.'
+    definition: 'Perda média nos piores 5% dos casos. Captura melhor o risco de cauda que o VaR.',
+    formula: 'E[Perda | Perda > VaR95]',
+    benchmark: 'Deve ser ~1.5x o VaR para distribuição normal',
+    interpretation: 'Se VaR é 2%, CVaR pode ser 3% - a perda média nos dias ruins.'
   },
   cvar_99: {
     term: 'CVaR / Expected Shortfall (99%)',
-    definition: 'Average loss in the worst 1% of cases. Most conservative tail risk measure.',
-    formula: 'E[Loss | Loss > VaR99]',
-    interpretation: 'Use for stress testing worst-case scenarios.'
+    definition: 'Perda média nos piores 1% dos casos. A medida de risco de cauda mais conservadora.',
+    formula: 'E[Perda | Perda > VaR99]',
+    interpretation: 'Use para stress testing de cenários de pior caso.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // DISTRIBUTION STATISTICS
+  // ESTATÍSTICAS DE DISTRIBUIÇÃO
   // ═══════════════════════════════════════════════════════════════════════════
   skewness: {
-    term: 'Skewness',
-    definition: 'Asymmetry of return distribution. Positive = more extreme gains, Negative = more extreme losses.',
+    term: 'Assimetria (Skewness)',
+    definition: 'Assimetria da distribuição de retornos. Positivo = mais ganhos extremos, Negativo = mais perdas extremas.',
     formula: 'E[(X-μ)³] / σ³',
-    benchmark: 'Positive is preferable (right-skewed gains)',
-    interpretation: 'Negative skew common in selling options, positive in buying.'
+    benchmark: 'Positivo é preferível (assimetria à direita)',
+    interpretation: 'Assimetria negativa é comum em venda de opções, positiva em compra.'
   },
   kurtosis: {
-    term: 'Excess Kurtosis',
-    definition: 'Tail thickness compared to normal distribution. Positive = fat tails (more extreme events).',
+    term: 'Curtose Excessiva',
+    definition: 'Espessura das caudas comparada à distribuição normal. Positivo = caudas gordas (mais eventos extremos).',
     formula: 'E[(X-μ)⁴] / σ⁴ - 3',
-    benchmark: '>0 is common in finance (fat tails)',
-    interpretation: 'High kurtosis means black swan events are more likely than normal suggests.'
+    benchmark: '>0 é comum em finanças (caudas gordas)',
+    interpretation: 'Alta curtose significa que eventos "cisne negro" são mais prováveis do que o normal sugere.'
   },
   tail_ratio: {
-    term: 'Tail Ratio',
-    definition: 'Ratio of 95th percentile gain to 5th percentile loss. Measures upside vs downside extremes.',
-    formula: 'Percentile95 / |Percentile5|',
-    benchmark: '>1.0 means bigger upside than downside tails',
-    interpretation: 'Tail ratio 1.5 means extreme gains are 50% larger than extreme losses.'
+    term: 'Razão de Cauda',
+    definition: 'Razão entre ganho do percentil 95 e perda do percentil 5. Mede extremos de alta vs baixa.',
+    formula: 'Percentil95 / |Percentil5|',
+    benchmark: '>1.0 significa caudas de alta maiores que de baixa',
+    interpretation: 'Razão 1.5 significa ganhos extremos 50% maiores que perdas extremas.'
   },
   stability: {
-    term: 'Timeseries Stability',
-    definition: 'R² of linear regression on cumulative returns. Measures how steadily the strategy grows.',
-    formula: 'R² of CumulativeReturns ~ Time',
-    benchmark: '>0.9 very stable, <0.7 choppy',
-    interpretation: 'High stability = consistent compounding. Low = volatile equity curve.'
+    term: 'Estabilidade da Série',
+    definition: 'R² da regressão linear nos retornos acumulados. Mede quão consistentemente a estratégia cresce.',
+    formula: 'R² de RetornosAcumulados ~ Tempo',
+    benchmark: '>0.9 muito estável, <0.7 irregular',
+    interpretation: 'Alta estabilidade = composição consistente. Baixa = curva de equity volátil.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // DRAWDOWN METRICS
+  // MÉTRICAS DE DRAWDOWN
   // ═══════════════════════════════════════════════════════════════════════════
   longest_dd: {
-    term: 'Longest Drawdown Duration',
-    definition: 'Maximum number of days spent below the previous peak. How long until recovery.',
-    benchmark: '<180 days preferred',
-    interpretation: '400 days underwater is psychologically brutal even if eventually profitable.'
+    term: 'Duração do Maior Drawdown',
+    definition: 'Número máximo de dias abaixo do pico anterior. Quanto tempo até a recuperação.',
+    benchmark: '<180 dias é preferível',
+    interpretation: '400 dias submerso é psicologicamente brutal, mesmo que eventualmente lucrativo.'
   },
   avg_dd_duration: {
-    term: 'Average Drawdown Duration',
-    definition: 'Mean time to recover from drawdowns. Shorter is better for capital efficiency.',
-    benchmark: '<60 days is good',
-    interpretation: 'Quick recoveries mean capital isn\'t stuck in losing positions.'
+    term: 'Duração Média de Drawdown',
+    definition: 'Tempo médio para se recuperar de drawdowns. Menor é melhor para eficiência de capital.',
+    benchmark: '<60 dias é bom',
+    interpretation: 'Recuperações rápidas significam que o capital não fica preso em posições perdedoras.'
   },
   time_underwater: {
-    term: 'Time Underwater',
-    definition: 'Percentage of time spent below the previous peak. How often you\'re in drawdown.',
-    benchmark: '<50% is good',
-    interpretation: '70% underwater means you\'re usually losing - hard to hold.'
+    term: 'Tempo Submerso',
+    definition: 'Percentual do tempo abaixo do pico anterior. Com que frequência você está em drawdown.',
+    benchmark: '<50% é bom',
+    interpretation: '70% submerso significa que você geralmente está perdendo - difícil de manter.'
   },
   gain_to_pain: {
-    term: 'Gain-to-Pain Ratio',
-    definition: 'Sum of all returns divided by sum of absolute negative returns. Overall reward/suffering ratio.',
-    formula: 'Σ(Returns) / Σ|NegativeReturns|',
-    benchmark: '>1.0 required for profitability, >2.0 excellent',
-    interpretation: 'G2P 1.5 means you make 1.5x more than you lose in total.'
+    term: 'Razão Ganho/Dor',
+    definition: 'Soma de todos os retornos dividida pela soma absoluta dos retornos negativos. Razão geral de recompensa/sofrimento.',
+    formula: 'Σ(Retornos) / Σ|RetornosNegativos|',
+    benchmark: '>1.0 necessário para lucrar, >2.0 é excelente',
+    interpretation: 'G2P 1.5 significa que você ganha 1.5x mais do que perde no total.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // VALIDATION METRICS
+  // MÉTRICAS DE VALIDAÇÃO
   // ═══════════════════════════════════════════════════════════════════════════
   pbo: {
-    term: 'Probability of Backtest Overfitting (PBO)',
-    definition: 'Statistical likelihood that a strategy is curve-fitted to historical noise rather than genuine patterns.',
-    formula: 'Based on CPCV degradation distribution',
-    benchmark: '<15% safe, <10% excellent',
-    interpretation: 'PBO 8% = 8% chance this is just luck. 30% = very concerning.'
+    term: 'Probabilidade de Overfitting (PBO)',
+    definition: 'Probabilidade estatística de que a estratégia está ajustada a ruído histórico em vez de padrões genuínos.',
+    formula: 'Baseado na distribuição de degradação CPCV',
+    benchmark: '<15% é seguro, <10% é excelente',
+    interpretation: 'PBO 8% = 8% de chance de ser apenas sorte. 30% = muito preocupante.'
   },
   dsr: {
-    term: 'Deflated Sharpe Ratio (DSR)',
-    definition: 'Sharpe Ratio adjusted for multiple testing bias. Accounts for trying many strategies.',
-    formula: 'SR × correction_factor(trials)',
-    benchmark: '>0.5 after deflation is good',
-    interpretation: 'If you tested 100 strategies, DSR adjusts for the "best" being lucky.'
+    term: 'Sharpe Ratio Deflacionado (DSR)',
+    definition: 'Sharpe Ratio ajustado para viés de múltiplos testes. Compensa testar muitas estratégias.',
+    formula: 'SR × fator_correção(tentativas)',
+    benchmark: '>0.5 após deflação é bom',
+    interpretation: 'Se você testou 100 estratégias, DSR ajusta para a "melhor" ser sortuda.'
   },
   t_stat: {
-    term: 'T-Statistic',
-    definition: 'Statistical significance of the Sharpe Ratio. Higher means less likely due to chance.',
+    term: 'Estatística T',
+    definition: 'Significância estatística do Sharpe Ratio. Maior significa menos provável de ser por acaso.',
     formula: 'SR × √(n/252)',
-    benchmark: '≥2.0 for 95% confidence',
-    interpretation: 't-stat 2.5 means <1% chance this Sharpe is random luck.'
+    benchmark: '≥2.0 para 95% de confiança',
+    interpretation: 't-stat 2.5 significa <1% de chance desse Sharpe ser sorte aleatória.'
   },
   p_value: {
-    term: 'P-Value',
-    definition: 'Probability that the observed returns could occur by chance. Lower is more significant.',
+    term: 'Valor-P',
+    definition: 'Probabilidade de que os retornos observados poderiam ocorrer por acaso. Menor é mais significativo.',
     formula: '2 × (1 - Φ(|t-stat|))',
-    benchmark: '<0.05 for 95% confidence',
-    interpretation: 'p-value 0.01 means only 1% chance this is luck.'
+    benchmark: '<0.05 para 95% de confiança',
+    interpretation: 'valor-p 0.01 significa apenas 1% de chance de ser sorte.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // WALK-FORWARD ANALYSIS
+  // ANÁLISE WALK-FORWARD
   // ═══════════════════════════════════════════════════════════════════════════
   wfa: {
-    term: 'Walk-Forward Analysis (WFA)',
-    definition: 'Validation technique that trains on past data and tests on next period repeatedly. Simulates real trading.',
-    interpretation: 'The gold standard for strategy validation. Tests how strategy adapts over time.'
+    term: 'Análise Walk-Forward (WFA)',
+    definition: 'Técnica de validação que treina em dados passados e testa no período seguinte repetidamente. Simula trading real.',
+    interpretation: 'O padrão ouro para validação de estratégias. Testa como a estratégia se adapta ao longo do tempo.'
   },
   is_oos: {
     term: 'In-Sample / Out-of-Sample',
-    definition: 'IS = data used for optimization. OOS = data never seen during training. OOS is the real test.',
-    interpretation: 'Good IS with bad OOS = overfitting. OOS performance is what you\'ll actually get.'
+    definition: 'IS = dados usados para otimização. OOS = dados nunca vistos durante o treino. OOS é o teste real.',
+    interpretation: 'Bom IS com OOS ruim = overfitting. Performance OOS é o que você realmente terá.'
   },
   degradation_ratio: {
-    term: 'Degradation Ratio',
-    definition: 'How much OOS performance retains from IS. Measures overfitting severity.',
-    formula: 'OOS_Sharpe / IS_Sharpe × 100%',
-    benchmark: '>50% robust, <30% concerning',
-    interpretation: '70% degradation = OOS keeps 70% of IS performance. Good sign.'
+    term: 'Taxa de Degradação',
+    definition: 'Quanto da performance IS é mantida no OOS. Mede severidade do overfitting.',
+    formula: 'Sharpe_OOS / Sharpe_IS × 100%',
+    benchmark: '>50% é robusto, <30% é preocupante',
+    interpretation: '70% de degradação = OOS mantém 70% da performance IS. Bom sinal.'
   },
   consistency_score: {
-    term: 'Consistency Score',
-    definition: 'Percentage of WFA folds that are profitable. Measures reliability across time periods.',
-    benchmark: '>60% good, >80% excellent',
-    interpretation: '75% consistency = profitable in 3 of 4 periods tested.'
+    term: 'Score de Consistência',
+    definition: 'Percentual de janelas WFA que são lucrativas. Mede confiabilidade ao longo do tempo.',
+    benchmark: '>60% é bom, >80% é excelente',
+    interpretation: '75% consistência = lucrativo em 3 de 4 períodos testados.'
   },
   wfa_window: {
-    term: 'WFA Window Size',
-    definition: 'Length of in-sample training period. Longer = more data but less tests.',
-    benchmark: '12-24 months typical',
-    interpretation: 'Balance between enough data to learn and enough tests to validate.'
+    term: 'Tamanho da Janela WFA',
+    definition: 'Duração do período de treino in-sample. Maior = mais dados mas menos testes.',
+    benchmark: '12-24 meses é típico',
+    interpretation: 'Equilíbrio entre dados suficientes para aprender e testes suficientes para validar.'
   },
   wfa_step: {
-    term: 'WFA Step Size',
-    definition: 'How much to advance between WFA folds. Shorter = more tests but more overlap.',
-    benchmark: '3-6 months typical',
-    interpretation: 'Smaller steps give more data points but may be correlated.'
+    term: 'Passo do WFA',
+    definition: 'Quanto avançar entre janelas WFA. Menor = mais testes mas mais sobreposição.',
+    benchmark: '3-6 meses é típico',
+    interpretation: 'Passos menores dão mais dados mas podem ser correlacionados.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // MONTE CARLO SIMULATION
+  // SIMULAÇÃO MONTE CARLO
   // ═══════════════════════════════════════════════════════════════════════════
   monte_carlo: {
-    term: 'Monte Carlo Simulation',
-    definition: 'Statistical technique using random sampling to estimate distributions of possible outcomes.',
-    interpretation: 'Shows range of possible futures, not just one backtest path.'
+    term: 'Simulação Monte Carlo',
+    definition: 'Técnica estatística que usa amostragem aleatória para estimar distribuições de resultados possíveis.',
+    interpretation: 'Mostra o leque de futuros possíveis, não apenas um caminho de backtest.'
   },
   bootstrap: {
-    term: 'Bootstrap Resampling',
-    definition: 'Technique that shuffles historical returns to generate alternate scenarios. Preserves statistical properties.',
-    interpretation: 'Creates 1000s of possible equity curves from the same returns.'
+    term: 'Reamostragem Bootstrap',
+    definition: 'Técnica que embaralha retornos históricos para gerar cenários alternativos. Preserva propriedades estatísticas.',
+    interpretation: 'Cria milhares de curvas de equity possíveis a partir dos mesmos retornos.'
   },
   block_size: {
-    term: 'Block Size (Bootstrap)',
-    definition: 'Size of return blocks when resampling. Preserves autocorrelation within blocks.',
-    benchmark: '5-21 days typical',
-    interpretation: 'Block=1 is IID (independent). Block=21 preserves monthly patterns.'
+    term: 'Tamanho do Bloco (Bootstrap)',
+    definition: 'Tamanho dos blocos de retorno na reamostragem. Preserva autocorrelação dentro dos blocos.',
+    benchmark: '5-21 dias é típico',
+    interpretation: 'Bloco=1 é IID (independente). Bloco=21 preserva padrões mensais.'
   },
   confidence_interval: {
-    term: 'Confidence Interval',
-    definition: 'Range of values likely to contain the true parameter with specified probability.',
-    benchmark: '95% CI is standard',
-    interpretation: '95% CI [0.8, 1.2] means true Sharpe is probably between 0.8 and 1.2.'
+    term: 'Intervalo de Confiança',
+    definition: 'Faixa de valores que provavelmente contém o parâmetro verdadeiro com probabilidade especificada.',
+    benchmark: 'IC 95% é padrão',
+    interpretation: 'IC 95% [0.8, 1.2] significa que o Sharpe verdadeiro provavelmente está entre 0.8 e 1.2.'
   },
   percentile_p5: {
-    term: 'P5 (5th Percentile)',
-    definition: 'Value below which 5% of outcomes fall. Represents worst-case scenario.',
-    interpretation: 'Use P5 for pessimistic planning. 95% of outcomes are better than this.'
+    term: 'P5 (Percentil 5)',
+    definition: 'Valor abaixo do qual 5% dos resultados caem. Representa cenário pessimista.',
+    interpretation: 'Use P5 para planejamento pessimista. 95% dos resultados são melhores que isso.'
   },
   percentile_p50: {
-    term: 'P50 (Median)',
-    definition: 'Value where half of outcomes are above and half below. Robust central estimate.',
-    interpretation: 'More robust than mean for skewed distributions.'
+    term: 'P50 (Mediana)',
+    definition: 'Valor onde metade dos resultados está acima e metade abaixo. Estimativa central robusta.',
+    interpretation: 'Mais robusto que a média para distribuições assimétricas.'
   },
   percentile_p95: {
-    term: 'P95 (95th Percentile)',
-    definition: 'Value below which 95% of outcomes fall. Represents optimistic scenario.',
-    interpretation: 'Don\'t plan on P95 - only 5% chance of achieving it.'
+    term: 'P95 (Percentil 95)',
+    definition: 'Valor abaixo do qual 95% dos resultados caem. Representa cenário otimista.',
+    interpretation: 'Não planeje com P95 - só 5% de chance de alcançá-lo.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // GENETIC ALGORITHM / EVOLUTION
+  // ALGORITMO GENÉTICO / EVOLUÇÃO
   // ═══════════════════════════════════════════════════════════════════════════
   genetic_algorithm: {
-    term: 'Genetic Algorithm',
-    definition: 'Optimization inspired by evolution. Strategies "breed" and mutate, fittest survive.',
-    interpretation: 'Explores vast strategy spaces efficiently through natural selection.'
+    term: 'Algoritmo Genético',
+    definition: 'Otimização inspirada na evolução. Estratégias "cruzam" e mutam, os mais aptos sobrevivem.',
+    interpretation: 'Explora vastos espaços de estratégias eficientemente através de seleção natural.'
   },
   population: {
-    term: 'Population Size',
-    definition: 'Number of strategies evolving simultaneously. Larger = more diversity but slower.',
-    benchmark: '100-200 typical',
-    interpretation: 'Population 100 means 100 strategies compete each generation.'
+    term: 'Tamanho da População',
+    definition: 'Número de estratégias evoluindo simultaneamente. Maior = mais diversidade mas mais lento.',
+    benchmark: '100-200 é típico',
+    interpretation: 'População 100 significa 100 estratégias competindo a cada geração.'
   },
   generation: {
-    term: 'Generation',
-    definition: 'One cycle of evaluation, selection, and breeding. Evolution progresses through generations.',
-    benchmark: '30-100 generations typical',
-    interpretation: 'Each generation should show improvement in best/mean fitness.'
+    term: 'Geração',
+    definition: 'Um ciclo de avaliação, seleção e cruzamento. A evolução progride através de gerações.',
+    benchmark: '30-100 gerações é típico',
+    interpretation: 'Cada geração deve mostrar melhoria no melhor/média de fitness.'
   },
   fitness: {
-    term: 'Fitness Function',
-    definition: 'Score determining which strategies survive and reproduce. Usually Sharpe or composite metric.',
-    interpretation: 'Higher fitness = better strategy. Evolution maximizes this.'
+    term: 'Função de Fitness',
+    definition: 'Score que determina quais estratégias sobrevivem e reproduzem. Geralmente Sharpe ou métrica composta.',
+    interpretation: 'Maior fitness = melhor estratégia. A evolução maximiza isso.'
   },
   pareto_frontier: {
-    term: 'Pareto Frontier',
-    definition: 'Set of strategies where none is better in all objectives. Represents optimal trade-offs.',
-    interpretation: 'All frontier strategies are valid choices depending on your priorities.'
+    term: 'Fronteira de Pareto',
+    definition: 'Conjunto de estratégias onde nenhuma é melhor em todos os objetivos. Representa trade-offs ótimos.',
+    interpretation: 'Todas as estratégias da fronteira são escolhas válidas dependendo das suas prioridades.'
   },
   convergence: {
-    term: 'Convergence',
-    definition: 'When population stops improving significantly. May indicate optimal found or stuck.',
-    interpretation: 'Early convergence may mean local optimum. Try larger population.'
+    term: 'Convergência',
+    definition: 'Quando a população para de melhorar significativamente. Pode indicar ótimo encontrado ou travado.',
+    interpretation: 'Convergência precoce pode significar ótimo local. Tente população maior.'
+  },
+  seeds: {
+    term: 'Seeds (Sementes Aleatórias)',
+    definition: 'Sementes de números aleatórios para reprodutibilidade. Cada seed gera uma sequência diferente de mutações e crossovers no algoritmo genético.',
+    benchmark: '3 seeds mínimo para produção, 5+ para validação institucional',
+    interpretation: 'Estratégia que performa bem em múltiplas seeds é robusta. Se só funciona com 1 seed, é sorte, não skill.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // STRESS TESTING
+  // TESTE DE ESTRESSE
   // ═══════════════════════════════════════════════════════════════════════════
   stress_test: {
-    term: 'Stress Testing',
-    definition: 'Testing strategy against extreme historical scenarios like crashes and high volatility.',
-    interpretation: 'Strategies passing stress tests are more likely to survive real crises.'
+    term: 'Teste de Estresse',
+    definition: 'Testa a estratégia contra cenários históricos extremos como crashes e alta volatilidade.',
+    interpretation: 'Estratégias que passam em testes de estresse têm mais chance de sobreviver a crises reais.'
   },
   stress_scenario: {
-    term: 'Stress Scenario',
-    definition: 'Specific market condition used for stress testing (e.g., 2008 crisis, COVID crash).',
-    interpretation: 'Each scenario tests a different type of market stress.'
+    term: 'Cenário de Estresse',
+    definition: 'Condição de mercado específica usada para teste de estresse (ex: crise 2008, crash COVID).',
+    interpretation: 'Cada cenário testa um tipo diferente de estresse de mercado.'
   },
   stress_degradation: {
-    term: 'Stress Degradation',
-    definition: 'How much performance drops under stress conditions vs normal conditions.',
-    benchmark: '<50% degradation is good',
-    interpretation: '30% degradation = strategy keeps 70% of performance under stress.'
+    term: 'Degradação sob Estresse',
+    definition: 'Quanto a performance cai sob condições de estresse vs condições normais.',
+    benchmark: '<50% de degradação é bom',
+    interpretation: '30% de degradação = estratégia mantém 70% da performance sob estresse.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // VALIDATION GATES
+  // GATES DE VALIDAÇÃO
   // ═══════════════════════════════════════════════════════════════════════════
   gates_passed: {
-    term: 'Validation Gates Passed',
-    definition: 'Whether strategy passed all minimum thresholds for production readiness.',
-    interpretation: 'Gates include Sharpe, PBO, stress tests, and consistency requirements.'
+    term: 'Gates de Validação Aprovados',
+    definition: 'Se a estratégia passou todos os thresholds mínimos para estar pronta para produção.',
+    interpretation: 'Gates incluem Sharpe, PBO, testes de estresse e requisitos de consistência.'
   },
   validated: {
-    term: 'Validated Status',
-    definition: 'Strategy passed all institutional validation criteria and is production-ready.',
-    interpretation: 'Validated strategies have high confidence of real-world performance.'
+    term: 'Status Validado',
+    definition: 'Estratégia passou em todos os critérios institucionais de validação e está pronta para produção.',
+    interpretation: 'Estratégias validadas têm alta confiança de performance no mundo real.'
   },
   research: {
-    term: 'Research Status',
-    definition: 'Strategy shows promise but hasn\'t passed all validation gates yet.',
-    interpretation: 'Needs more testing or parameter adjustment before trading.'
+    term: 'Status Pesquisa',
+    definition: 'Estratégia mostra promessa mas ainda não passou em todos os gates de validação.',
+    interpretation: 'Precisa de mais testes ou ajuste de parâmetros antes de operar.'
   },
   cpcv: {
-    term: 'CPCV (Combinatorial Purged Cross-Validation)',
-    definition: 'Advanced validation generating multiple IS/OOS combinations to calculate PBO statistically.',
-    interpretation: 'More rigorous than simple train/test split. Industry standard.'
+    term: 'CPCV (Validação Cruzada Combinatória Purgada)',
+    definition: 'Validação avançada que gera múltiplas combinações IS/OOS para calcular PBO estatisticamente.',
+    interpretation: 'Mais rigoroso que divisão simples treino/teste. Padrão da indústria.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // EXECUTION & COSTS
+  // EXECUÇÃO E CUSTOS
   // ═══════════════════════════════════════════════════════════════════════════
   net_vs_gross: {
     term: 'NET vs GROSS',
-    definition: 'NET = after all costs (fees, slippage). GROSS = before costs. Always use NET for decisions.',
-    interpretation: 'A 2.0 Sharpe GROSS might be 0.5 NET after costs - big difference!'
+    definition: 'NET = após todos os custos (taxas, slippage). GROSS = antes dos custos. Sempre use NET para decisões.',
+    interpretation: 'Um Sharpe 2.0 GROSS pode ser 0.5 NET após custos - grande diferença!'
   },
   slippage: {
     term: 'Slippage',
-    definition: 'Difference between expected and actual execution price. Caused by latency and market impact.',
-    benchmark: '1-5 bps for liquid stocks',
-    interpretation: 'High frequency strategies are very sensitive to slippage.'
+    definition: 'Diferença entre preço esperado e preço real de execução. Causado por latência e impacto de mercado.',
+    benchmark: '1-5 bps para ações líquidas',
+    interpretation: 'Estratégias de alta frequência são muito sensíveis ao slippage.'
   },
   delay_bars: {
-    term: 'Delay Bars',
-    definition: 'Number of bars between signal and execution. Simulates real-world latency.',
-    benchmark: '1 bar is conservative',
-    interpretation: 'Delay=0 assumes instant execution - unrealistic for most traders.'
+    term: 'Barras de Delay',
+    definition: 'Número de barras entre sinal e execução. Simula latência do mundo real.',
+    benchmark: '1 barra é conservador',
+    interpretation: 'Delay=0 assume execução instantânea - irrealista para a maioria dos traders.'
   },
   turnover: {
-    term: 'Annual Turnover',
-    definition: 'How many times the portfolio is completely replaced per year. Higher = more costs.',
-    formula: 'Total traded value / Average portfolio value',
-    benchmark: '<12x for cost efficiency',
-    interpretation: 'Turnover 24x means trading twice per month on average.'
+    term: 'Turnover Anual',
+    definition: 'Quantas vezes o portfólio é completamente trocado por ano. Maior = mais custos.',
+    formula: 'Valor total operado / Valor médio do portfólio',
+    benchmark: '<12x para eficiência de custos',
+    interpretation: 'Turnover 24x significa operar duas vezes por mês em média.'
   },
   capacity: {
-    term: 'Strategy Capacity',
-    definition: 'Maximum capital the strategy can manage before market impact degrades returns.',
-    interpretation: '$10M capacity means performance degrades above that AUM.'
+    term: 'Capacidade da Estratégia',
+    definition: 'Capital máximo que a estratégia pode gerir antes que impacto de mercado degrade retornos.',
+    interpretation: 'Capacidade R$10M significa que performance degrada acima desse AUM.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // PORTFOLIO & COMPARISON
+  // PORTFÓLIO E COMPARAÇÃO
   // ═══════════════════════════════════════════════════════════════════════════
   correlation_matrix: {
-    term: 'Correlation Matrix',
-    definition: 'Table showing pairwise correlations between strategy returns. Low correlation = better diversification.',
-    benchmark: '<0.5 for good diversification',
-    interpretation: 'Strategies with 0.2 correlation provide better combined performance.'
+    term: 'Matriz de Correlação',
+    definition: 'Tabela mostrando correlações par-a-par entre retornos de estratégias. Baixa correlação = melhor diversificação.',
+    benchmark: '<0.5 para boa diversificação',
+    interpretation: 'Estratégias com correlação 0.2 fornecem melhor performance combinada.'
   },
   diversification_ratio: {
-    term: 'Diversification Ratio',
-    definition: 'Ratio of sum of individual volatilities to portfolio volatility. Measures diversification benefit.',
-    formula: 'Σ(weights × volatilities) / PortfolioVolatility',
-    benchmark: '>1.5 is good diversification',
-    interpretation: 'Ratio 2.0 means diversification cuts risk in half.'
+    term: 'Razão de Diversificação',
+    definition: 'Razão entre soma das volatilidades individuais e volatilidade do portfólio. Mede benefício da diversificação.',
+    formula: 'Σ(pesos × volatilidades) / VolatilidadePortfólio',
+    benchmark: '>1.5 é boa diversificação',
+    interpretation: 'Razão 2.0 significa que a diversificação corta o risco pela metade.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
-  // MISC
+  // DIVERSOS
   // ═══════════════════════════════════════════════════════════════════════════
   best_day: {
-    term: 'Best Day Return',
-    definition: 'Single best daily return in the backtest period.',
-    interpretation: 'Shows upside potential. Very high values may indicate outlier dependence.'
+    term: 'Melhor Retorno Diário',
+    definition: 'Melhor retorno em um único dia no período de backtest.',
+    interpretation: 'Mostra potencial de alta. Valores muito altos podem indicar dependência de outliers.'
   },
   worst_day: {
-    term: 'Worst Day Return',
-    definition: 'Single worst daily return in the backtest period. Your nightmare scenario.',
-    interpretation: 'Can you emotionally handle this loss in a single day?'
+    term: 'Pior Retorno Diário',
+    definition: 'Pior retorno em um único dia no período de backtest. Seu cenário de pesadelo.',
+    interpretation: 'Você consegue emocionalmente lidar com essa perda em um único dia?'
   },
   best_month: {
-    term: 'Best Month Return',
-    definition: 'Single best monthly return in the backtest period.',
-    interpretation: 'Strong months shouldn\'t be essential for overall profitability.'
+    term: 'Melhor Retorno Mensal',
+    definition: 'Melhor retorno em um único mês no período de backtest.',
+    interpretation: 'Meses fortes não devem ser essenciais para a lucratividade geral.'
   },
   worst_month: {
-    term: 'Worst Month Return',
-    definition: 'Single worst monthly return in the backtest period.',
-    interpretation: 'Most investors review monthly - can you explain this to clients?'
+    term: 'Pior Retorno Mensal',
+    definition: 'Pior retorno em um único mês no período de backtest.',
+    interpretation: 'A maioria dos investidores avalia mensalmente - você consegue explicar isso para clientes?'
   },
   rolling_sharpe: {
-    term: 'Rolling Sharpe (252-day)',
-    definition: 'Sharpe calculated over trailing 252 trading days, rolling forward. Shows stability.',
-    interpretation: 'Wide swings in rolling Sharpe indicate regime sensitivity.'
+    term: 'Sharpe Móvel (252 dias)',
+    definition: 'Sharpe calculado nos últimos 252 dias úteis, rolando para frente. Mostra estabilidade.',
+    interpretation: 'Oscilações grandes no Sharpe móvel indicam sensibilidade a regimes de mercado.'
   },
   rolling_volatility: {
-    term: 'Rolling Volatility (252-day)',
-    definition: 'Volatility calculated over trailing year, rolling forward. Shows risk variation.',
-    interpretation: 'Spiking rolling vol during crises is normal but informative.'
+    term: 'Volatilidade Móvel (252 dias)',
+    definition: 'Volatilidade calculada no último ano, rolando para frente. Mostra variação de risco.',
+    interpretation: 'Picos de volatilidade móvel durante crises são normais mas informativos.'
   },
 };
 
 // =============================================================================
-// LEGACY TOOLTIP DATABASE (for Cockpit page)
+// TOOLTIPS LEGADO (para página Cockpit)
 // =============================================================================
 
 export const TOOLTIPS: Record<string, TooltipContent> = {
-  // Compute Budget
+  // Orçamento de Computação
   max_runtime: {
-    what: 'Maximum time the system will use to discover strategies',
-    impact: 'More time = more strategies evaluated = higher chance of finding good ones.',
-    when: 'Increase for deeper exploration, decrease for quick tests',
-    example: '15 min for initial exploration. 1h for deep analysis.',
+    what: 'Tempo máximo que o sistema usará para descobrir estratégias',
+    impact: 'Mais tempo = mais estratégias avaliadas = maior chance de encontrar boas.',
+    when: 'Aumente para exploração profunda, diminua para testes rápidos',
+    example: '15 min para exploração inicial. 1h para análise profunda.',
   },
   population_size: {
-    what: 'Number of strategies evolving simultaneously',
-    impact: 'Larger population = more genetic diversity = finds solutions in larger spaces.',
-    when: 'Increase if strategies converge too early',
-    example: '100 for production, 200 for exhaustive exploration',
+    what: 'Número de estratégias evoluindo simultaneamente',
+    impact: 'População maior = mais diversidade genética = encontra soluções em espaços maiores.',
+    when: 'Aumente se estratégias convergirem muito cedo',
+    example: '100 para produção, 200 para exploração exaustiva',
   },
   max_generations: {
-    what: 'Maximum number of evolutionary cycles',
-    impact: 'More generations = more strategy refinement. Diminishing returns after ~50.',
-    when: 'Leave default or increase if runtime allows',
-    example: '50 generations usually sufficient for convergence',
+    what: 'Número máximo de ciclos evolutivos',
+    impact: 'Mais gerações = mais refinamento. Retornos decrescentes após ~50.',
+    when: 'Deixe o padrão ou aumente se o tempo permitir',
+    example: '50 gerações geralmente suficientes para convergência',
   },
   workers: {
-    what: 'Parallel threads for strategy evaluation',
-    impact: 'More workers = faster, but uses more CPU/memory. Ideal: physical cores.',
-    when: 'Reduce if system becomes slow for other tasks',
-    example: '8 workers on 8-core CPU uses 100% capacity',
+    what: 'Threads paralelas para avaliação de estratégias',
+    impact: 'Mais workers = mais rápido, mas usa mais CPU/memória. Ideal: núcleos físicos.',
+    when: 'Reduza se o sistema ficar lento para outras tarefas',
+    example: '8 workers em CPU 8-core usa 100% da capacidade',
   },
   seeds: {
-    what: 'Seeds for experiment reproducibility',
-    impact: 'Multiple seeds = more robust results (less luck dependence).',
-    when: 'Use 3-5 seeds for institutional validation',
-    example: '3 seeds = 3 independent runs, result is the average',
+    what: 'Seeds para reprodutibilidade de experimentos',
+    impact: 'Múltiplas seeds = resultados mais robustos (menos dependência de sorte).',
+    when: 'Use 3-5 seeds para validação institucional',
+    example: '3 seeds = 3 execuções independentes, resultado é a média',
   },
   
   // Gates
   min_oos_sharpe: {
-    what: 'Minimum Sharpe Ratio in Out-of-Sample period',
-    impact: 'Gate filtering strategies with insufficient performance.',
-    when: 'Adjust based on benchmark. More volatile markets may have lower thresholds.',
-    example: 'Sharpe 0.5 = 50% more return than risk. 1.0 = excellent.',
+    what: 'Sharpe Ratio mínimo no período Out-of-Sample',
+    impact: 'Gate filtrando estratégias com performance insuficiente.',
+    when: 'Ajuste baseado no benchmark. Mercados mais voláteis podem ter thresholds menores.',
+    example: 'Sharpe 0.5 = 50% mais retorno que risco. 1.0 = excelente.',
   },
   max_pbo: {
-    what: 'Probability of Backtest Overfitting',
-    impact: 'Measures chance strategy is "lucky" vs genuinely good.',
-    when: 'Keep ≤0.15 for production strategies',
-    example: 'PBO 0.08 = 8% overfitting chance. 0.30 = concerning.',
+    what: 'Probabilidade de Overfitting no Backtest',
+    impact: 'Mede chance da estratégia ser "sortuda" vs genuinamente boa.',
+    when: 'Mantenha ≤0.15 para estratégias de produção',
+    example: 'PBO 0.08 = 8% de chance de overfitting. 0.30 = preocupante.',
   },
   min_stress_passed: {
-    what: 'Minimum stress tests the strategy must pass',
-    impact: 'Tests robustness in extreme historical scenarios.',
-    when: 'Use 4+ for production. 0 for quick exploration.',
-    example: '4 of 8 tests = strategy survives most crashes',
+    what: 'Testes de estresse mínimos que a estratégia deve passar',
+    impact: 'Testa robustez em cenários históricos extremos.',
+    when: 'Use 4+ para produção. 0 para exploração rápida.',
+    example: '4 de 8 testes = estratégia sobrevive à maioria dos crashes',
   },
   stress_testing: {
-    what: 'Simulates extreme market scenarios',
-    impact: 'Tests each strategy against 2x volatility, price gaps, prolonged drawdowns.',
-    when: 'Always enable for production. Disable only for quick tests.',
-    example: 'Strategy passing stress tests survived 2008 and COVID',
+    what: 'Simula cenários extremos de mercado',
+    impact: 'Testa cada estratégia contra volatilidade 2x, gaps de preço, drawdowns prolongados.',
+    when: 'Sempre habilite para produção. Desabilite só para testes rápidos.',
+    example: 'Estratégia que passa nos stress tests sobreviveu a 2008 e COVID',
   },
   
   // Ranking
   ranking_institutional: {
-    what: 'Multi-criteria weighted ranking (institutional standard)',
-    impact: 'Weighs Sharpe OOS (40%), PBO (25%), stress (20%), gates (15%).',
-    when: 'Use as default for production',
-    example: 'Sharpe 1.2 + PBO 0.05 scores higher than Sharpe 1.5 + PBO 0.25',
+    what: 'Ranking ponderado multi-critério (padrão institucional)',
+    impact: 'Pondera Sharpe OOS (40%), PBO (25%), stress (20%), gates (15%).',
+    when: 'Use como padrão para produção',
+    example: 'Sharpe 1.2 + PBO 0.05 pontua mais que Sharpe 1.5 + PBO 0.25',
   },
   ranking_pareto: {
-    what: 'Pareto frontier (non-dominated strategies)',
-    impact: 'Shows strategies optimal in at least one dimension.',
-    when: 'Use to explore trade-offs (e.g., risk vs return)',
-    example: '5 strategies on frontier = 5 valid choices depending on preference',
+    what: 'Fronteira de Pareto (estratégias não-dominadas)',
+    impact: 'Mostra estratégias ótimas em pelo menos uma dimensão.',
+    when: 'Use para explorar trade-offs (ex: risco vs retorno)',
+    example: '5 estratégias na fronteira = 5 escolhas válidas dependendo da preferência',
   },
   ranking_sharpe: {
-    what: 'Orders only by Sharpe Ratio OOS NET',
-    impact: 'Simple but may reward overfitting. Ignores PBO and stress.',
-    when: 'Use for initial analysis or when PBO already validated',
-    example: 'Top 1 by Sharpe may have high PBO - verify!',
+    what: 'Ordena apenas por Sharpe Ratio OOS NET',
+    impact: 'Simples mas pode premiar overfitting. Ignora PBO e stress.',
+    when: 'Use para análise inicial ou quando PBO já validado',
+    example: 'Top 1 por Sharpe pode ter PBO alto - verifique!',
   },
   ranking_riskadjusted: {
-    what: 'Sharpe divided by Maximum Drawdown',
-    impact: 'Penalizes strategies with large drops even if good Sharpe.',
-    when: 'Use if drawdown is priority (loss aversion)',
-    example: 'Sharpe 1.0 with DD 10% > Sharpe 1.5 with DD 30%',
+    what: 'Sharpe dividido por Drawdown Máximo',
+    impact: 'Penaliza estratégias com quedas grandes mesmo com bom Sharpe.',
+    when: 'Use se drawdown é prioridade (aversão a perdas)',
+    example: 'Sharpe 1.0 com DD 10% > Sharpe 1.5 com DD 30%',
   },
 };
 

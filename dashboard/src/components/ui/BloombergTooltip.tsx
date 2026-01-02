@@ -151,145 +151,145 @@ export function BloombergTooltip({
 }
 
 /**
- * MetricTooltip - Predefined tooltips for common financial metrics
+ * MetricTooltip - Tooltips predefinidos para métricas financeiras comuns
  */
 export const MetricTooltips = {
   sharpe: (value: number) => ({
     title: 'Sharpe Ratio',
-    description: 'Risk-adjusted return metric',
+    description: 'Retorno ajustado ao risco',
     formula: '(Rp - Rf) / σp',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: value >= 1.0 ? 'profit' as const : value >= 0.5 ? 'warning' as const : 'loss' as const },
-      { label: 'Annualized', value: 'Yes', sublabel: '252 days' },
+      { label: 'Atual', value: value.toFixed(3), color: value >= 1.0 ? 'profit' as const : value >= 0.5 ? 'warning' as const : 'loss' as const },
+      { label: 'Anualizado', value: 'Sim', sublabel: '252 dias' },
     ],
-    benchmark: '≥ 1.0 (good), ≥ 2.0 (excellent)',
-    interpretation: 'Higher values indicate better risk-adjusted returns. >1 is good, >2 is excellent.'
+    benchmark: '≥ 1.0 (bom), ≥ 2.0 (excelente)',
+    interpretation: 'Valores maiores indicam melhores retornos ajustados ao risco. >1 é bom, >2 é excelente.'
   }),
   
   sortino: (value: number) => ({
     title: 'Sortino Ratio',
-    description: 'Downside risk-adjusted return',
+    description: 'Retorno ajustado ao risco de baixa',
     formula: '(Rp - Rf) / σd',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: value >= 1.5 ? 'profit' as const : value >= 1.0 ? 'warning' as const : 'loss' as const },
-      { label: 'Uses', value: 'Downside deviation only' },
+      { label: 'Atual', value: value.toFixed(3), color: value >= 1.5 ? 'profit' as const : value >= 1.0 ? 'warning' as const : 'loss' as const },
+      { label: 'Usa', value: 'Apenas desvio de baixa' },
     ],
-    benchmark: '≥ 1.5 (good), ≥ 2.0 (excellent)',
-    interpretation: 'Better than Sharpe for asymmetric return distributions. Ignores upside volatility.'
+    benchmark: '≥ 1.5 (bom), ≥ 2.0 (excelente)',
+    interpretation: 'Melhor que Sharpe para distribuições de retorno assimétricas. Ignora volatilidade de alta.'
   }),
   
   calmar: (value: number) => ({
     title: 'Calmar Ratio',
-    description: 'Return vs maximum drawdown',
-    formula: 'CAGR / Max Drawdown',
+    description: 'Retorno vs drawdown máximo',
+    formula: 'CAGR / Drawdown Máximo',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: value >= 1.0 ? 'profit' as const : value >= 0.5 ? 'warning' as const : 'loss' as const },
+      { label: 'Atual', value: value.toFixed(3), color: value >= 1.0 ? 'profit' as const : value >= 0.5 ? 'warning' as const : 'loss' as const },
     ],
-    benchmark: '≥ 1.0 (good), ≥ 3.0 (excellent)',
-    interpretation: 'Higher values mean better reward relative to worst historical loss.'
+    benchmark: '≥ 1.0 (bom), ≥ 3.0 (excelente)',
+    interpretation: 'Valores maiores significam melhor recompensa relativa à pior perda histórica.'
   }),
   
   omega: (value: number) => ({
     title: 'Omega Ratio',
-    description: 'Probability-weighted gains/losses',
-    formula: '∫ gains / ∫ losses (above/below threshold)',
+    description: 'Ganhos/perdas ponderados por probabilidade',
+    formula: '∫ ganhos / ∫ perdas (acima/abaixo do limiar)',
     rows: [
-      { label: 'Current', value: value === Infinity ? '∞' : value.toFixed(3), color: value >= 1.5 ? 'profit' as const : 'warning' as const },
-      { label: 'Threshold', value: '0%', sublabel: 'risk-free' },
+      { label: 'Atual', value: value === Infinity ? '∞' : value.toFixed(3), color: value >= 1.5 ? 'profit' as const : 'warning' as const },
+      { label: 'Limiar', value: '0%', sublabel: 'livre de risco' },
     ],
-    benchmark: '≥ 1.5 (good), ≥ 2.0 (excellent)',
-    interpretation: '>1 means more wins than losses. Captures entire return distribution.'
+    benchmark: '≥ 1.5 (bom), ≥ 2.0 (excelente)',
+    interpretation: '>1 significa mais ganhos que perdas. Captura toda a distribuição de retornos.'
   }),
   
   var95: (value: number) => ({
     title: 'Value at Risk (95%)',
-    description: 'Maximum expected daily loss at 95% confidence',
-    formula: '5th percentile of daily returns',
+    description: 'Perda máxima diária esperada com 95% de confiança',
+    formula: 'Percentil 5 dos retornos diários',
     rows: [
-      { label: 'Daily VaR', value: `${(value * 100).toFixed(2)}%`, color: 'loss' as const },
-      { label: 'Confidence', value: '95%' },
+      { label: 'VaR Diário', value: `${(value * 100).toFixed(2)}%`, color: 'loss' as const },
+      { label: 'Confiança', value: '95%' },
     ],
-    interpretation: 'On 95% of days, losses will not exceed this amount. Does not capture tail risk.'
+    interpretation: 'Em 95% dos dias, as perdas não excederão esse valor. Não captura risco de cauda.'
   }),
   
   cvar95: (value: number) => ({
-    title: 'Conditional VaR (95%)',
-    description: 'Expected loss in the worst 5% of cases',
-    formula: 'E[loss | loss > VaR95]',
+    title: 'CVaR Condicional (95%)',
+    description: 'Perda esperada nos piores 5% dos casos',
+    formula: 'E[perda | perda > VaR95]',
     rows: [
-      { label: 'Daily CVaR', value: `${(value * 100).toFixed(2)}%`, color: 'loss' as const },
-      { label: 'Also known as', value: 'Expected Shortfall' },
+      { label: 'CVaR Diário', value: `${(value * 100).toFixed(2)}%`, color: 'loss' as const },
+      { label: 'Também chamado', value: 'Expected Shortfall' },
     ],
-    interpretation: 'Average of the worst losses. Better captures tail risk than VaR.'
+    interpretation: 'Média das piores perdas. Captura melhor o risco de cauda que o VaR.'
   }),
   
   pbo: (value: number) => ({
-    title: 'Probability of Backtest Overfitting',
-    description: 'Likelihood that OOS performance will be worse than IS',
-    formula: 'Based on CPCV degradation distribution',
+    title: 'Probabilidade de Overfitting',
+    description: 'Probabilidade de performance OOS ser pior que IS',
+    formula: 'Baseado na distribuição de degradação CPCV',
     rows: [
-      { label: 'Current', value: `${(value * 100).toFixed(1)}%`, color: value <= 0.15 ? 'profit' as const : value <= 0.30 ? 'warning' as const : 'loss' as const },
-      { label: 'Status', value: value <= 0.15 ? 'PASS' : 'FAIL' },
+      { label: 'Atual', value: `${(value * 100).toFixed(1)}%`, color: value <= 0.15 ? 'profit' as const : value <= 0.30 ? 'warning' as const : 'loss' as const },
+      { label: 'Status', value: value <= 0.15 ? 'APROVADO' : 'REPROVADO' },
     ],
-    benchmark: '≤ 15% (validated)',
-    interpretation: 'Lower is better. Above 15% suggests strategy may be overfit.'
+    benchmark: '≤ 15% (validado)',
+    interpretation: 'Menor é melhor. Acima de 15% sugere que a estratégia pode estar sobreajustada.'
   }),
   
   dsr: (value: number) => ({
-    title: 'Deflated Sharpe Ratio',
-    description: 'Sharpe adjusted for multiple testing',
+    title: 'Sharpe Ratio Deflacionado',
+    description: 'Sharpe ajustado para múltiplos testes',
     formula: 'SR × √(1 - Var(SR) / SR²)',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: value >= 0.5 ? 'profit' as const : 'warning' as const },
-      { label: 'Trials', value: 'Adjusted' },
+      { label: 'Atual', value: value.toFixed(3), color: value >= 0.5 ? 'profit' as const : 'warning' as const },
+      { label: 'Tentativas', value: 'Ajustado' },
     ],
-    benchmark: '≥ 0.5 (validated)',
-    interpretation: 'Accounts for luck in backtesting many strategies. Use instead of raw Sharpe.'
+    benchmark: '≥ 0.5 (validado)',
+    interpretation: 'Compensa a sorte de testar muitas estratégias. Use em vez do Sharpe bruto.'
   }),
   
   tstat: (value: number) => ({
-    title: 'T-Statistic',
-    description: 'Statistical significance of Sharpe ratio',
+    title: 'Estatística T',
+    description: 'Significância estatística do Sharpe Ratio',
     formula: 'SR × √(n / 252)',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: Math.abs(value) >= 2.0 ? 'profit' as const : 'warning' as const },
-      { label: 'Threshold', value: '≥ 2.0 for 95% CI' },
+      { label: 'Atual', value: value.toFixed(3), color: Math.abs(value) >= 2.0 ? 'profit' as const : 'warning' as const },
+      { label: 'Limiar', value: '≥ 2.0 para IC 95%' },
     ],
-    interpretation: 't ≥ 2.0 means <5% chance Sharpe is due to luck alone.'
+    interpretation: 't ≥ 2.0 significa <5% de chance do Sharpe ser só sorte.'
   }),
   
   pvalue: (value: number) => ({
-    title: 'P-Value',
-    description: 'Probability returns are due to chance',
+    title: 'Valor-P',
+    description: 'Probabilidade dos retornos serem por acaso',
     formula: '2 × (1 - Φ(|t-stat|))',
     rows: [
-      { label: 'Current', value: value < 0.001 ? '<0.001' : value.toFixed(4), color: value <= 0.05 ? 'profit' as const : 'loss' as const },
-      { label: 'Status', value: value <= 0.05 ? 'Significant' : 'Not significant' },
+      { label: 'Atual', value: value < 0.001 ? '<0.001' : value.toFixed(4), color: value <= 0.05 ? 'profit' as const : 'loss' as const },
+      { label: 'Status', value: value <= 0.05 ? 'Significativo' : 'Não significativo' },
     ],
-    benchmark: '≤ 0.05 (95% confidence)',
-    interpretation: 'Lower is better. <0.05 means statistically significant.'
+    benchmark: '≤ 0.05 (95% confiança)',
+    interpretation: 'Menor é melhor. <0.05 significa estatisticamente significativo.'
   }),
   
   skewness: (value: number) => ({
-    title: 'Skewness',
-    description: 'Asymmetry of return distribution',
+    title: 'Assimetria (Skewness)',
+    description: 'Assimetria da distribuição de retornos',
     formula: 'E[(X - μ)³] / σ³',
     rows: [
-      { label: 'Current', value: value.toFixed(3), color: value >= 0 ? 'profit' as const : 'warning' as const },
-      { label: 'Distribution', value: value > 0 ? 'Right-skewed' : value < 0 ? 'Left-skewed' : 'Symmetric' },
+      { label: 'Atual', value: value.toFixed(3), color: value >= 0 ? 'profit' as const : 'warning' as const },
+      { label: 'Distribuição', value: value > 0 ? 'Assimétrica à direita' : value < 0 ? 'Assimétrica à esquerda' : 'Simétrica' },
     ],
-    interpretation: 'Positive skew = more extreme gains. Negative skew = more extreme losses.'
+    interpretation: 'Assimetria positiva = mais ganhos extremos. Negativa = mais perdas extremas.'
   }),
   
   kurtosis: (value: number) => ({
-    title: 'Excess Kurtosis',
-    description: 'Tail thickness vs normal distribution',
+    title: 'Curtose Excessiva',
+    description: 'Espessura das caudas vs distribuição normal',
     formula: 'E[(X - μ)⁴] / σ⁴ - 3',
     rows: [
-      { label: 'Current', value: value.toFixed(3) },
-      { label: 'Tails', value: value > 0 ? 'Fat tails' : value < 0 ? 'Thin tails' : 'Normal' },
+      { label: 'Atual', value: value.toFixed(3) },
+      { label: 'Caudas', value: value > 0 ? 'Caudas gordas' : value < 0 ? 'Caudas finas' : 'Normal' },
     ],
-    interpretation: 'Positive = more extreme events than normal. Common in finance.'
+    interpretation: 'Positivo = mais eventos extremos que o normal. Comum em finanças.'
   }),
 };
 

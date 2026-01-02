@@ -12,7 +12,7 @@ import { WFAAnalysis } from '../components/WFAAnalysis';
 import { StressAnalysis } from '../components/StressAnalysis';
 import { RiskDecomposition } from '../components/RiskDecomposition';
 import { useDataStore } from '../stores/dataStore';
-import { config } from '../lib/platform';
+import { config, platform } from '../lib/platform';
 import type { MonthlyReturn, RollingPoint, CandidateSummary } from '../stores/dataStore';
 import { 
   Play, 
@@ -205,6 +205,7 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState<'all' | 'br' | 'us'>('all');
+  const [stageFilter, setStageFilter] = useState<'all' | 'validated' | 'research'>('validated'); // Default to validated
 
   useEffect(() => {
     loadRecentCandidates();
@@ -235,6 +236,10 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   };
 
   const filtered = candidates.filter(c => {
+    // Stage filter (validated = Stage B, research = Stage A)
+    if (stageFilter === 'validated' && c.source_stage !== 'B') return false;
+    if (stageFilter === 'research' && c.source_stage !== 'A') return false;
+    
     // Market filter
     if (marketFilter !== 'all') {
       const market = inferMarket(c);
@@ -312,6 +317,40 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
             }`}
           >
             🇺🇸 US
+          </button>
+        </div>
+
+        {/* Stage Filter */}
+        <div className="flex rounded-xl overflow-hidden border border-terminal-border">
+          <button
+            onClick={() => setStageFilter('validated')}
+            className={`px-4 py-3 text-sm font-medium transition-colors ${
+              stageFilter === 'validated' 
+                ? 'bg-emerald-500/20 text-emerald-400' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            ✓ Validated
+          </button>
+          <button
+            onClick={() => setStageFilter('research')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              stageFilter === 'research' 
+                ? 'bg-amber-500/20 text-amber-400' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🔬 Research
+          </button>
+          <button
+            onClick={() => setStageFilter('all')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              stageFilter === 'all' 
+                ? 'bg-profit/20 text-profit' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            All Stages
           </button>
         </div>
         
@@ -497,7 +536,11 @@ export function Backtest() {
   useEffect(() => {
     if (selectedCandidate) {
       loadBacktest(selectedCandidate.candidate_id);
-      loadRiskMetrics(selectedCandidate.candidate_id);
+      
+      // Risk metrics only available in Tauri mode
+      if (platform.isTauri) {
+        loadRiskMetrics(selectedCandidate.candidate_id);
+      }
       
       // Also load simulated equity for Neon candidates
       if ((selectedCandidate as any).data_source === 'neon' || !backtest?.available) {

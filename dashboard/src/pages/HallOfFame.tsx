@@ -26,12 +26,12 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
     <div className="flex flex-wrap items-center gap-4 p-4 bg-slate-800/50 rounded-xl border border-slate-700">
       <div className="flex items-center gap-2">
         <Filter className="w-4 h-4 text-slate-400" />
-        <span className="text-sm text-slate-400">Filters:</span>
+        <span className="text-sm text-slate-400">Filtros:</span>
       </div>
       
-      {/* Market Filter */}
+      {/* Filtro de Mercado */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">Market:</span>
+        <span className="text-xs text-slate-500">Mercado:</span>
         <div className="flex rounded-lg overflow-hidden border border-slate-700">
           {(['all', 'br', 'us'] as const).map(m => (
             <button
@@ -43,30 +43,30 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              {m === 'all' ? 'All' : m.toUpperCase()}
+              {m === 'all' ? 'Todos' : m.toUpperCase()}
             </button>
           ))}
         </div>
       </div>
       
-      {/* Sort By */}
+      {/* Ordenação */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">Sort:</span>
+        <span className="text-xs text-slate-500">Ordenar:</span>
         <select
           value={filter.sortBy}
           onChange={e => setFilter({ ...filter, sortBy: e.target.value as FilterState['sortBy'] })}
           className="px-3 py-1 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-amber-500"
         >
-          <option value="sharpe">Sharpe (High → Low)</option>
-          <option value="date">Date (Recent → Old)</option>
-          <option value="pbo">PBO (Low → High)</option>
-          <option value="dsr">DSR (High → Low)</option>
+          <option value="sharpe">Sharpe (Maior → Menor)</option>
+          <option value="date">Data (Recente → Antigo)</option>
+          <option value="pbo">PBO (Menor → Maior)</option>
+          <option value="dsr">DSR (Maior → Menor)</option>
         </select>
       </div>
       
-      {/* Limit */}
+      {/* Limite */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">Show:</span>
+        <span className="text-xs text-slate-500">Mostrar:</span>
         <select
           value={filter.limit}
           onChange={e => setFilter({ ...filter, limit: parseInt(e.target.value) })}
@@ -85,28 +85,28 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
 // ENTRY CARD COMPONENT
 // =============================================================================
 
-// Check if metrics are within valid ranges (quant sanity check)
+// Verifica se as métricas estão dentro de intervalos válidos (sanity check quant)
 function validateMetrics(m: HallOfFameEntry['metrics']) {
   const issues: string[] = [];
   
-  // Sharpe ratio sanity: realistic range is -3 to +5 for most strategies
+  // Sharpe ratio sanity: intervalo realista é -3 a +5 para maioria das estratégias
   if (m.oosSharpeNet != null && (m.oosSharpeNet > 10 || m.oosSharpeNet < -3)) {
-    issues.push(`Sharpe ${m.oosSharpeNet.toFixed(1)} is unrealistic`);
+    issues.push(`Sharpe ${m.oosSharpeNet.toFixed(1)} é irreal`);
   }
   
-  // PBO should be between 0 and 1, typically 0.05-0.50
+  // PBO deve estar entre 0 e 1, tipicamente 0.05-0.50
   if (m.pbo === 0 || m.pbo == null) {
-    issues.push('PBO not computed');
+    issues.push('PBO não calculado');
   }
   
-  // DSR should be positive and typically 60-80% of raw Sharpe
+  // DSR deve ser positivo e tipicamente 60-80% do Sharpe bruto
   if (m.dsr === 0 || m.dsr == null) {
-    issues.push('DSR not computed');
+    issues.push('DSR não calculado');
   }
   
-  // MaxDD should be negative and between 0 and -1
+  // MaxDD deve ser negativo e entre 0 e -1
   if (m.maxDrawdownNet == null) {
-    issues.push('MaxDD missing');
+    issues.push('MaxDD ausente');
   }
   
   return { valid: issues.length === 0, issues };
@@ -149,14 +149,14 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
             }`}>
               {entry.market?.toUpperCase() || 'BR'}
             </span>
-            {!metricsCheck.valid && (
-              <span 
-                className="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-400 cursor-help"
-                title={metricsCheck.issues.join(', ')}
-              >
-                ⚠ Incomplete
-              </span>
-            )}
+                    {!metricsCheck.valid && (
+                      <span 
+                        className="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-400 cursor-help"
+                        title={metricsCheck.issues.join(', ')}
+                      >
+                        ⚠ Incompleto
+                      </span>
+                    )}
           </div>
           <div className="text-xs text-slate-500 mt-0.5 font-mono">
             {entry.candidateId.slice(-12)}
@@ -191,14 +191,14 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
       {expanded && (
         <div className="border-t border-slate-700 p-4 bg-slate-900/30">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Metrics */}
+            {/* Métricas */}
             <div>
               <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <BarChart3 className="w-3 h-3" /> Metrics
+                <BarChart3 className="w-3 h-3" /> Métricas
               </h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">OOS Sharpe NET</span>
+                  <span className="text-slate-500">Sharpe OOS NET</span>
                   <span className="text-emerald-400 font-mono">{metrics.oosSharpeNet?.toFixed(4)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -206,16 +206,16 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                   <span className="text-white font-mono">{((metrics.cagrNet || 0) * 100).toFixed(2)}%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Max Drawdown</span>
+                  <span className="text-slate-500">Drawdown Máximo</span>
                   <span className="text-rose-400 font-mono">{(Math.abs(metrics.maxDrawdownNet || 0) * 100).toFixed(2)}%</span>
                 </div>
               </div>
             </div>
             
-            {/* Validation */}
+            {/* Validação */}
             <div>
               <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Shield className="w-3 h-3" /> Validation
+                <Shield className="w-3 h-3" /> Validação
               </h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
@@ -227,7 +227,7 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                   <span className="text-white font-mono">{metrics.dsr?.toFixed(3)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Gates Passed</span>
+                  <span className="text-slate-500">Gates Aprovados</span>
                   {validation.gatesPassed ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   ) : (
@@ -241,10 +241,10 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
               </div>
             </div>
             
-            {/* Provenance */}
+            {/* Proveniência */}
             <div>
               <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <GitBranch className="w-3 h-3" /> Provenance
+                <GitBranch className="w-3 h-3" /> Proveniência
               </h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
@@ -252,69 +252,69 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                   <span className="text-white font-mono text-xs">{entry.provenance.gitSha?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Config Hash</span>
+                  <span className="text-slate-500">Hash Config</span>
                   <span className="text-white font-mono text-xs">{entry.provenance.configHash?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Dataset Hash</span>
+                  <span className="text-slate-500">Hash Dataset</span>
                   <span className="text-white font-mono text-xs">{entry.provenance.datasetHash?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Genome Hash</span>
+                  <span className="text-slate-500">Hash Genoma</span>
                   <span className="text-white font-mono text-xs">{entry.genomeHash?.slice(0, 7) || '—'}</span>
                 </div>
               </div>
             </div>
             
-            {/* Timing */}
+            {/* Tempo */}
             <div>
               <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Clock className="w-3 h-3" /> Timing
+                <Clock className="w-3 h-3" /> Tempo
               </h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Promoted</span>
+                  <span className="text-slate-500">Promovido</span>
                   <span className="text-white text-xs">{new Date(entry.promotedAt).toLocaleDateString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Run ID</span>
+                  <span className="text-slate-500">ID Execução</span>
                   <span className="text-white font-mono text-xs">{entry.runId?.slice(0, 8)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Campaign</span>
+                  <span className="text-slate-500">Campanha</span>
                   <span className="text-white text-xs truncate max-w-[100px]">{entry.campaignId?.slice(0, 8)}</span>
                 </div>
               </div>
             </div>
           </div>
           
-          {/* Notes */}
+          {/* Notas */}
           {entry.notes && (
             <div className="mt-4 pt-4 border-t border-slate-700">
-              <p className="text-xs text-slate-500">Notes: {entry.notes}</p>
+              <p className="text-xs text-slate-500">Notas: {entry.notes}</p>
             </div>
           )}
           
-          {/* Actions */}
+          {/* Ações */}
           <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end gap-3">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // Navigate to backtest page with this candidate
+                // Navega para página de backtest com este candidato
                 window.dispatchEvent(new CustomEvent('navigate', { detail: 'backtest' }));
-                // Set selected candidate in data store via API
+                // Define candidato selecionado no data store via API
                 fetch(`/api/candidate/${entry.candidateId}`)
                   .then(res => res.json())
                   .then(data => {
-                    // Trigger candidate selection in dataStore
+                    // Dispara seleção de candidato no dataStore
                     window.dispatchEvent(new CustomEvent('select-candidate', { detail: data }));
                   })
-                  .catch(err => console.error('Failed to load candidate:', err));
+                  .catch(err => console.error('Falha ao carregar candidato:', err));
               }}
               className="flex items-center gap-2 px-4 py-2 bg-accent-cyan/20 text-accent-cyan rounded-lg hover:bg-accent-cyan/30 transition-colors text-sm font-medium"
             >
               <LineChart className="w-4 h-4" />
-              Open Backtest
+              Abrir Backtest
             </button>
           </div>
         </div>
@@ -361,22 +361,22 @@ export function HallOfFame() {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Header */}
+        {/* Cabeçalho */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-3">
               <Trophy className="w-6 h-6 text-amber-400" />
-              Hall of Fame
+              Hall da Fama
             </h1>
             <p className="text-slate-400 text-sm mt-1">
-              Elite strategies that passed all institutional validation gates
+              Estratégias de elite que passaram em todos os gates institucionais de validação
             </p>
           </div>
           
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-2xl font-bold text-amber-400">{stats?.promotions.total || hallOfFame.length}</p>
-              <p className="text-xs text-slate-500">Total Promoted</p>
+              <p className="text-xs text-slate-500">Total Promovidas</p>
             </div>
             <button
               onClick={async () => {
@@ -387,17 +387,17 @@ export function HallOfFame() {
                     body: JSON.stringify({ limit: 1000 }),
                   });
                   const data = await res.json();
-                  console.log('Promotion check:', data);
+                  console.log('Verificação de promoção:', data);
                   if (data.promoted > 0) {
                     fetchHallOfFame(filter.limit, filter.market === 'all' ? undefined : filter.market);
                   }
                 } catch (err) {
-                  console.error('Promotion check failed:', err);
+                  console.error('Verificação de promoção falhou:', err);
                 }
               }}
               className="px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
-              Scan for Promotions
+              Buscar Promoções
             </button>
             <button
               onClick={() => fetchHallOfFame(filter.limit, filter.market === 'all' ? undefined : filter.market)}
@@ -412,21 +412,21 @@ export function HallOfFame() {
         {/* Filters */}
         <FilterBar filter={filter} setFilter={setFilter} />
         
-        {/* Stats Summary */}
+        {/* Resumo de Estatísticas */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center">
             <p className="text-2xl font-bold text-emerald-400">{stats?.promotions.last24h || 0}</p>
-            <p className="text-xs text-slate-500">Promoted (24h)</p>
+            <p className="text-xs text-slate-500">Promovidas (24h)</p>
           </div>
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center">
             <p className="text-2xl font-bold text-white">{stats?.promotions.last7d || 0}</p>
-            <p className="text-xs text-slate-500">Promoted (7d)</p>
+            <p className="text-xs text-slate-500">Promovidas (7d)</p>
           </div>
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center">
             <p className="text-2xl font-bold text-white">
               {sortedEntries.length > 0 ? sortedEntries[0].metrics.oosSharpeNet?.toFixed(3) : '—'}
             </p>
-            <p className="text-xs text-slate-500">Best Sharpe</p>
+            <p className="text-xs text-slate-500">Melhor Sharpe</p>
           </div>
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center">
             <p className="text-2xl font-bold text-white">
@@ -435,11 +435,11 @@ export function HallOfFame() {
                 : '—'
               }
             </p>
-            <p className="text-xs text-slate-500">Avg Sharpe</p>
+            <p className="text-xs text-slate-500">Sharpe Médio</p>
           </div>
         </div>
         
-        {/* Entries List */}
+        {/* Lista de Entradas */}
         {hallOfFameLoading ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="w-8 h-8 text-slate-500 animate-spin" />
@@ -447,8 +447,8 @@ export function HallOfFame() {
         ) : sortedEntries.length === 0 ? (
           <div className="text-center py-12 rounded-xl border border-slate-700 bg-slate-800/30">
             <Trophy className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <p className="text-slate-400">No promoted strategies yet</p>
-            <p className="text-sm text-slate-500 mt-1">Strategies will appear here once they pass all validation gates</p>
+            <p className="text-slate-400">Nenhuma estratégia promovida ainda</p>
+            <p className="text-sm text-slate-500 mt-1">Estratégias aparecerão aqui quando passarem em todos os gates de validação</p>
           </div>
         ) : (
           <div className="space-y-3">

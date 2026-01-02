@@ -238,7 +238,10 @@ export function ConfigBudget() {
               />
             </div>
             <div>
-              <label className="text-sm text-slate-400 mb-2 block">Seeds</label>
+              <label className="text-sm text-slate-400 mb-2 flex items-center">
+                Seeds
+                <QuickTooltip termKey="seeds" size="sm" />
+              </label>
               <input
                 type="text"
                 value={seedInput}

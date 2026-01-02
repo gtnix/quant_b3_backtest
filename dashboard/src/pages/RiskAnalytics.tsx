@@ -38,42 +38,42 @@ export function RiskAnalytics() {
     }
   }, [selectedCandidate?.candidate_id]);
 
-  // No artifacts root
+  // Sem artifacts root
   if (!artifactsRoot) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-6">
         <Shield className="w-16 h-16 text-terminal-muted" />
         <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
+          <h2 className="text-xl font-semibold mb-2">Nenhum Projeto Selecionado</h2>
           <p className="text-terminal-muted">
-            Select a project folder from the Candidates page first.
+            Selecione uma pasta de projeto na página de Candidatos primeiro.
           </p>
         </div>
       </div>
     );
   }
 
-  // No candidate selected
+  // Nenhum candidato selecionado
   if (!selectedCandidate) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-6">
         <Shield className="w-16 h-16 text-terminal-muted" />
         <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Candidate Selected</h2>
+          <h2 className="text-xl font-semibold mb-2">Nenhum Candidato Selecionado</h2>
           <p className="text-terminal-muted">
-            Select a candidate from the Candidates page to view risk analytics.
+            Selecione um candidato na página de Candidatos para ver análise de risco.
           </p>
         </div>
       </div>
     );
   }
 
-  // Loading state
+  // Estado de carregamento
   if (isLoading && !riskMetrics) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-4">
         <RefreshCw className="w-12 h-12 animate-spin text-terminal-muted" />
-        <p className="text-terminal-muted">Calculating risk metrics...</p>
+        <p className="text-terminal-muted">Calculando métricas de risco...</p>
       </div>
     );
   }
@@ -83,9 +83,9 @@ export function RiskAnalytics() {
       <div className="flex flex-col items-center justify-center h-full space-y-6">
         <AlertTriangle className="w-16 h-16 text-accent-yellow" />
         <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Risk Data Not Available</h2>
+          <h2 className="text-xl font-semibold mb-2">Dados de Risco Indisponíveis</h2>
           <p className="text-terminal-muted max-w-md">
-            {error || 'Unable to calculate risk metrics for this candidate.'}
+            {error || 'Não foi possível calcular métricas de risco para este candidato.'}
           </p>
         </div>
       </div>
@@ -94,12 +94,12 @@ export function RiskAnalytics() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Risk Analytics</h1>
+          <h1 className="text-2xl font-bold">Análise de Risco</h1>
           <p className="text-terminal-muted mt-1">
-            Institutional-grade risk analysis for{' '}
+            Análise de risco padrão institucional para{' '}
             <span className="text-accent-cyan font-mono">
               {selectedCandidate.display_name}
             </span>
@@ -110,7 +110,7 @@ export function RiskAnalytics() {
           className="flex items-center gap-2 px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border hover:border-profit transition-colors"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
+          Atualizar
         </button>
       </div>
 
@@ -160,72 +160,72 @@ export function RiskAnalytics() {
         </div>
       </div>
 
-      {/* Tail Risk Metrics */}
+      {/* Métricas de Risco de Cauda */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label inline-flex items-center">Skewness<QuickTooltip termKey="skewness" /></div>
+          <div className="metric-label inline-flex items-center">Assimetria<QuickTooltip termKey="skewness" /></div>
           <div className={`font-mono text-xl ${riskMetrics.skewness < 0 ? 'text-loss' : 'text-profit'}`}>
             {riskMetrics.skewness.toFixed(3)}
           </div>
           <div className="text-xs text-terminal-muted mt-1">
-            {riskMetrics.skewness < -0.5 ? 'Negative tail risk' : riskMetrics.skewness > 0.5 ? 'Positive skew' : 'Near symmetric'}
+            {riskMetrics.skewness < -0.5 ? 'Risco de cauda negativa' : riskMetrics.skewness > 0.5 ? 'Assimetria positiva' : 'Quase simétrico'}
           </div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Excess Kurtosis<QuickTooltip termKey="kurtosis" /></div>
+          <div className="metric-label inline-flex items-center">Curtose Excessiva<QuickTooltip termKey="kurtosis" /></div>
           <div className={`font-mono text-xl ${riskMetrics.kurtosis > 3 ? 'text-accent-yellow' : ''}`}>
             {riskMetrics.kurtosis.toFixed(3)}
           </div>
           <div className="text-xs text-terminal-muted mt-1">
-            {riskMetrics.kurtosis > 3 ? 'Fat tails (leptokurtic)' : 'Normal tails'}
+            {riskMetrics.kurtosis > 3 ? 'Caudas gordas (leptocúrtica)' : 'Caudas normais'}
           </div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Tail Ratio<QuickTooltip termKey="tail_ratio" /></div>
+          <div className="metric-label inline-flex items-center">Razão de Cauda<QuickTooltip termKey="tail_ratio" /></div>
           <div className="font-mono text-xl">{riskMetrics.tail_ratio.toFixed(2)}</div>
-          <div className="text-xs text-terminal-muted mt-1">P95 gain / P5 loss</div>
+          <div className="text-xs text-terminal-muted mt-1">Ganho P95 / Perda P5</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Gain-to-Pain<QuickTooltip termKey="gain_to_pain" /></div>
+          <div className="metric-label inline-flex items-center">Ganho/Dor<QuickTooltip termKey="gain_to_pain" /></div>
           <div className={`font-mono text-xl ${riskMetrics.gain_to_pain > 1 ? 'text-profit' : 'text-loss'}`}>
             {riskMetrics.gain_to_pain.toFixed(2)}
           </div>
-          <div className="text-xs text-terminal-muted mt-1">Total return / total pain</div>
+          <div className="text-xs text-terminal-muted mt-1">Retorno total / dor total</div>
         </div>
       </div>
 
-      {/* Best/Worst Analysis */}
+      {/* Análise Melhor/Pior */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label inline-flex items-center">Best Day<QuickTooltip termKey="best_day" /></div>
+          <div className="metric-label inline-flex items-center">Melhor Dia<QuickTooltip termKey="best_day" /></div>
           <div className="font-mono text-xl text-profit">+{(riskMetrics.best_day * 100).toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Worst Day<QuickTooltip termKey="worst_day" /></div>
+          <div className="metric-label inline-flex items-center">Pior Dia<QuickTooltip termKey="worst_day" /></div>
           <div className="font-mono text-xl text-loss">{(riskMetrics.worst_day * 100).toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Best Month<QuickTooltip termKey="best_month" /></div>
+          <div className="metric-label inline-flex items-center">Melhor Mês<QuickTooltip termKey="best_month" /></div>
           <div className="font-mono text-xl text-profit">+{riskMetrics.best_month.toFixed(2)}%</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Worst Month<QuickTooltip termKey="worst_month" /></div>
+          <div className="metric-label inline-flex items-center">Pior Mês<QuickTooltip termKey="worst_month" /></div>
           <div className="font-mono text-xl text-loss">{riskMetrics.worst_month.toFixed(2)}%</div>
         </div>
       </div>
 
-      {/* Drawdown Stats */}
+      {/* Estatísticas de Drawdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
-          <div className="metric-label inline-flex items-center">Longest Drawdown<QuickTooltip termKey="longest_dd" /></div>
-          <div className="font-mono text-xl">{riskMetrics.longest_dd_days} days</div>
+          <div className="metric-label inline-flex items-center">Maior Drawdown<QuickTooltip termKey="longest_dd" /></div>
+          <div className="font-mono text-xl">{riskMetrics.longest_dd_days} dias</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Avg DD Duration<QuickTooltip termKey="avg_dd_duration" /></div>
-          <div className="font-mono text-xl">{riskMetrics.average_dd_days.toFixed(1)} days</div>
+          <div className="metric-label inline-flex items-center">Duração Média DD<QuickTooltip termKey="avg_dd_duration" /></div>
+          <div className="font-mono text-xl">{riskMetrics.average_dd_days.toFixed(1)} dias</div>
         </div>
         <div className="card">
-          <div className="metric-label inline-flex items-center">Time Underwater<QuickTooltip termKey="time_underwater" /></div>
+          <div className="metric-label inline-flex items-center">Tempo Submerso<QuickTooltip termKey="time_underwater" /></div>
           <div className={`font-mono text-xl ${riskMetrics.time_underwater_pct > 50 ? 'text-loss' : ''}`}>
             {riskMetrics.time_underwater_pct.toFixed(1)}%
           </div>
@@ -238,13 +238,13 @@ export function RiskAnalytics() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Abas */}
       <div className="flex items-center gap-4 border-b border-terminal-border">
         {[
-          { key: 'var', label: 'VaR Analysis', icon: Shield },
-          { key: 'distribution', label: 'Return Distribution', icon: BarChart3 },
-          { key: 'rolling', label: 'Rolling Metrics', icon: Activity },
-          { key: 'monthly', label: 'Monthly Returns', icon: Calendar },
+          { key: 'var', label: 'Análise VaR', icon: Shield },
+          { key: 'distribution', label: 'Distribuição de Retornos', icon: BarChart3 },
+          { key: 'rolling', label: 'Métricas Móveis', icon: Activity },
+          { key: 'monthly', label: 'Retornos Mensais', icon: Calendar },
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -262,10 +262,10 @@ export function RiskAnalytics() {
         ))}
       </div>
 
-      {/* Tab Content */}
+      {/* Conteúdo das Abas */}
       {activeTab === 'var' && (
         <div className="card-elevated">
-          <h3 className="font-semibold text-lg mb-4">Value at Risk Analysis</h3>
+          <h3 className="font-semibold text-lg mb-4">Análise de Value at Risk</h3>
           <VaRGauge
             var95={riskMetrics.var_95}
             var99={riskMetrics.var_99}
@@ -277,7 +277,7 @@ export function RiskAnalytics() {
 
       {activeTab === 'distribution' && (
         <div className="card-elevated">
-          <h3 className="font-semibold text-lg mb-4">Daily Return Distribution</h3>
+          <h3 className="font-semibold text-lg mb-4">Distribuição de Retornos Diários</h3>
           <div className="h-[400px]">
             <ReturnDistribution returns={riskMetrics.daily_returns} showNormal />
           </div>
@@ -287,7 +287,7 @@ export function RiskAnalytics() {
       {activeTab === 'rolling' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card-elevated">
-            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Rolling Sharpe (252-day)<QuickTooltip termKey="rolling_sharpe" /></h3>
+            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Sharpe Móvel (252 dias)<QuickTooltip termKey="rolling_sharpe" /></h3>
             <div className="h-[300px]">
               <RollingMetrics
                 data={[
@@ -298,22 +298,22 @@ export function RiskAnalytics() {
             </div>
           </div>
           <div className="card-elevated">
-            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Rolling Volatility (252-day)<QuickTooltip termKey="rolling_volatility" /></h3>
+            <h3 className="font-semibold text-lg mb-4 inline-flex items-center">Volatilidade Móvel (252 dias)<QuickTooltip termKey="rolling_volatility" /></h3>
             <div className="h-[300px]">
               <RollingMetrics
                 data={[
-                  { label: 'Volatility', points: riskMetrics.rolling_volatility, color: '#ff6b6b' },
+                  { label: 'Volatilidade', points: riskMetrics.rolling_volatility, color: '#ff6b6b' },
                 ]}
                 showZeroLine={false}
               />
             </div>
           </div>
           <div className="card-elevated lg:col-span-2">
-            <h3 className="font-semibold text-lg mb-4">Rolling Returns (21-day)</h3>
+            <h3 className="font-semibold text-lg mb-4">Retornos Móveis (21 dias)</h3>
             <div className="h-[300px]">
               <RollingMetrics
                 data={[
-                  { label: '21-day Return', points: riskMetrics.rolling_returns, color: '#00d4ff' },
+                  { label: 'Retorno 21 dias', points: riskMetrics.rolling_returns, color: '#00d4ff' },
                 ]}
                 showZeroLine
               />
@@ -324,7 +324,7 @@ export function RiskAnalytics() {
 
       {activeTab === 'monthly' && (
         <div className="card-elevated">
-          <h3 className="font-semibold text-lg mb-4">Monthly Returns Heatmap</h3>
+          <h3 className="font-semibold text-lg mb-4">Mapa de Calor de Retornos Mensais</h3>
           <MonthlyHeatmap data={riskMetrics.monthly_returns} />
         </div>
       )}

@@ -24,6 +24,17 @@ async function initBrowserMode(): Promise<string | null> {
   return null;
 }
 
+// Safe invoke wrapper - works in both Tauri and Browser modes
+async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (platform.isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke(command, args);
+  }
+  // Browser mode: these commands are not available, throw to trigger fallback
+  console.warn(`[Browser Mode] Command '${command}' not available in browser mode`);
+  throw new Error(`Command '${command}' not available in browser mode`);
+}
+
 // =============================================================================
 // ARTIFACT TYPES - Aligned with backend types
 // =============================================================================

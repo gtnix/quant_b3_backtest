@@ -125,7 +125,7 @@ export function Candidates() {
     {
       key: '_select',
       header: (
-        <button onClick={handleSelectAll} className="p-1 hover:bg-terminal-surface rounded" title="Select all">
+        <button onClick={handleSelectAll} className="p-1 hover:bg-terminal-surface rounded" title="Selecionar todos">
           <Square className="w-4 h-4 text-terminal-muted" />
         </button>
       ),
@@ -152,7 +152,7 @@ export function Candidates() {
     },
     {
       key: 'display_name',
-      header: 'Strategy',
+      header: 'Estratégia',
       sortable: true,
       render: (value: unknown, row: Record<string, unknown>) => {
         const gatesPassed = row.gates_passed as boolean;
@@ -183,14 +183,14 @@ export function Candidates() {
           return (
             <div className="flex items-center gap-1.5 text-profit">
               <CheckCircle className="w-4 h-4" />
-              <span className="text-xs font-medium">Validated</span>
+              <span className="text-xs font-medium">Validado</span>
             </div>
           );
         }
         return (
           <div className="flex items-center gap-1.5 text-terminal-muted">
             <Target className="w-4 h-4" />
-            <span className="text-xs font-medium">Research</span>
+            <span className="text-xs font-medium">Pesquisa</span>
           </div>
         );
       },
@@ -300,12 +300,12 @@ export function Candidates() {
       <div className="flex flex-col items-center justify-center h-full space-y-6">
         <FolderOpen className="w-16 h-16 text-terminal-muted" />
         <div className="text-center max-w-lg">
-          <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
-          <p className="text-terminal-muted mb-4">Select a project folder containing SCG artifacts.</p>
+          <h2 className="text-xl font-semibold mb-2">Nenhum Projeto Selecionado</h2>
+          <p className="text-terminal-muted mb-4">Selecione uma pasta de projeto contendo artefatos SCG.</p>
           <FolderSelector 
             type="artifacts"
-            label="Artifacts Folder"
-            description="Select the folder containing your SCG output"
+            label="Pasta de Artefatos"
+            description="Selecione a pasta contendo o output do SCG"
             onPathChange={(path) => setArtifactsRoot(path)}
             className="mb-4"
           />
@@ -317,28 +317,28 @@ export function Candidates() {
   if (!selectedRunId) {
     return (
       <div className="space-y-6 p-6">
-        {/* Header */}
+        {/* Cabeçalho */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
             <Database className="w-8 h-8 text-accent-cyan" />
-            <h1 className="text-2xl font-bold">Candidate Explorer</h1>
+            <h1 className="text-2xl font-bold">Explorador de Candidatos</h1>
           </div>
-          <p className="text-terminal-muted">Select a run to explore strategy candidates</p>
+          <p className="text-terminal-muted">Selecione uma execução para explorar candidatos de estratégia</p>
         </div>
 
-        {/* Run Selector Grid */}
+        {/* Grid Seletor de Execuções */}
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <Clock className="w-5 h-5 text-terminal-muted" />
-              Recent Runs
+              Execuções Recentes
             </h2>
             <button
               onClick={() => fetchRecentRuns(10)}
               className="text-sm text-terminal-muted hover:text-terminal-text flex items-center gap-1"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
+              Atualizar
             </button>
           </div>
 
@@ -349,8 +349,8 @@ export function Candidates() {
           ) : recentRuns.length === 0 ? (
             <div className="text-center py-12 bg-terminal-surface rounded-xl border border-terminal-border">
               <Award className="w-12 h-12 mx-auto mb-4 text-terminal-muted opacity-50" />
-              <p className="text-terminal-muted">No runs found</p>
-              <p className="text-sm text-terminal-muted mt-1">Generate strategies from the Cockpit</p>
+              <p className="text-terminal-muted">Nenhuma execução encontrada</p>
+              <p className="text-sm text-terminal-muted mt-1">Gere estratégias a partir do Cockpit</p>
             </div>
           ) : (
             <div className="grid gap-3">
@@ -376,14 +376,14 @@ export function Candidates() {
                     </div>
                     <div className="flex items-center gap-6">
                       <div className="text-right">
-                        <div className="text-sm text-terminal-muted">Candidates</div>
+                        <div className="text-sm text-terminal-muted">Candidatos</div>
                         <div className="font-mono font-bold text-accent-cyan">
                           {run.candidates_count}
                         </div>
                       </div>
                       {run.best_oos_sharpe_net && (
                         <div className="text-right">
-                          <div className="text-sm text-terminal-muted">Best Sharpe</div>
+                          <div className="text-sm text-terminal-muted">Melhor Sharpe</div>
                           <div className="font-mono font-bold text-profit">
                             {run.best_oos_sharpe_net.toFixed(2)}
                           </div>
@@ -392,7 +392,7 @@ export function Candidates() {
                       <div className="text-right">
                         <div className="text-sm text-terminal-muted">Status</div>
                         <div className={`font-medium ${run.status === 'completed' ? 'text-profit' : 'text-accent-yellow'}`}>
-                          {run.status}
+                          {run.status === 'completed' ? 'Concluído' : run.status}
                         </div>
                       </div>
                       <ChevronDown className="w-5 h-5 text-terminal-muted -rotate-90 group-hover:text-profit transition-colors" />
@@ -404,12 +404,12 @@ export function Candidates() {
           )}
         </div>
 
-        {/* Legacy runs from campaigns (if available) */}
+        {/* Execuções legadas de campanhas (se disponíveis) */}
         {runs.length > 0 && (
           <div className="max-w-4xl mx-auto mt-8">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <FolderOpen className="w-5 h-5 text-terminal-muted" />
-              From Local Artifacts
+              De Artefatos Locais
             </h2>
             <div className="flex flex-wrap gap-2">
               {runs.slice(0, 5).map(run => (
@@ -433,7 +433,7 @@ export function Candidates() {
 
   return (
     <div className="space-y-4">
-      {/* Breadcrumb Navigation */}
+      {/* Navegação Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
         <button 
           onClick={() => {
@@ -442,7 +442,7 @@ export function Candidates() {
           }}
           className="text-terminal-muted hover:text-white transition-colors"
         >
-          Runs
+          Execuções
         </button>
         <ChevronDown className="w-4 h-4 text-terminal-muted -rotate-90" />
         <span className="text-accent-cyan font-mono">{selectedRunInfo?.campaign_name || selectedRunId?.slice(0, 12)}</span>
@@ -454,12 +454,12 @@ export function Candidates() {
         )}
       </div>
 
-      {/* Header */}
+      {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Candidate Explorer</h1>
+          <h1 className="text-2xl font-bold">Explorador de Candidatos</h1>
           <p className="text-terminal-muted text-sm mt-1">
-            <span className="font-medium">{selectedRunInfo?.campaign_name || 'Campaign'}</span>
+            <span className="font-medium">{selectedRunInfo?.campaign_name || 'Campanha'}</span>
             {' — '}
             <span className="font-mono text-accent-cyan">{selectedRunId}</span>
           </p>
@@ -470,16 +470,16 @@ export function Candidates() {
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border hover:border-profit transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
+            Atualizar
           </button>
           <button className="flex items-center gap-2 px-3 py-2 rounded-lg bg-profit/10 text-profit border border-profit/30 hover:bg-profit/20 transition-all text-sm">
             <Download className="w-4 h-4" />
-            Export
+            Exportar
           </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Cards de Estatísticas */}
       <div className="grid grid-cols-4 gap-3">
         <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
           <div className="flex items-center gap-3">
@@ -488,7 +488,7 @@ export function Candidates() {
             </div>
             <div>
               <div className="text-2xl font-bold">{candidatesList.length}</div>
-              <div className="text-xs text-terminal-muted">Total Candidates</div>
+              <div className="text-xs text-terminal-muted">Total de Candidatos</div>
             </div>
           </div>
         </div>
@@ -499,7 +499,7 @@ export function Candidates() {
             </div>
             <div>
               <div className="text-2xl font-bold text-profit">{validatedCount}</div>
-              <div className="text-xs text-terminal-muted">Validated</div>
+              <div className="text-xs text-terminal-muted">Validados</div>
             </div>
           </div>
         </div>
@@ -521,17 +521,17 @@ export function Candidates() {
             </div>
             <div>
               <div className="text-2xl font-bold">{bestSharpe.toFixed(2)}</div>
-              <div className="text-xs text-terminal-muted">Best Sharpe</div>
+              <div className="text-xs text-terminal-muted">Melhor Sharpe</div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Selection Bar */}
+      {/* Barra de Seleção */}
       {selectedCandidateIds.length > 0 && (
         <div className="flex items-center gap-4 p-3 bg-accent-cyan/10 border border-accent-cyan/30 rounded-lg">
           <span className="text-sm">
-            <span className="font-mono text-accent-cyan font-bold">{selectedCandidateIds.length}</span> selected
+            <span className="font-mono text-accent-cyan font-bold">{selectedCandidateIds.length}</span> selecionados
           </span>
           <div className="flex-1" />
           <button
@@ -540,14 +540,14 @@ export function Candidates() {
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent-cyan text-black font-medium text-sm hover:bg-accent-cyan/90 transition-colors disabled:opacity-50"
           >
             <GitCompare className="w-4 h-4" />
-            Compare
+            Comparar
           </button>
           <button
             onClick={clearCandidateSelection}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-terminal-surface border border-terminal-border text-sm hover:border-loss transition-colors"
           >
             <X className="w-4 h-4" />
-            Clear
+            Limpar
           </button>
         </div>
       )}
@@ -556,13 +556,13 @@ export function Candidates() {
         <div className="p-4 bg-loss/10 border border-loss/30 rounded-lg text-loss">{error}</div>
       )}
 
-      {/* Filters */}
+      {/* Filtros */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-terminal-muted" />
           <input
             type="text"
-            placeholder="Search strategies..."
+            placeholder="Buscar estratégias..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm"
@@ -576,7 +576,7 @@ export function Candidates() {
             onChange={(e) => setFilterPbo(e.target.value ? Number(e.target.value) : null)}
             className="px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm cursor-pointer"
           >
-            <option value="">All PBO</option>
+            <option value="">Todo PBO</option>
             <option value="0.10">PBO ≤ 10%</option>
             <option value="0.15">PBO ≤ 15%</option>
             <option value="0.20">PBO ≤ 20%</option>
@@ -588,19 +588,19 @@ export function Candidates() {
           onChange={(e) => setFilterClass(e.target.value)}
           className="px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg focus:outline-none focus:border-profit text-sm cursor-pointer"
         >
-          <option value="">All Status</option>
-          <option value="validated">Validated</option>
-          <option value="research">Research</option>
+          <option value="">Todo Status</option>
+          <option value="validated">Validado</option>
+          <option value="research">Pesquisa</option>
         </select>
         
-        {/* View Mode Toggle */}
+        {/* Toggle de Modo de Visualização */}
         <div className="flex items-center bg-terminal-surface border border-terminal-border rounded-lg overflow-hidden ml-auto">
           <button
             onClick={() => setViewMode('table')}
             className={`px-3 py-2 text-sm flex items-center gap-1.5 ${viewMode === 'table' ? 'bg-profit/20 text-profit' : 'text-terminal-muted hover:text-white'}`}
           >
             <Table className="w-4 h-4" />
-            Table
+            Tabela
           </button>
           <button
             onClick={() => setViewMode('pareto')}
@@ -612,15 +612,15 @@ export function Candidates() {
         </div>
       </div>
 
-      {/* Pareto Scatter View */}
+      {/* Visualização Pareto Scatter */}
       {viewMode === 'pareto' && (
         <div className="bg-terminal-surface rounded-xl border border-terminal-border p-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-medium flex items-center gap-2">
               <ScatterChart className="w-4 h-4 text-terminal-muted" />
-              Pareto Frontier: Sharpe vs Max Drawdown
+              Fronteira de Pareto: Sharpe vs Drawdown Máximo
             </h3>
-            <span className="text-xs text-terminal-muted">{candidatesList.length} candidates</span>
+            <span className="text-xs text-terminal-muted">{candidatesList.length} candidatos</span>
           </div>
           <ParetoScatter
             data={candidatesList.map(c => ({
@@ -640,7 +640,7 @@ export function Candidates() {
         </div>
       )}
 
-      {/* Table View */}
+      {/* Visualização em Tabela */}
       {viewMode === 'table' && (
         <div className="bg-terminal-surface rounded-xl border border-terminal-border overflow-hidden">
           {isLoading && candidatesList.length === 0 ? (
@@ -650,8 +650,8 @@ export function Candidates() {
           ) : candidatesList.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-terminal-muted">
               <Award className="w-12 h-12 mb-4 opacity-50" />
-              <p>No candidates found</p>
-              <p className="text-sm mt-1">Try adjusting your filters</p>
+              <p>Nenhum candidato encontrado</p>
+              <p className="text-sm mt-1">Tente ajustar seus filtros</p>
             </div>
           ) : (
             <DataTable

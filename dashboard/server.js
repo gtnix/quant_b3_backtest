@@ -569,12 +569,12 @@ app.get('/api/candidates/recent', async (req, res) => {
     const result = await pool.query(`
       SELECT c.candidate_id, c.genome_hash, c.rank_in_run, c.oos_sharpe_net, 
              c.oos_cagr_net, c.max_drawdown_net, c.pbo, c.dsr, c.gates_passed,
-             c.stress_passed, c.stress_total, c.created_at,
+             c.stress_passed, c.stress_total, c.created_at, c.source_stage,
              r.run_id, camp.name as campaign_name
       FROM scg_candidates c
       LEFT JOIN scg_runs r ON c.run_id = r.run_id
       LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id
-      ORDER BY c.created_at DESC
+      ORDER BY c.oos_sharpe_net DESC NULLS LAST, c.created_at DESC
       LIMIT $1
     `, [parseInt(limit)]);
     
@@ -595,7 +595,8 @@ app.get('/api/candidates/recent', async (req, res) => {
         stress_total: c.stress_total || 0,
         run_id: c.run_id,
         campaign_name: c.campaign_name,
-        created_at: c.created_at
+        created_at: c.created_at,
+        source_stage: c.source_stage
       };
     });
     

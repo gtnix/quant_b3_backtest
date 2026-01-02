@@ -24,9 +24,9 @@ import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 function StatusIndicator({ status, sseConnected }: { status: OmpStatus; sseConnected: boolean }) {
   const statusConfig: Record<OmpStatus, { color: string; pulse: boolean; label: string }> = {
-    running: { color: 'bg-emerald-500', pulse: true, label: 'MINING' },
-    paused: { color: 'bg-amber-500', pulse: false, label: 'PAUSED' },
-    draining: { color: 'bg-orange-500', pulse: true, label: 'DRAINING' },
+    running: { color: 'bg-emerald-500', pulse: true, label: 'MINERANDO' },
+    paused: { color: 'bg-amber-500', pulse: false, label: 'PAUSADO' },
+    draining: { color: 'bg-orange-500', pulse: true, label: 'FINALIZANDO' },
     offline: { color: 'bg-slate-600', pulse: false, label: 'OFFLINE' },
   };
   
@@ -34,13 +34,13 @@ function StatusIndicator({ status, sseConnected }: { status: OmpStatus; sseConne
   
   return (
     <div className="flex items-center gap-3">
-      {/* SSE Indicator */}
+      {/* Indicador SSE */}
       <div className={`flex items-center gap-1 text-xs ${sseConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
         {sseConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-        <span className="font-mono">{sseConnected ? 'LIVE' : 'DISCONNECTED'}</span>
+        <span className="font-mono">{sseConnected ? 'AO VIVO' : 'DESCONECTADO'}</span>
       </div>
       
-      {/* Status Badge */}
+      {/* Badge de Status */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded">
         <span className={`w-2.5 h-2.5 rounded-full ${config.color} ${config.pulse ? 'animate-pulse' : ''}`} />
         <span className="font-mono text-sm text-white tracking-wider">{config.label}</span>
@@ -167,7 +167,7 @@ function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxH
     }
   }, [logs, autoScroll]);
   
-  // Re-enable auto-scroll after 30 seconds of inactivity
+  // Reabilita auto-scroll após 30 segundos de inatividade
   useEffect(() => {
     if (!autoScroll) {
       const timer = setInterval(() => {
@@ -198,19 +198,19 @@ function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxH
       <div className="flex items-center justify-between px-3 py-2 bg-slate-900/50 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-slate-500" />
-          <span className="text-xs font-medium text-slate-400">ACTIVITY LOG</span>
+          <span className="text-xs font-medium text-slate-400">LOG DE ATIVIDADE</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-600">{logs.length} entries</span>
+          <span className="text-[10px] text-slate-600">{logs.length} entradas</span>
           <button
             onClick={() => {
               setAutoScroll(!autoScroll);
               lastUserScrollRef.current = Date.now();
             }}
             className={`text-xs px-2 py-0.5 rounded ${autoScroll ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}
-            title={autoScroll ? 'Click to pause auto-scroll' : 'Click to resume (or wait 30s)'}
+            title={autoScroll ? 'Clique para pausar auto-scroll' : 'Clique para retomar (ou aguarde 30s)'}
           >
-            {autoScroll ? 'AUTO' : 'PAUSED'}
+            {autoScroll ? 'AUTO' : 'PAUSADO'}
           </button>
         </div>
       </div>
@@ -227,7 +227,7 @@ function ActivityLog({ logs, maxHeight = 200 }: { logs: ActivityLogEntry[]; maxH
         }}
       >
         {logs.length === 0 ? (
-          <div className="p-4 text-center text-slate-600">No activity yet</div>
+          <div className="p-4 text-center text-slate-600">Nenhuma atividade ainda</div>
         ) : (
           logs.map((log) => (
             <div 
@@ -261,9 +261,9 @@ function PerformancePanel() {
       <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
         <div className="flex items-center gap-2 mb-3">
           <Gauge className="w-4 h-4 text-slate-500" />
-          <span className="text-xs font-medium text-slate-400">RUST ENGINE METRICS</span>
+          <span className="text-xs font-medium text-slate-400">MÉTRICAS DO ENGINE RUST</span>
         </div>
-        <div className="text-center py-4 text-slate-600 text-sm">Loading...</div>
+        <div className="text-center py-4 text-slate-600 text-sm">Carregando...</div>
       </div>
     );
   }
@@ -276,7 +276,7 @@ function PerformancePanel() {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Gauge className="w-4 h-4 text-violet-400" />
-          <span className="text-xs font-medium text-slate-400">RUST ENGINE METRICS</span>
+          <span className="text-xs font-medium text-slate-400">MÉTRICAS DO ENGINE RUST</span>
         </div>
         {current && (
           <span className="text-[10px] text-slate-600 font-mono">{current.run_id}</span>
@@ -285,14 +285,14 @@ function PerformancePanel() {
       
       {current ? (
         <div className="space-y-4">
-          {/* Throughput with Sparkline */}
+          {/* Throughput com Sparkline */}
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold font-mono text-white">
                 {current.throughput_genomes_per_min.toFixed(1)}
                 <span className="text-sm text-slate-500 ml-1">/min</span>
               </div>
-              <div className="text-[10px] text-slate-500 uppercase">Genomes Evaluated</div>
+              <div className="text-[10px] text-slate-500 uppercase">Genomas Avaliados</div>
             </div>
             <Sparkline 
               data={throughputHistory} 
@@ -331,26 +331,26 @@ function PerformancePanel() {
             </div>
           </div>
           
-          {/* Best Sharpe */}
+          {/* Melhor Sharpe */}
           {current.best_sharpe && (
             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-3 text-center">
               <div className="text-3xl font-bold font-mono text-emerald-400">
                 {current.best_sharpe.toFixed(3)}
               </div>
-              <div className="text-[10px] text-emerald-500/70 uppercase">Best Sharpe Ratio</div>
+              <div className="text-[10px] text-emerald-500/70 uppercase">Melhor Sharpe Ratio</div>
             </div>
           )}
         </div>
       ) : historical ? (
         <div className="space-y-4">
-          {/* Historical Throughput */}
+          {/* Throughput Histórico */}
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold font-mono text-slate-400">
                 {historical.avg_throughput_per_min.toFixed(1)}
                 <span className="text-sm text-slate-500 ml-1">/min</span>
               </div>
-              <div className="text-[10px] text-slate-500 uppercase">Avg Throughput (24h)</div>
+              <div className="text-[10px] text-slate-500 uppercase">Throughput Médio (24h)</div>
             </div>
             <Sparkline 
               data={throughputHistory.length > 0 ? throughputHistory : [0, historical.avg_throughput_per_min]} 
@@ -361,54 +361,54 @@ function PerformancePanel() {
             />
           </div>
           
-          {/* Historical Metrics Grid */}
+          {/* Grid de Métricas Históricas */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-blue-400">
                 {historical.candidates_1h.toLocaleString()}
               </div>
-              <div className="text-[10px] text-slate-500">CANDIDATES 1H</div>
+              <div className="text-[10px] text-slate-500">CANDIDATOS 1H</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-violet-400">
                 {historical.candidates_24h.toLocaleString()}
               </div>
-              <div className="text-[10px] text-slate-500">CANDIDATES 24H</div>
+              <div className="text-[10px] text-slate-500">CANDIDATOS 24H</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-amber-400">
                 {historical.promotions_24h}
               </div>
-              <div className="text-[10px] text-slate-500">PROMOTIONS 24H</div>
+              <div className="text-[10px] text-slate-500">PROMOÇÕES 24H</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-slate-400">
                 {performance.system?.memory_available_mb || '—'}
               </div>
-              <div className="text-[10px] text-slate-500">MEM AVAIL MB</div>
+              <div className="text-[10px] text-slate-500">MEM DISP MB</div>
             </div>
           </div>
           
-          {/* Best Candidate 24h */}
+          {/* Melhor Candidato 24h */}
           {historical.best_candidate_24h && (
             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-3 text-center">
               <div className="text-2xl font-bold font-mono text-emerald-400">
                 {historical.best_candidate_24h.sharpe?.toFixed(3) || '—'}
               </div>
-              <div className="text-[10px] text-emerald-500/70 uppercase">Best Sharpe (24h)</div>
+              <div className="text-[10px] text-emerald-500/70 uppercase">Melhor Sharpe (24h)</div>
             </div>
           )}
           
-          {/* Idle Status */}
+          {/* Status Ocioso */}
           <div className="text-center py-2">
             <span className="px-3 py-1 text-xs bg-slate-800 text-slate-400 rounded-full">
-              Standby
+              Em Espera
             </span>
           </div>
         </div>
       ) : (
         <div className="text-center py-4 text-slate-600 text-sm">
-          Waiting for campaign to start...
+          Aguardando início da campanha...
         </div>
       )}
     </div>
@@ -557,13 +557,13 @@ function ConversionFunnel() {
     <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp className="w-4 h-4 text-slate-500" />
-        <span className="text-xs font-medium text-slate-400">CONVERSION FUNNEL</span>
+        <span className="text-xs font-medium text-slate-400">FUNIL DE CONVERSÃO</span>
       </div>
       
       <div className="space-y-2">
-        {/* Stage A */}
+        {/* Estágio A */}
         <div className="flex items-center gap-2">
-          <div className="w-16 text-[10px] text-slate-500 text-right">STAGE A</div>
+          <div className="w-16 text-[10px] text-slate-500 text-right">ESTÁGIO A</div>
           <div 
             className="h-5 bg-blue-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
             style={{ width: `${aWidth}%` }}
@@ -572,9 +572,9 @@ function ConversionFunnel() {
           </div>
         </div>
         
-        {/* Stage B */}
+        {/* Estágio B */}
         <div className="flex items-center gap-2">
-          <div className="w-16 text-[10px] text-slate-500 text-right">STAGE B</div>
+          <div className="w-16 text-[10px] text-slate-500 text-right">ESTÁGIO B</div>
           <div 
             className="h-5 bg-emerald-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
             style={{ width: `${bWidth}%` }}
@@ -584,9 +584,9 @@ function ConversionFunnel() {
           <span className="text-[9px] text-slate-600">{data.validationRate}</span>
         </div>
         
-        {/* Hall of Fame */}
+        {/* Hall da Fama */}
         <div className="flex items-center gap-2">
-          <div className="w-16 text-[10px] text-slate-500 text-right">HALL OF FAME</div>
+          <div className="w-16 text-[10px] text-slate-500 text-right">HALL DA FAMA</div>
           <div 
             className="h-5 bg-amber-600/60 rounded-sm flex items-center justify-end pr-2 transition-all"
             style={{ width: `${hofWidth}%`, minWidth: '30px' }}
@@ -598,7 +598,7 @@ function ConversionFunnel() {
       </div>
       
       <div className="mt-3 pt-2 border-t border-slate-800 text-center">
-        <span className="text-[10px] text-slate-500">Candidates/Strategy: </span>
+        <span className="text-[10px] text-slate-500">Candidatos/Estratégia: </span>
         <span className="text-[10px] font-mono text-amber-400">{data.candidatesPerStrategy}</span>
       </div>
     </div>
@@ -749,26 +749,26 @@ export function MinerControl() {
       
       {/* Main Content */}
       <div className="max-w-[1600px] mx-auto p-4">
-        {/* Top Stats Bar */}
+        {/* Barra Superior de Stats */}
         <div className="grid grid-cols-6 gap-3 mb-4 animate-fade-in">
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
-            <LiveCounter value={loopCount} label="LOOPS" tooltipKey="loops" />
+            <LiveCounter value={loopCount} label="CICLOS" tooltipKey="loops" />
             <RefreshCw className={`w-5 h-5 text-slate-600 ${isRunning ? 'animate-spin' : ''}`} />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-slate-700">
-            <LiveCounter value={uptimeSeconds} label="UPTIME" format="time" tooltipKey="uptime" />
+            <LiveCounter value={uptimeSeconds} label="TEMPO ATIVO" format="time" tooltipKey="uptime" />
             <Clock className="w-5 h-5 text-slate-600" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-blue-500/50">
-            <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATES 24H" tooltipKey="candidates_24h" />
+            <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATOS 24H" tooltipKey="candidates_24h" />
             <BarChart2 className="w-5 h-5 text-blue-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-amber-500/50">
-            <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOTIONS 24H" tooltipKey="promotions_24h" />
+            <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOÇÕES 24H" tooltipKey="promotions_24h" />
             <Trophy className="w-5 h-5 text-amber-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-emerald-500/50">
-            <LiveCounter value={stats?.promotions.total || 0} label="HALL OF FAME" tooltipKey="hall_of_fame_count" />
+            <LiveCounter value={stats?.promotions.total || 0} label="HALL DA FAMA" tooltipKey="hall_of_fame_count" />
             <Trophy className="w-5 h-5 text-emerald-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-violet-500/50">
@@ -781,31 +781,31 @@ export function MinerControl() {
         <div className="grid grid-cols-12 gap-4 animate-slide-up">
           {/* Left Column - Campaign + Queue */}
           <div className="col-span-4 space-y-4">
-            {/* Active Campaign */}
+            {/* Campanha Ativa */}
             {currentCampaign ? (
               <ActiveCampaignCard campaign={currentCampaign} />
             ) : (
               <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6 text-center">
                 <Activity className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                <div className="text-slate-500 text-sm">No Active Campaign</div>
+                <div className="text-slate-500 text-sm">Nenhuma Campanha Ativa</div>
                 <div className="text-slate-600 text-xs mt-1">
-                  {isOffline ? 'Start mining to begin' : 'Waiting for next...'}
+                  {isOffline ? 'Inicie a mineração para começar' : 'Aguardando próxima...'}
                 </div>
               </div>
             )}
             
-            {/* Queue */}
+            {/* Fila */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-lg">
               <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-slate-500" />
-                  <span className="text-xs font-medium text-slate-400">CAMPAIGN QUEUE</span>
+                  <span className="text-xs font-medium text-slate-400">FILA DE CAMPANHAS</span>
                 </div>
                 <span className="text-[10px] text-slate-600">{queue?.campaigns?.length || 0}</span>
               </div>
               <div className="p-2 space-y-1 max-h-[200px] overflow-y-auto">
                 {queue?.campaigns?.length === 0 ? (
-                  <div className="text-center py-4 text-slate-600 text-xs">Empty queue</div>
+                  <div className="text-center py-4 text-slate-600 text-xs">Fila vazia</div>
                 ) : (
                   queue?.campaigns?.map(campaign => (
                     <QueueItem 
@@ -819,16 +819,16 @@ export function MinerControl() {
               </div>
             </div>
             
-            {/* Stats */}
+            {/* Estatísticas */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
                 <BarChart2 className="w-4 h-4 text-slate-500" />
-                <span className="text-xs font-medium text-slate-400">STATISTICS</span>
+                <span className="text-xs font-medium text-slate-400">ESTATÍSTICAS</span>
               </div>
-              <StatRow label="Candidates (7d)" value={stats?.candidates.last7d?.toLocaleString() || '0'} />
-              <StatRow label="Promotions (7d)" value={stats?.promotions.last7d || 0} color="amber" />
-              <StatRow label="Campaigns Done" value={stats?.campaigns.completed || 0} color="emerald" />
-              <StatRow label="Campaigns Failed" value={stats?.campaigns.failed || 0} />
+              <StatRow label="Candidatos (7d)" value={stats?.candidates.last7d?.toLocaleString() || '0'} />
+              <StatRow label="Promoções (7d)" value={stats?.promotions.last7d || 0} color="amber" />
+              <StatRow label="Campanhas Concluídas" value={stats?.campaigns.completed || 0} color="emerald" />
+              <StatRow label="Campanhas Falhadas" value={stats?.campaigns.failed || 0} />
             </div>
             
             {/* Conversion Funnel */}
@@ -840,13 +840,13 @@ export function MinerControl() {
             <ActivityLog logs={activityLog} maxHeight={450} />
           </div>
           
-          {/* Right Column - Resources + Performance */}
+          {/* Coluna Direita - Recursos + Performance */}
           <div className="col-span-3 space-y-4">
-            {/* Resources */}
+            {/* Recursos */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-4">
                 <Cpu className="w-4 h-4 text-slate-500" />
-                <span className="text-xs font-medium text-slate-400">SYSTEM RESOURCES</span>
+                <span className="text-xs font-medium text-slate-400">RECURSOS DO SISTEMA</span>
               </div>
               
               <div className="flex justify-around items-start mb-4">
@@ -860,7 +860,7 @@ export function MinerControl() {
                   <CircularGauge 
                     value={resources.diskFreePct || (resources.diskFreeGb / 100) * 100} 
                     max={100} 
-                    label="DISK FREE" 
+                    label="DISCO LIVRE" 
                     unit="%"
                     size={70}
                     warningThreshold={20}
@@ -869,22 +869,22 @@ export function MinerControl() {
                 </div>
               </div>
               
-              {/* Disk I/O Metrics */}
+              {/* Métricas de I/O de Disco */}
               <div className="grid grid-cols-4 gap-2 text-center text-xs">
                 <div className="bg-slate-800/50 rounded p-2">
-                  <div className="text-slate-500 text-[10px]">Free Space</div>
+                  <div className="text-slate-500 text-[10px]">Espaço Livre</div>
                   <div className="text-white font-mono">{resources.diskFreeGb?.toFixed(1) || '—'} GB</div>
                 </div>
                 <div className="bg-slate-800/50 rounded p-2">
-                  <div className="text-slate-500 text-[10px]">Written (24h)</div>
+                  <div className="text-slate-500 text-[10px]">Escrito (24h)</div>
                   <div className="text-white font-mono">{resources.diskWritten24h?.toFixed(2) || '0.00'} GB</div>
                 </div>
                 <div className="bg-slate-800/50 rounded p-2">
-                  <div className="text-slate-500 text-[10px]">Write Rate</div>
+                  <div className="text-slate-500 text-[10px]">Taxa de Escrita</div>
                   <div className="text-white font-mono">{resources.writeRateMbPerSec?.toFixed(2) || '0.00'} MB/s</div>
                 </div>
                 <div className="bg-slate-800/50 rounded p-2">
-                  <div className="text-slate-500 text-[10px]">Acceleration</div>
+                  <div className="text-slate-500 text-[10px]">Aceleração</div>
                   <div className={`font-mono ${(resources.writeAcceleration || 0) > 0 ? 'text-amber-400' : 'text-white'}`}>
                     {resources.writeAcceleration?.toFixed(3) || '0.000'} MB/s²
                   </div>
@@ -899,36 +899,36 @@ export function MinerControl() {
                 {resources.canStartCampaign ? (
                   <span className="flex items-center justify-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
-                    Resources OK
+                    Recursos OK
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-1">
                     <AlertCircle className="w-3 h-3" />
-                    Resources constrained
+                    Recursos limitados
                   </span>
                 )}
               </div>
             </div>
             
-            {/* Performance Metrics */}
+            {/* Métricas de Performance */}
             <PerformancePanel />
             
-            {/* Hall of Fame Quick View */}
+            {/* Visualização Rápida Hall da Fama */}
             <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-medium text-amber-400">HALL OF FAME</span>
+                  <span className="text-xs font-medium text-amber-400">HALL DA FAMA</span>
                 </div>
                 <a href="#/hall-of-fame" className="text-[10px] text-slate-500 hover:text-white flex items-center gap-1">
-                  View All <ChevronRight className="w-3 h-3" />
+                  Ver Todos <ChevronRight className="w-3 h-3" />
                 </a>
               </div>
               <div className="text-center py-4">
                 <div className="text-4xl font-bold font-mono text-amber-400">
                   {stats?.promotions.total || 0}
                 </div>
-                <div className="text-[10px] text-amber-500/70 uppercase">Strategies Promoted</div>
+                <div className="text-[10px] text-amber-500/70 uppercase">Estratégias Promovidas</div>
               </div>
             </div>
           </div>
