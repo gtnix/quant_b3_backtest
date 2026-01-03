@@ -173,6 +173,16 @@ impl Mutation {
             param_ranges,
         }
     }
+    
+    /// Get the current mutation rate.
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+    
+    /// Set the mutation rate (for adaptive mutation).
+    pub fn set_rate(&mut self, rate: f64) {
+        self.rate = rate.clamp(0.0, 1.0);
+    }
 
     /// Mutate a genome in place.
     pub fn mutate(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
@@ -292,6 +302,163 @@ impl Mutation {
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// Adaptive Mutation (State-of-the-Art)
+// Based on: Eiben & Smith (2003), "Introduction to Evolutionary Computing"
+// =============================================================================
+
+/// Adaptive mutation operator that adjusts rate based on population diversity.
+///
+/// When diversity is low, mutation rate increases to escape local optima.
+/// When diversity is high, mutation rate decreases to exploit good solutions.
+///
+/// Formula: rate(t) = base_rate × (1 + k × (1 - diversity))
+///
+/// Reference: Eiben, A.E. & Smith, J.E. (2003)
+#[derive(Debug, Clone)]
+pub struct AdaptiveMutation {
+    /// Base mutation rate
+    base_rate: f64,
+    /// Minimum mutation rate
+    min_rate: f64,
+    /// Maximum mutation rate
+    max_rate: f64,
+    /// Amplification factor k
+    amplification: f64,
+    /// Current effective rate
+    current_rate: f64,
+    /// Parameter ranges for creating new genes
+    param_ranges: ParamRanges,
+    /// Generations since last improvement
+    stagnation_generations: u32,
+    /// Boost rate after restart
+    boost_active: bool,
+    /// Generations remaining with boost
+    boost_generations_remaining: u32,
+}
+
+impl AdaptiveMutation {
+    /// Create a new AdaptiveMutation with default parameters.
+    pub fn new(param_ranges: ParamRanges) -> Self {
+        Self {
+            base_rate: 0.05,
+            min_rate: 0.01,
+            max_rate: 0.30,
+            amplification: 2.0,
+            current_rate: 0.05,
+            param_ranges,
+            stagnation_generations: 0,
+            boost_active: false,
+            boost_generations_remaining: 0,
+        }
+    }
+    
+    /// Create with custom parameters.
+    pub fn with_params(
+        base_rate: f64,
+        min_rate: f64,
+        max_rate: f64,
+        amplification: f64,
+        param_ranges: ParamRanges,
+    ) -> Self {
+        Self {
+            base_rate: base_rate.clamp(0.0, 1.0),
+            min_rate: min_rate.clamp(0.0, 1.0),
+            max_rate: max_rate.clamp(0.0, 1.0),
+            amplification,
+            current_rate: base_rate,
+            param_ranges,
+            stagnation_generations: 0,
+            boost_active: false,
+            boost_generations_remaining: 0,
+        }
+    }
+    
+    /// Update mutation rate based on current diversity.
+    ///
+    /// # Arguments
+    /// * `diversity` - Population diversity score [0, 1]
+    /// * `improved` - Whether the best fitness improved this generation
+    pub fn update(&mut self, diversity: f64, improved: bool) {
+        // Track stagnation
+        if improved {
+            self.stagnation_generations = 0;
+        } else {
+            self.stagnation_generations += 1;
+        }
+        
+        // Handle boost mode (after restart)
+        if self.boost_active {
+            if self.boost_generations_remaining > 0 {
+                self.boost_generations_remaining -= 1;
+                self.current_rate = self.max_rate;
+                return;
+            } else {
+                self.boost_active = false;
+            }
+        }
+        
+        // Adaptive rate based on diversity
+        // rate = base_rate × (1 + k × (1 - diversity))
+        let adjustment = 1.0 + self.amplification * (1.0 - diversity);
+        let mut rate = self.base_rate * adjustment;
+        
+        // Extra boost for severe stagnation
+        if self.stagnation_generations > 10 {
+            let stagnation_boost = (self.stagnation_generations as f64 / 20.0).min(1.0);
+            rate *= 1.0 + stagnation_boost;
+        }
+        
+        self.current_rate = rate.clamp(self.min_rate, self.max_rate);
+    }
+    
+    /// Activate boost mode (typically after a restart).
+    pub fn activate_boost(&mut self, generations: u32) {
+        self.boost_active = true;
+        self.boost_generations_remaining = generations;
+        self.current_rate = self.max_rate;
+    }
+    
+    /// Get the current effective mutation rate.
+    pub fn current_rate(&self) -> f64 {
+        self.current_rate
+    }
+    
+    /// Get the number of stagnation generations.
+    pub fn stagnation_generations(&self) -> u32 {
+        self.stagnation_generations
+    }
+    
+    /// Check if boost mode is active.
+    pub fn is_boosted(&self) -> bool {
+        self.boost_active
+    }
+    
+    /// Convert to a standard Mutation operator with current rate.
+    pub fn to_mutation(&self) -> Mutation {
+        Mutation::new(self.current_rate, self.param_ranges.clone())
+    }
+    
+    /// Mutate a genome using the current adaptive rate.
+    pub fn mutate(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
+        self.to_mutation().mutate(genome, rng)
+    }
+    
+    /// Reset stagnation tracking.
+    pub fn reset(&mut self) {
+        self.stagnation_generations = 0;
+        self.boost_active = false;
+        self.boost_generations_remaining = 0;
+        self.current_rate = self.base_rate;
+    }
+}
+
+impl Default for AdaptiveMutation {
+    fn default() -> Self {
+        Self::new(ParamRanges::new())
     }
 }
 

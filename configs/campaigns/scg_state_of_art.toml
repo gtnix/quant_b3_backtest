@@ -1,0 +1,257 @@
+# =============================================================================
+# SCG State-of-the-Art Campaign Configuration
+# =============================================================================
+#
+# This configuration implements academic best practices for genetic algorithms
+# in trading strategy optimization, based on:
+#
+# References:
+# - Deb et al. (2002) - NSGA-II
+# - Goldberg & Richardson (1987) - Fitness Sharing
+# - Eiben & Smith (2003) - Adaptive Mutation
+# - Lopez de Prado (2018) - Anti-Overfitting
+#
+# Key improvements over default:
+# - Larger population for diversity
+# - Lower elitism to encourage exploration
+# - Adaptive mutation with stagnation detection
+# - Fitness sharing to prevent premature convergence
+# - Stricter validation gates
+#
+# =============================================================================
+
+[campaign]
+name = "scg_state_of_art"
+description = "State-of-the-art evolutionary optimization with diversity preservation"
+version = "1.0.0"
+
+# =============================================================================
+# Evolution Parameters (Academic Best Practices)
+# =============================================================================
+
+[evolution]
+# Larger population = more diversity, better exploration
+# Reference: Eiben & Smith (2003) recommend 100-500 for complex problems
+population_size = 300
+
+# More generations for thorough exploration
+# With adaptive mutation and restarts, convergence is less of an issue
+max_generations = 150
+
+# Tournament size: 5 provides good selection pressure
+# Reference: Goldberg (1991) - Tournament Selection
+tournament_size = 5
+
+# Slightly lower crossover rate to preserve good building blocks
+# Reference: De Jong (1975) - Optimal rates between 0.6-0.9
+crossover_rate = 0.80
+
+# Lower elitism to encourage exploration
+# Default was 10%, now 5% to prevent premature convergence
+elitism_rate = 0.05
+
+# Base mutation rate (will be adapted dynamically)
+# Starting lower because adaptive mutation will increase when needed
+mutation_rate = 0.05
+
+# Random seed for reproducibility
+# seed = 42
+
+# Convergence detection window
+convergence_generations = 15
+
+# Maximum runtime (60 = 1 minute test)
+max_runtime_seconds = 60
+
+# Number of parallel workers (0 = auto)
+workers = 0
+
+# Hall of Fame size (top strategies to preserve)
+hall_of_fame_size = 50
+
+# =============================================================================
+# Diversity Preservation (NEW - State of the Art)
+# =============================================================================
+
+[diversity]
+# Enable diversity monitoring and fitness sharing
+enabled = true
+
+# Sigma share: radius for niche formation in fitness space
+# Reference: Goldberg & Richardson (1987)
+# Values 0.05-0.20 are typical; 0.10 provides good balance
+sigma_share = 0.10
+
+# Alpha parameter for sharing function
+# 1.0 = linear decay, 2.0 = quadratic (smoother niches)
+sharing_alpha = 1.0
+
+# Enable fitness sharing penalty
+fitness_sharing = true
+
+# Use phenotypic (fitness-based) distance vs genotypic (gene-based)
+# Phenotypic is more effective for our domain
+phenotypic_distance = true
+
+# Critical diversity threshold (triggers emergency measures)
+critical_threshold = 0.15
+
+# =============================================================================
+# Adaptive Mutation (NEW - State of the Art)
+# =============================================================================
+
+[adaptation]
+# Enable adaptive mutation rate based on diversity
+enabled = true
+
+# Base mutation rate (when diversity is healthy)
+base_mutation_rate = 0.05
+
+# Minimum mutation rate (even with high diversity)
+min_mutation_rate = 0.01
+
+# Maximum mutation rate (during stagnation/low diversity)
+max_mutation_rate = 0.30
+
+# Amplification factor for diversity-based adjustment
+# rate = base * (1 + k * (1 - diversity))
+amplification_factor = 2.0
+
+# =============================================================================
+# Stagnation Detection & Restart (NEW - State of the Art)
+# =============================================================================
+
+[stagnation]
+# Enable stagnation detection
+detection_enabled = true
+
+# Window size: number of generations to look back
+# Reference: De Jong (1975) - typically 5-20 generations
+window_size = 10
+
+# Improvement threshold: minimum relative improvement
+# 0.005 = 0.5% improvement required to not be considered stagnant
+improvement_threshold = 0.005
+
+# Enable automatic restart when stagnation detected
+restart_enabled = true
+
+# Elite ratio to preserve during restart
+# 0.20 = preserve top 20%, regenerate 80%
+restart_elite_ratio = 0.20
+
+# Generations with boosted mutation after restart
+post_restart_boost_generations = 5
+
+# Maximum number of restarts allowed
+max_restarts = 5
+
+# =============================================================================
+# Execution Configuration
+# =============================================================================
+
+[execution]
+mode = "compiled"
+has_costs = true
+slippage_bps = 10.0
+commission_bps = 5.0
+emolument_bps = 2.5
+market_impact_model = "linear"
+
+# =============================================================================
+# Validation Configuration (Institutional Grade)
+# =============================================================================
+
+[validation]
+# Enable full validation pipeline
+enabled = true
+
+# Top K candidates to validate in Stage B
+top_k = 30
+
+# Walk-Forward Analysis
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.6
+wfa_purge_days = 5
+
+# PBO/DSR Anti-Overfitting
+pbo_enabled = true
+pbo_significance_level = 0.05
+
+# Stress Testing
+stress_enabled = true
+stress_min_pass = 4
+
+# =============================================================================
+# Quality Gates (Stricter than default)
+# =============================================================================
+
+[gates]
+# All gates must pass for promotion
+gates_required = true
+
+# Minimum OOS Sharpe Ratio (NET costs)
+min_oos_sharpe_net = 0.50
+
+# Maximum Probability of Backtest Overfitting
+max_pbo = 0.15
+
+# Minimum stress scenarios passed (out of 5)
+min_stress_passed = 4
+
+# Maximum IS/OOS degradation (40% = max acceptable)
+max_degradation = 0.40
+
+# Minimum trades in OOS period
+min_oos_trades = 30
+
+# =============================================================================
+# Data Integrity
+# =============================================================================
+
+[data_integrity]
+enabled = true
+lookback_requirements = true
+survivorship_bias_check = true
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+
+[metrics]
+# Objectives for Pareto optimization
+objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
+
+# Weights for weighted sum fallback
+sharpe_weight = 1.5
+cagr_weight = 1.0
+drawdown_weight = 1.0
+calmar_weight = 0.5
+sortino_weight = 0.5
+
+# Penalties
+low_trades_penalty = true
+min_trades = 30
+extreme_turnover_penalty = true
+max_turnover_annual = 500.0
+high_volatility_penalty = true
+max_volatility = 0.40
+
+# =============================================================================
+# Output Configuration
+# =============================================================================
+
+[output]
+# Save generation statistics
+save_generations = true
+
+# Save all genomes (for debugging)
+save_all_genomes = false
+
+# Save diversity metrics
+save_diversity_metrics = true
+
+# Save restart events
+save_restart_events = true
+

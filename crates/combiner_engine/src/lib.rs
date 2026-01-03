@@ -38,10 +38,12 @@ pub mod institutional_thresholds;
 pub mod statistics;
 pub mod audit_framework;
 pub mod audit_checks;
+pub mod diversity;
+pub mod stagnation;
 
 pub use config::EvolutionConfig;
 pub use population::Population;
-pub use operators::{Selection, Crossover, Mutation};
+pub use operators::{Selection, Crossover, Mutation, AdaptiveMutation};
 pub use pareto::ParetoFrontier;
 pub use hall_of_fame::HallOfFame;
 pub use engine::{EvolutionEngine, GenerationStats, UltraEvolutionResult};
@@ -62,5 +64,15 @@ pub use institutional_thresholds::InstitutionalThresholds;
 pub use validation_reports::{
     WfaReport, PboDsrReport, StressReport, ValidationBundle,
     ValidationVerdict as ReportVerdict,
+};
+pub use diversity::{
+    DiversityMonitor, DiversityMetrics,
+    compute_genotypic_diversity, compute_phenotypic_diversity,
+    compute_structural_entropy, phenotypic_distance,
+    apply_fitness_sharing, compute_sharing_factors,
+};
+pub use stagnation::{
+    StagnationDetector, StagnationConfig, StagnationStatus,
+    RestartResult,
 };
 

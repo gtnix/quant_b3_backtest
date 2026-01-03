@@ -374,11 +374,13 @@ docs/
 │   ├── system-overview.md      # Visão geral e diagrama
 │   ├── crate-map.md            # Crates e responsabilidades
 │   ├── data-flow.md            # Fluxo de dados end-to-end
-│   └── design-decisions.md     # ADRs
+│   ├── design-decisions.md     # ADRs
+│   └── omp-specification.md    # Orquestrador de Mineração Perpétua
 ├── scg/                         # Sistema Combinador Generativo
 │   ├── overview.md             # Visão geral do SCG
 │   ├── genome-structure.md     # Estrutura do genoma
 │   ├── validation-framework.md # WFA, PBO, DSR
+│   ├── state-of-the-art.md     # Performance e otimizações
 │   └── cli-reference.md        # Comandos combiner
 ├── dashboard/                   # Dashboard Tauri/Browser/VPS
 │   ├── README.md               # Arquitetura e componentes
@@ -387,6 +389,7 @@ docs/
 │   └── vps-deployment.md       # Deploy VPS (nginx + PM2) ← NOVO
 ├── data/                        # Documentação de dados
 │   ├── README.md               # Índice e overview
+│   ├── data-providers-policy.md # Política oficial de data providers
 │   ├── provider-due-diligence.md  # Avaliação de providers
 │   └── us-datahub-status.md    # Status do DataHub US
 ├── components/                  # Especificações técnicas
@@ -398,7 +401,6 @@ docs/
 │   └── artifacts.md            # Estrutura de output/artifacts
 ├── validation/                  # Relatório de validação
 │   ├── determinism.md          # Invariantes
-│   ├── test-coverage.md        # Cobertura de testes
 │   └── benchmarks.md           # Baselines de performance
 ├── strategies/                  # Documentação de estratégias
 │   ├── block-catalog.md        # GERADO DO CÓDIGO
@@ -408,15 +410,10 @@ docs/
 │   ├── dividend-policy.md      # Anti-double-count
 │   ├── survivorship-bias.md    # Universe eligibility
 │   └── fx-conventions.md       # Multi-currency
-├── audits/                      # Audit trail
-│   └── duplication-audit.md    # Relatório de auditoria
 ├── reference/                   # Referência rápida
 │   └── glossary.md             # Glossário
-├── portfolio/                   # Especificação de experiência
-│   └── experience-specification.md  # Documentação técnica de portfólio
 ├── data_integrity.md           # Data integrity framework
-├── strategy_factory.md         # Factory runbook
-└── generative_combiner_architecture.md  # Spec completa SCG
+└── strategy_factory.md         # Factory runbook
 ```
 
 ---
