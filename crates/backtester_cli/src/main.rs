@@ -5,7 +5,7 @@
 
 use backtester_io::{BrapiLoader, CsvLoader, Normalizer};
 use backtester_strategy::experiment::{
-    BlockCatalog, Comparator, ExperimentRunner, RunnerConfig,
+    ArtifactFormat, BlockCatalog, Comparator, ExperimentRunner, RunnerConfig,
 };
 use backtester_strategy::BlockRegistry;
 use clap::{Parser, Subcommand};
@@ -91,6 +91,10 @@ enum Commands {
         /// Risk profile name (muito_conservador, conservador, moderado, arrojado, muito_arrojado)
         #[arg(long)]
         risk_profile: Option<String>,
+        
+        /// Use OBFS binary format instead of JSON/CSV (90% storage reduction)
+        #[arg(long)]
+        obfs: bool,
     },
 
     /// Run all strategy configs in a folder
@@ -110,6 +114,10 @@ enum Commands {
         /// Path to market data CSV file for backtesting
         #[arg(short = 'm', long)]
         market_data: Option<PathBuf>,
+        
+        /// Use OBFS binary format instead of JSON/CSV (90% storage reduction)
+        #[arg(long)]
+        obfs: bool,
     },
 
     /// Compare two experiment runs
@@ -391,6 +399,7 @@ fn run_command(
     market_data: Option<PathBuf>,
     data_source: Option<String>,
     risk_profile: Option<String>,
+    obfs: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    STRATEGY RUNNER                           ║");
@@ -422,9 +431,18 @@ fn run_command(
         println!("Risk profile: {}", rp);
     }
     
+    // Determine artifact format
+    let artifact_format = if obfs {
+        println!("Artifact format: OBFS (binary, ~90% storage reduction)");
+        ArtifactFormat::Obfs
+    } else {
+        ArtifactFormat::Legacy
+    };
+    
     let runner_config = RunnerConfig {
         output_dir: output_dir.to_string_lossy().into(),
         market_data_csv_path: market_data.map(|p| p.to_string_lossy().into_owned()),
+        artifact_format,
         ..Default::default()
     };
 
@@ -478,6 +496,7 @@ fn run_batch_command(
     output_dir: PathBuf,
     strict: bool,
     market_data: Option<PathBuf>,
+    obfs: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    BATCH RUNNER                              ║");
@@ -488,9 +507,18 @@ fn run_batch_command(
         println!("Market data: {}", md_path.display());
     }
 
+    // Determine artifact format
+    let artifact_format = if obfs {
+        println!("Artifact format: OBFS (binary, ~90% storage reduction)");
+        ArtifactFormat::Obfs
+    } else {
+        ArtifactFormat::Legacy
+    };
+
     let runner_config = RunnerConfig {
         output_dir: output_dir.to_string_lossy().into(),
         market_data_csv_path: market_data.map(|p| p.to_string_lossy().into_owned()),
+        artifact_format,
         ..Default::default()
     };
 
@@ -914,13 +942,15 @@ fn main() {
             market_data,
             data_source,
             risk_profile,
-        } => run_command(config, output, dry_run, strict, execution, market_data, data_source, risk_profile),
+            obfs,
+        } => run_command(config, output, dry_run, strict, execution, market_data, data_source, risk_profile, obfs),
         Commands::RunBatch {
             folder,
             output,
             strict,
             market_data,
-        } => run_batch_command(folder, output, strict, market_data),
+            obfs,
+        } => run_batch_command(folder, output, strict, market_data, obfs),
         Commands::Compare { 
             run_a, 
             run_b,

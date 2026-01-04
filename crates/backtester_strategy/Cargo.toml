@@ -7,6 +7,7 @@ description = "Strategy Factory - modular DSL for declarative strategy compositi
 [dependencies]
 backtester_engine = { path = "../backtester_engine" }
 backtester_intelligence = { path = "../backtester_intelligence" }
+obfs = { path = "../obfs" }
 chrono = { version = "0.4", features = ["serde"] }
 rust_decimal = { version = "1.33", features = ["serde"] }
 rust_decimal_macros = "1.33"

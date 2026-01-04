@@ -23,7 +23,7 @@ use crate::config::{load_strategy_config, LoadError, StrategyConfig};
 use crate::context::{StrategyContext, StrategyCandidate};
 use crate::registry::BlockRegistry;
 
-use super::artifacts::ArtifactWriter;
+use super::artifacts::{ArtifactFormat, ArtifactWriter};
 use super::metrics::MetricsCalculator;
 use super::types::*;
 
@@ -69,6 +69,8 @@ pub struct RunnerConfig {
     pub dividend_csv_path: Option<String>,
     /// Path to market data CSV file (optional, for backtesting)
     pub market_data_csv_path: Option<String>,
+    /// Artifact output format (Legacy JSON/CSV or OBFS binary)
+    pub artifact_format: ArtifactFormat,
 }
 
 impl Default for RunnerConfig {
@@ -84,6 +86,7 @@ impl Default for RunnerConfig {
             initial_capital: Decimal::from(1_000_000),
             dividend_csv_path: None,
             market_data_csv_path: None,
+            artifact_format: ArtifactFormat::Legacy,
         }
     }
 }
@@ -190,8 +193,9 @@ impl ExperimentRunner {
             self.validate_strict(&result)?;
         }
 
-        // Write artifacts
-        let writer = ArtifactWriter::new(&self.config.output_dir);
+        // Write artifacts (Legacy or OBFS format)
+        let mut writer = ArtifactWriter::new(&self.config.output_dir)
+            .with_format(self.config.artifact_format);
         let output_path = writer.write_all(
             &run_id,
             &result.metadata,
@@ -1309,6 +1313,7 @@ impl ExperimentRunner {
                 initial_capital: self.config.initial_capital,
                 dividend_csv_path: self.config.dividend_csv_path.clone(),
                 market_data_csv_path: self.config.market_data_csv_path.clone(),
+                artifact_format: self.config.artifact_format,
             };
 
             let stressed_runner = ExperimentRunner::with_config(stressed_runner_config);

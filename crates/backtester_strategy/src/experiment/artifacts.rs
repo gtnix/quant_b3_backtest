@@ -1,12 +1,27 @@
 //! Artifact writer - generates standardized output files for experiment runs.
+//!
+//! Supports two output formats:
+//! - Legacy: JSON/CSV files (metadata.json, metrics.json, timeseries.csv, trace.jsonl)
+//! - OBFS: Optimized Binary File System (rkyv + Zstd + Parquet) for 90% storage reduction
 
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::types::{EquityPoint, ExecutionMode, ExperimentTraceEntry, RunMetadata, RunMetrics};
+
+/// Output format for artifacts
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArtifactFormat {
+    /// Legacy JSON/CSV format (backwards compatible)
+    #[default]
+    Legacy,
+    /// OBFS binary format (rkyv + Zstd + Parquet)
+    Obfs,
+}
 
 /// Header line for trace.jsonl containing run context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,15 +39,20 @@ pub struct TraceHeader {
 }
 
 /// Writer for experiment artifacts.
+/// Supports Legacy (JSON/CSV) and OBFS (binary) formats.
 pub struct ArtifactWriter {
     base_path: PathBuf,
+    format: ArtifactFormat,
+    obfs: Option<obfs::Obfs>,
 }
 
 impl ArtifactWriter {
-    /// Create a new artifact writer with the given base output path.
+    /// Create a new artifact writer with the given base output path (Legacy format).
     pub fn new(base_path: impl AsRef<Path>) -> Self {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
+            format: ArtifactFormat::Legacy,
+            obfs: None,
         }
     }
 
@@ -41,8 +61,54 @@ impl ArtifactWriter {
         Self::new("output/experiments")
     }
 
+    /// Set the artifact format (builder pattern).
+    pub fn with_format(mut self, format: ArtifactFormat) -> Self {
+        self.format = format;
+        if format == ArtifactFormat::Obfs {
+            self.init_obfs();
+        }
+        self
+    }
+
+    /// Initialize OBFS storage.
+    fn init_obfs(&mut self) {
+        let obfs_path = self.base_path.join("obfs");
+        let config = obfs::ObfsConfig {
+            root_path: obfs_path.to_string_lossy().to_string(),
+            compression_level: 3,
+            enable_blake3: true,
+            enable_xxh3: true,
+            max_file_size: 1024 * 1024 * 1024, // 1 GB
+        };
+        let obfs_instance = obfs::Obfs::with_config(config);
+        if let Err(e) = obfs_instance.initialize() {
+            tracing::warn!("Failed to initialize OBFS: {}", e);
+        }
+        self.obfs = Some(obfs_instance);
+    }
+
+    /// Get the current artifact format.
+    pub fn format(&self) -> ArtifactFormat {
+        self.format
+    }
+
     /// Write all artifacts for a run.
     pub fn write_all(
+        &mut self,
+        run_id: &str,
+        metadata: &RunMetadata,
+        trace: &[ExperimentTraceEntry],
+        metrics: &RunMetrics,
+        timeseries: &[EquityPoint],
+    ) -> Result<PathBuf, ArtifactError> {
+        match self.format {
+            ArtifactFormat::Legacy => self.write_all_legacy(run_id, metadata, trace, metrics, timeseries),
+            ArtifactFormat::Obfs => self.write_all_obfs(run_id, metadata, trace, metrics, timeseries),
+        }
+    }
+
+    /// Write artifacts in Legacy format (JSON/CSV).
+    fn write_all_legacy(
         &self,
         run_id: &str,
         metadata: &RunMetadata,
@@ -60,6 +126,117 @@ impl ArtifactWriter {
 
         tracing::info!("Artifacts written to: {}", run_dir.display());
         Ok(run_dir)
+    }
+
+    /// Write artifacts in OBFS format (rkyv + Zstd + Parquet).
+    fn write_all_obfs(
+        &mut self,
+        run_id: &str,
+        metadata: &RunMetadata,
+        trace: &[ExperimentTraceEntry],
+        metrics: &RunMetrics,
+        timeseries: &[EquityPoint],
+    ) -> Result<PathBuf, ArtifactError> {
+        let obfs = self.obfs.as_mut().ok_or_else(|| {
+            ArtifactError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "OBFS not initialized",
+            ))
+        })?;
+
+        let uuid = Uuid::parse_str(run_id).unwrap_or_else(|_| Uuid::new_v4());
+
+        // Convert metadata
+        let obfs_metadata = obfs::Metadata {
+            strategy_id: metadata.strategy_id.clone(),
+            strategy_version: metadata.strategy_version.clone(),
+            run_id: metadata.run_id.clone(),
+            timestamp: metadata.timestamp_utc.timestamp(),
+            universe: metadata.dataset_id.clone().unwrap_or_else(|| "B3_IBOV".to_string()),
+            start_date: String::new(),
+            end_date: String::new(),
+            initial_capital: 1_000_000.0,
+            mode: metadata.execution_mode.as_str().to_string(),
+        };
+
+        // Convert metrics
+        let obfs_metrics = obfs::Metrics {
+            cagr: metrics.cagr,
+            volatility: metrics.volatility,
+            sharpe_ratio: metrics.sharpe_ratio,
+            sortino_ratio: metrics.sortino_ratio,
+            max_drawdown: metrics.max_drawdown,
+            max_drawdown_duration_days: metrics.max_drawdown_duration_days as i32,
+            hit_rate: metrics.hit_rate,
+            profit_factor: metrics.profit_factor,
+            turnover_annual: metrics.turnover_annual,
+            total_trades: metrics.total_trades as i32,
+        };
+
+        // Convert trace entries
+        let obfs_trace: Vec<obfs::TraceEvent> = trace
+            .iter()
+            .map(|t| obfs::TraceEvent {
+                timestamp: t.timestamp_ms as i64,
+                event_type: t.block_type.clone(),
+                message: t.message.clone(),
+            })
+            .collect();
+
+        // Convert timeseries to TimeSeriesPoints
+        let epoch = chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let ts_points: Vec<obfs::TimeSeriesPoint> = timeseries
+            .iter()
+            .map(|p| obfs::TimeSeriesPoint {
+                backtest_uuid: uuid,
+                date_offset: (p.date - epoch).num_days().max(0) as u16,
+                equity: p.equity.to_string().parse::<f32>().unwrap_or(0.0),
+                drawdown: p.drawdown as f32,
+                exposure: p.exposure as f32,
+            })
+            .collect();
+
+        // Write timeseries to Parquet
+        let ts_ref = if !ts_points.is_empty() {
+            obfs.timeseries_store_mut()
+                .write_timeseries(uuid, &ts_points)
+                .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+        } else {
+            obfs::TimeSeriesRef {
+                parquet_file: String::new(),
+                row_group: 0,
+                start_row: 0,
+                num_rows: 0,
+            }
+        };
+
+        // Build artifact
+        let artifact = obfs::BacktestArtifact {
+            uuid_bytes: *uuid.as_bytes(),
+            metadata: obfs_metadata,
+            metrics: obfs_metrics,
+            timeseries_ref: obfs::TimeseriesReference {
+                parquet_file: ts_ref.parquet_file,
+                row_group: ts_ref.row_group,
+                start_row: ts_ref.start_row,
+                num_rows: ts_ref.num_rows,
+            },
+            trace: obfs_trace,
+            integrity: obfs::IntegritySeal::default(),
+        };
+
+        // Write to OBFS
+        let mut writer = obfs.writer();
+        writer.write_artifact(&artifact)
+            .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+        // Sync to disk
+        obfs.sync()
+            .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+        let obfs_path = self.base_path.join("obfs");
+        tracing::info!("OBFS artifacts written to: {} (UUID: {})", obfs_path.display(), uuid);
+        Ok(obfs_path)
     }
 
     /// Write metadata.json
@@ -396,7 +573,7 @@ mod tests {
     #[test]
     fn test_write_and_read_artifacts() {
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -428,7 +605,7 @@ mod tests {
     #[test]
     fn test_list_runs() {
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         // Create two runs
         let metadata = sample_metadata();
@@ -456,7 +633,7 @@ mod tests {
     #[test]
     fn test_artifact_schema_version() {
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -480,7 +657,7 @@ mod tests {
         // Comprehensive roundtrip test: write all artifacts, read them back,
         // verify all fields match the original values
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         let original_metadata = sample_metadata();
         let original_metrics = sample_metrics();
@@ -553,7 +730,7 @@ mod tests {
     fn test_metadata_json_valid_structure() {
         // Verify metadata.json is valid JSON with expected structure
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -581,7 +758,7 @@ mod tests {
     fn test_trace_jsonl_valid_lines() {
         // Verify each line in trace.jsonl is valid JSON
         let temp = tempdir().unwrap();
-        let writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path());
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();

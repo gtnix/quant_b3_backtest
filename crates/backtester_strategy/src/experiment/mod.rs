@@ -32,7 +32,7 @@ pub use metrics::{
     MIN_VOLATILITY_THRESHOLD,
     MAX_RATIO_VALUE,
 };
-pub use artifacts::ArtifactWriter;
+pub use artifacts::{ArtifactFormat, ArtifactWriter};
 pub use comparator::{Comparator, RegressionThresholds, RegressionThresholdsBuilder, ComparatorError};
 pub use catalog::BlockCatalog;
 pub use stress::{

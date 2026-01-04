@@ -224,6 +224,62 @@ impl ProjectArtifactLoader {
     }
 }
 
+// ============================================================================
+// EquityPoint Adapter - for backtester_strategy integration
+// ============================================================================
+
+use crate::timeseries::TimeSeriesPoint;
+
+/// Reference epoch for date_offset calculation (2020-01-01)
+pub const EPOCH_DATE: chrono::NaiveDate = match chrono::NaiveDate::from_ymd_opt(2020, 1, 1) {
+    Some(d) => d,
+    None => panic!("Invalid epoch date"),
+};
+
+/// Project's EquityPoint format (from backtester_strategy::experiment::types)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectEquityPoint {
+    pub date: chrono::NaiveDate,
+    pub equity: rust_decimal::Decimal,
+    pub drawdown: f64,
+    pub exposure: f64,
+    #[serde(default)]
+    pub vol_exante: Option<f64>,
+    #[serde(default)]
+    pub vol_expost: Option<f64>,
+    #[serde(default)]
+    pub dividend_cashflow: Option<rust_decimal::Decimal>,
+    #[serde(default)]
+    pub dividend_cumulative: Option<rust_decimal::Decimal>,
+}
+
+/// Convert ProjectEquityPoint to OBFS TimeSeriesPoint
+impl ProjectEquityPoint {
+    /// Convert to TimeSeriesPoint for OBFS storage
+    pub fn to_timeseries_point(&self, backtest_uuid: Uuid) -> TimeSeriesPoint {
+        let date_offset = (self.date - EPOCH_DATE).num_days().max(0) as u16;
+        
+        TimeSeriesPoint {
+            backtest_uuid,
+            date_offset,
+            equity: self.equity.to_string().parse::<f32>().unwrap_or(0.0),
+            drawdown: self.drawdown as f32,
+            exposure: self.exposure as f32,
+        }
+    }
+}
+
+/// Batch convert EquityPoints to TimeSeriesPoints
+pub fn convert_equity_points_to_timeseries(
+    points: &[ProjectEquityPoint],
+    backtest_uuid: Uuid,
+) -> Vec<TimeSeriesPoint> {
+    points
+        .iter()
+        .map(|p| p.to_timeseries_point(backtest_uuid))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
