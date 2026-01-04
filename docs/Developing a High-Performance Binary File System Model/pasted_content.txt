@@ -1,0 +1,69 @@
+Análise do Problema de Armazenamento
+O que foi gerado em 5 minutos de campanha
+Métrica	Valor
+Espaço total consumido	6.7 GB
+Backtests executados	96,995
+Estratégias no Hall of Fame	1,000
+Estratégias validadas (Stage B)	51
+Diretórios criados	96,995
+Arquivos criados	387,980 (4 por backtest)
+Estrutura de cada backtest
+Cada um dos 96,995 backtests gera uma pasta com 4 arquivos:
+backtests/└── 00006e13-81a7-4faa-bb06-1e25c6667a11/    ├── metadata.json     (820 bytes)    ├── metrics.json      (502 bytes)    ├── timeseries.csv    (57,218 bytes)  ← 94% do espaço    └── trace.jsonl       (1,753 bytes)
+Breakdown do consumo de espaço
+Componente	Tamanho Total	% do Total	Tamanho por Backtest
+timeseries.csv	5.2 GB	94%	57 KB
+Overhead de diretórios	379 MB	5.6%	4 KB (mínimo ext4)
+trace.jsonl	163 MB	2.4%	1.8 KB
+metadata.json	76 MB	1.1%	820 B
+metrics.json	47 MB	0.7%	502 B
+Análise do timeseries.csv (o maior vilão)
+Conteúdo:
+date,equity,drawdown,exposure,vol_exante,vol_expost,dividend_cashflow,dividend_cumulative2020-01-02,1000000.00,0.000000,0.131745,,,,2020-01-03,998317.675,-0.001682,0.131745,,,,...2024-12-30,1101803.295,-0.048829,0.131737,,,,
+Característica	Valor
+Linhas por arquivo	1,245 (dias de trading)
+Colunas	8
+Colunas sempre vazias	4 (vol_exante, vol_expost, dividend_cashflow, dividend_cumulative)
+Caracteres médios por linha	44
+Formato	Texto CSV (não comprimido)
+Ineficiências do formato texto:
+1101803.295 como texto = 11 bytes
+1101803.295 como float32 binário = 4 bytes
+-0.048829 como texto = 9 bytes
+-0.048829 como float32 binário = 4 bytes
+Teste de compressão em um arquivo:
+Formato	Tamanho	Redução
+CSV original	57 KB	-
+CSV + gzip	16 KB	71%
+CSV + zstd	16 KB	71%
+Overhead de filesystem
+O sistema cria um diretório separado para cada backtest:
+Métrica	Valor
+Diretórios criados	96,995
+Inodes consumidos	484,975 (5 por backtest: 1 dir + 4 arquivos)
+Overhead mínimo por diretório (ext4)	4 KB
+Overhead total de diretórios	379 MB
+O que é salvo vs. o que é usado
+Categoria	Quantidade	Uso Real
+Backtests com timeseries completo	96,995	Todos salvos
+Estratégias que passam para Hall of Fame	1,000	Precisam de timeseries
+Estratégias validadas (Stage B)	51	Precisam de timeseries
+Backtests descartados	95,995	Só precisavam de metrics.json
+Onde o código gera esses arquivos
+O backtester CLI gera os 4 arquivos para todo backtest executado:
+crates/backtester_cli/src/output.rs         → Gera os arquivoscrates/combiner_runner/src/executor.rs      → Chama o backtester
+O timeseries.csv é usado posteriormente para:
+Crosscheck (crosscheck.rs) - recalcula métricas a partir do NAV
+Asset Attribution (run_campaign.rs) - analisa composição do portfolio
+Ambos os usos só precisam dos backtests validados (51), não dos 96,995.
+Projeção para campanhas maiores
+Duração	Backtests (estimado)	Espaço Consumido
+5 min	96,995	6.7 GB
+30 min	~580,000	~40 GB
+1 hora	~1,160,000	~80 GB
+4 horas	~4,640,000	~320 GB
+Resumo da causa raiz
+94% do espaço vem de um único arquivo (timeseries.csv) que é gerado para todos os 96,995 backtests, quando apenas 51 são efetivamente utilizados
+O formato CSV texto usa 2-3x mais espaço que formatos binários equivalentes
+Cada backtest tem sua própria pasta, gerando 379 MB de overhead de filesystem
+Colunas vazias são incluídas em todos os arquivos (4 das 8 colunas são sempre vazias neste run)

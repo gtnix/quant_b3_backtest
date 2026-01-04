@@ -261,6 +261,50 @@ impl RiskCalculator {
         self.calculate_cvar(returns, 0.975)
     }
 
+    /// Calculate CDaR (Conditional Drawdown-at-Risk).
+    ///
+    /// CDaR at alpha% is the mean of the worst (1-alpha)% of drawdowns.
+    /// This is a more robust drawdown risk measure than max drawdown alone.
+    /// Optimizing portfolios with CDaR constraints produces more stable results.
+    ///
+    /// Reference: Chekhlov, Uryasev & Zabarankin (2003) - Portfolio Optimization
+    /// with Drawdown Constraints
+    ///
+    /// # Arguments
+    /// * `drawdowns` - Series of drawdown values (negative percentages, e.g., -0.05 for 5% DD)
+    /// * `confidence` - Confidence level (e.g., 0.95 for 95%)
+    ///
+    /// # Returns
+    /// Mean of the worst (1-confidence)% drawdowns (negative value)
+    pub fn calculate_cdar(&self, drawdowns: &[Decimal], confidence: f64) -> Decimal {
+        if drawdowns.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        // Sort ascending (most negative = worst drawdowns first)
+        let mut sorted = drawdowns.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let n = sorted.len();
+        // Number of observations in the tail (worst drawdowns)
+        let tail_count = ((n as f64) * (1.0 - confidence)).ceil() as usize;
+        let tail_count = tail_count.max(1).min(n);
+
+        // CDaR = mean of the worst tail_count drawdowns
+        let tail_sum: Decimal = sorted[..tail_count].iter().sum();
+        tail_sum / Decimal::from(tail_count as u32)
+    }
+
+    /// Calculate CDaR at 95% confidence (mean of worst 5% of drawdowns).
+    pub fn calculate_cdar_95(&self, drawdowns: &[Decimal]) -> Decimal {
+        self.calculate_cdar(drawdowns, 0.95)
+    }
+
+    /// Calculate CDaR at 99% confidence (mean of worst 1% of drawdowns).
+    pub fn calculate_cdar_99(&self, drawdowns: &[Decimal]) -> Decimal {
+        self.calculate_cdar(drawdowns, 0.99)
+    }
+
     /// Calculate Drawdown Beta between an asset and the portfolio.
     ///
     /// Measures how much an asset's drawdowns correlate with portfolio drawdowns.
@@ -1007,6 +1051,46 @@ mod tests {
         // -20% loss, 30% max DD
         let rf = calc.calculate_recovery_factor(dec!(-0.20), dec!(0.30));
         assert!(rf < Decimal::ZERO, "RF should be negative for losing strategy");
+    }
+
+    #[test]
+    fn test_cdar_basic() {
+        let calc = RiskCalculator::default();
+        
+        // Drawdowns: -5%, -10%, -3%, -15%, -8%, -2%, -12%, -7%, -4%, -6%
+        let drawdowns = vec![
+            dec!(-0.05), dec!(-0.10), dec!(-0.03), dec!(-0.15), dec!(-0.08),
+            dec!(-0.02), dec!(-0.12), dec!(-0.07), dec!(-0.04), dec!(-0.06),
+        ];
+        
+        // CDaR 95% = mean of worst 5% = mean of worst 0.5 obs ≈ 1 obs = -15%
+        let cdar = calc.calculate_cdar_95(&drawdowns);
+        assert!(cdar < Decimal::ZERO, "CDaR should be negative");
+        assert!(cdar <= dec!(-0.10), "CDaR 95% should be at least -10%");
+    }
+
+    #[test]
+    fn test_cdar_empty() {
+        let calc = RiskCalculator::default();
+        let cdar = calc.calculate_cdar_95(&[]);
+        assert_eq!(cdar, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_cdar_vs_cvar() {
+        let calc = RiskCalculator::default();
+        
+        // Same data, but CDaR operates on drawdown series (always negative)
+        // CVaR operates on return series (can be positive or negative)
+        let drawdowns = vec![
+            dec!(-0.05), dec!(-0.10), dec!(-0.03), dec!(-0.15), dec!(-0.08),
+        ];
+        
+        let cdar = calc.calculate_cdar_95(&drawdowns);
+        let cvar = calc.calculate_cvar_95(&drawdowns);
+        
+        // For same data, they should be equal (both are mean of worst N%)
+        assert_eq!(cdar, cvar, "CDaR and CVaR use same formula on different data types");
     }
 }
 

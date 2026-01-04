@@ -39,7 +39,15 @@ pub struct InstitutionalThresholds {
     /// Maximum out-of-sample drawdown (negative value)
     /// OMP spec: -0.20 (20% max drawdown)
     pub max_oos_drawdown: f64,
+    
+    /// Minimum out-of-sample Profit Factor.
+    /// Reference: Package Research v2.0 - Checklist Anti-Overfitting.
+    /// A value below 1.5 may indicate transaction costs erode strategy edge.
+    #[serde(default = "default_min_profit_factor")]
+    pub min_profit_factor_oos: f64,
 }
+
+fn default_min_profit_factor() -> f64 { 1.3 }
 
 impl Default for InstitutionalThresholds {
     fn default() -> Self {
@@ -52,6 +60,7 @@ impl Default for InstitutionalThresholds {
             max_degradation_pct: 50.0,
             min_split_pass_rate: 0.5,
             max_oos_drawdown: -0.20,  // OMP spec: max_drawdown_net = 0.20
+            min_profit_factor_oos: 1.5, // Package Research v2.0
         }
     }
 }
@@ -66,6 +75,7 @@ impl InstitutionalThresholds {
             max_degradation_pct: 70.0,
             min_split_pass_rate: 0.4,
             max_oos_drawdown: -0.35,
+            min_profit_factor_oos: 1.1, // Relaxed for research
         }
     }
     
@@ -94,6 +104,9 @@ impl InstitutionalThresholds {
         if self.max_oos_drawdown > 0.0 {
             return Err("max_oos_drawdown must be <= 0 (negative value)".into());
         }
+        if self.min_profit_factor_oos < 1.0 {
+            return Err("min_profit_factor_oos must be >= 1.0".into());
+        }
         Ok(())
     }
     
@@ -106,6 +119,20 @@ impl InstitutionalThresholds {
         degradation_pct: f64,
         split_pass_rate: f64,
         oos_drawdown: f64,
+    ) -> (bool, Vec<String>) {
+        self.check_candidate_with_pf(oos_sharpe, pbo, dsr, degradation_pct, split_pass_rate, oos_drawdown, None)
+    }
+    
+    /// Check if a candidate passes all thresholds, including profit factor.
+    pub fn check_candidate_with_pf(
+        &self,
+        oos_sharpe: f64,
+        pbo: f64,
+        dsr: f64,
+        degradation_pct: f64,
+        split_pass_rate: f64,
+        oos_drawdown: f64,
+        profit_factor: Option<f64>,
     ) -> (bool, Vec<String>) {
         let mut failures = Vec::new();
         
@@ -145,6 +172,14 @@ impl InstitutionalThresholds {
                 oos_drawdown * 100.0, self.max_oos_drawdown * 100.0
             ));
         }
+        if let Some(pf) = profit_factor {
+            if pf < self.min_profit_factor_oos {
+                failures.push(format!(
+                    "Profit Factor {:.2} < min {:.2}",
+                    pf, self.min_profit_factor_oos
+                ));
+            }
+        }
         
         (failures.is_empty(), failures)
     }
@@ -161,6 +196,7 @@ mod tests {
         assert_eq!(t.min_oos_sharpe, 1.0);
         assert_eq!(t.max_pbo, 0.10);
         assert_eq!(t.min_dsr, 0.8);
+        assert_eq!(t.min_profit_factor_oos, 1.5);
     }
     
     #[test]
@@ -168,6 +204,7 @@ mod tests {
         let t = InstitutionalThresholds::research();
         assert!(t.validate().is_ok());
         assert!(t.min_oos_sharpe < InstitutionalThresholds::default().min_oos_sharpe);
+        assert!(t.min_profit_factor_oos < InstitutionalThresholds::default().min_profit_factor_oos);
     }
     
     #[test]
@@ -178,6 +215,10 @@ mod tests {
         
         t = InstitutionalThresholds::default();
         t.min_oos_sharpe = -0.5;
+        assert!(t.validate().is_err());
+        
+        t = InstitutionalThresholds::default();
+        t.min_profit_factor_oos = 0.5;
         assert!(t.validate().is_err());
     }
     
@@ -209,6 +250,20 @@ mod tests {
         );
         assert!(!passed);
         assert_eq!(failures.len(), 3);
+    }
+    
+    #[test]
+    fn test_check_candidate_profit_factor() {
+        let t = InstitutionalThresholds::default();
+        
+        // Pass with good profit factor
+        let (passed, _) = t.check_candidate_with_pf(1.5, 0.05, 0.9, 30.0, 0.6, -0.15, Some(2.0));
+        assert!(passed);
+        
+        // Fail with low profit factor
+        let (passed, failures) = t.check_candidate_with_pf(1.5, 0.05, 0.9, 30.0, 0.6, -0.15, Some(1.2));
+        assert!(!passed);
+        assert!(failures.iter().any(|f| f.contains("Profit Factor")));
     }
 }
 

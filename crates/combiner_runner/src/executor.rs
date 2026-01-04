@@ -134,6 +134,8 @@ impl BacktestOutput {
                 total_trades: 100,
                 winning_trades: Some(55),
                 losing_trades: Some(45),
+                is_valid: true,
+                warnings: Vec::new(),
             },
             run_id: Some("test-mock-run".into()),
             output_path: None,

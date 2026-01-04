@@ -19,6 +19,8 @@ members = [
     "crates/combiner_engine",
     "crates/combiner_runner",
     "crates/combiner_cli",
+    # Storage
+    "crates/obfs",
 ]
 
 [workspace.package]
@@ -44,6 +46,9 @@ combiner_core = { path = "crates/combiner_core" }
 combiner_engine = { path = "crates/combiner_engine" }
 combiner_runner = { path = "crates/combiner_runner" }
 combiner_cli = { path = "crates/combiner_cli" }
+
+# Storage
+obfs = { path = "crates/obfs" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
