@@ -132,6 +132,11 @@ impl Obfs {
         &self.config
     }
 
+    /// Get the compression pipeline for direct compression operations
+    pub fn compression_pipeline(&self) -> &CompressionPipeline {
+        &self.compression_pipeline
+    }
+
     /// Sync all data to disk
     pub fn sync(&self) -> anyhow::Result<()> {
         self.metadata_store.sync()

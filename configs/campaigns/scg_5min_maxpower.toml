@@ -100,6 +100,7 @@ high_volatility_penalty = true
 max_volatility = 0.40
 
 [output]
+artifact_format = "obfs"    # "legacy" (JSON) or "obfs" (compressed, 84% savings)
 save_generations = true
 save_all_genomes = false
 save_diversity_metrics = true

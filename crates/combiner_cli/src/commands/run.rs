@@ -16,7 +16,7 @@ use combiner_core::{GenomeValidator, ParamRanges};
 use combiner_engine::{
     EvolutionConfig, EvolutionEngine, ExperimentManifest, ExperimentPersistence,
     ExperimentStatus, Population, generate_experiment_id, UltraEvolutionResult,
-    FinalReportGenerator,
+    FinalReportGenerator, ArtifactFormat,
 };
 use combiner_runner::{BacktestExecutor, CliExecutor, ValidationCache};
 
@@ -47,6 +47,14 @@ pub struct OutputConfig {
     /// Save population each N generations.
     #[serde(default = "default_save_interval")]
     pub save_interval: u32,
+
+    /// Artifact format: "legacy" (JSON) or "obfs" (compressed, 84% savings).
+    #[serde(default = "default_artifact_format")]
+    pub artifact_format: String,
+}
+
+fn default_artifact_format() -> String {
+    "legacy".to_string()
 }
 
 fn default_output_dir() -> String {
@@ -136,7 +144,8 @@ pub fn execute(
         pb.finish_with_message("ULTRA evolution complete");
 
         // Save ultra results
-        save_ultra_results(&engine, &result, output_path, &evo_config, start_time)?;
+        let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);
+        save_ultra_results(&engine, &result, output_path, &evo_config, start_time, artifact_format)?;
 
         // Print ultra summary
         print_ultra_summary(&result);
@@ -152,7 +161,8 @@ pub fn execute(
         pb.finish_with_message("Evolution complete");
 
         // Save results
-        save_results(&engine, output_path, &evo_config, start_time)?;
+        let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);
+        save_results(&engine, output_path, &evo_config, start_time, artifact_format)?;
 
         // Print summary
         print_summary(&engine);
@@ -306,9 +316,11 @@ fn save_results<E: BacktestExecutor>(
     output_path: &Path,
     config: &EvolutionConfig,
     start_time: std::time::Instant,
+    artifact_format: ArtifactFormat,
 ) -> Result<()> {
     let experiment_id = generate_experiment_id();
-    let persistence = ExperimentPersistence::new(output_path, &experiment_id);
+    let persistence = ExperimentPersistence::new(output_path, &experiment_id)
+        .with_format(artifact_format);
 
     // Initialize directory structure
     persistence.init()?;
@@ -380,9 +392,11 @@ fn save_ultra_results<E: BacktestExecutor>(
     output_path: &Path,
     config: &EvolutionConfig,
     start_time: std::time::Instant,
+    artifact_format: ArtifactFormat,
 ) -> Result<()> {
     let experiment_id = generate_experiment_id();
-    let persistence = ExperimentPersistence::new(output_path, &experiment_id);
+    let persistence = ExperimentPersistence::new(output_path, &experiment_id)
+        .with_format(artifact_format);
 
     // Initialize directory structure
     persistence.init()?;

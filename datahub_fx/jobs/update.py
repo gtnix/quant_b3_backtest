@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from ..config import FxConfig, DEFAULT_CONFIG
 from ..storage import CsvFxStorage
+from ..db import get_connection, ensure_table_exists, upsert_rates, get_latest_date as db_get_latest_date
 from .sync import get_provider_for_pair, DEFAULT_PAIRS
 
 logger = logging.getLogger(__name__)
@@ -30,8 +31,14 @@ def update_pair(
         logger.error(f"No provider found for pair: {pair}")
         return {"pair": pair, "status": "error", "error": "No provider available"}
     
-    # Get last known date
-    last_date = storage.get_latest_date(pair)
+    # Get last known date from Neon DB first, fallback to CSV
+    try:
+        with get_connection() as conn:
+            ensure_table_exists(conn)
+            last_date = db_get_latest_date(conn, pair)
+    except Exception as e:
+        logger.warning(f"Could not get date from DB: {e}, using CSV")
+        last_date = storage.get_latest_date(pair)
     
     if last_date is None:
         # No existing data, do full sync
@@ -52,9 +59,17 @@ def update_pair(
         records = provider.fetch(pair, start_date, end_date)
         
         if records:
+            # Save to CSV cache
             added = storage.append(pair, records)
             new_last = storage.get_latest_date(pair)
-            logger.info(f"Added {added} new records for {pair}")
+            logger.info(f"Added {added} new records for {pair} to CSV")
+            
+            # Persist to Neon DB
+            db_records = [(r.pair, r.date, r.rate, r.source) for r in records]
+            with get_connection() as conn:
+                db_count = upsert_rates(conn, db_records)
+                logger.info(f"Added {db_count} records for {pair} to Neon DB")
+            
             return {
                 "pair": pair,
                 "status": "updated",

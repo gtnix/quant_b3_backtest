@@ -39,6 +39,9 @@ pub struct CampaignConfig {
     /// Risk profile configuration.
     #[serde(default)]
     pub risk_profile: RiskProfileConfig,
+    /// Output configuration.
+    #[serde(default)]
+    pub output: OutputConfig,
 }
 
 /// Campaign metadata.
@@ -333,6 +336,38 @@ impl Default for DataIntegrityConfig {
     }
 }
 
+/// Output configuration for artifact format and paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    /// Artifact format: "legacy" (JSON/CSV) or "obfs" (compressed binary).
+    /// OBFS provides ~84% storage savings with zero-copy reads.
+    #[serde(default = "default_artifact_format")]
+    pub artifact_format: String,
+    /// Output directory path (optional override).
+    #[serde(default)]
+    pub output_dir: Option<String>,
+}
+
+fn default_artifact_format() -> String {
+    "legacy".to_string()
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            artifact_format: default_artifact_format(),
+            output_dir: None,
+        }
+    }
+}
+
+impl OutputConfig {
+    /// Get the artifact format as enum.
+    pub fn artifact_format_enum(&self) -> combiner_engine::ArtifactFormat {
+        combiner_engine::ArtifactFormat::from_str(&self.artifact_format)
+    }
+}
+
 // =============================================================================
 // LOADING AND HASHING
 // =============================================================================
@@ -512,6 +547,10 @@ max_gap_days = 5
 jump_threshold_pct = 30.0
 price_adjustment = "adjusted"
 enabled = true
+
+[output]
+artifact_format = "obfs"  # "legacy" (JSON) or "obfs" (compressed, 84% savings)
+# output_dir = "output/scg"  # Optional override
 "#
     )
 }
@@ -537,6 +576,7 @@ mod tests {
             promotion: PromotionConfig::default(),
             data_integrity: DataIntegrityConfig::default(),
             risk_profile: RiskProfileConfig::default(),
+            output: OutputConfig::default(),
         };
 
         let config2 = config1.clone();

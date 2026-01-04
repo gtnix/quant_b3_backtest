@@ -34,7 +34,7 @@ class BCBProvider(FxProvider):
     
     BASE_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs"
     
-    def __init__(self, timeout: int = 30, max_retries: int = 3):
+    def __init__(self, timeout: int = 60, max_retries: int = 5):
         self.timeout = timeout
         self.max_retries = max_retries
         self.session = requests.Session()
@@ -73,6 +73,8 @@ class BCBProvider(FxProvider):
         
         logger.info(f"Fetching {pair} from BCB: {start_date} to {end_date}")
         
+        import time
+        data = None
         for attempt in range(self.max_retries):
             try:
                 response = self.session.get(url, params=params, timeout=self.timeout)
@@ -80,9 +82,14 @@ class BCBProvider(FxProvider):
                 data = response.json()
                 break
             except requests.RequestException as e:
-                logger.warning(f"BCB request attempt {attempt + 1} failed: {e}")
+                wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, 16s
+                logger.warning(f"BCB request attempt {attempt + 1} failed: {e}, retrying in {wait_time}s")
                 if attempt == self.max_retries - 1:
                     raise ConnectionError(f"Failed to fetch from BCB after {self.max_retries} attempts: {e}")
+                time.sleep(wait_time)
+        
+        if data is None:
+            return []
         
         records = []
         for item in data:

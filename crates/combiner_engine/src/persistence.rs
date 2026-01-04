@@ -4,6 +4,10 @@
 //! - manifest.json (experiment metadata)
 //! - generations/ (population snapshots)
 //! - hall_of_fame/ (best strategies)
+//!
+//! Supports two output formats:
+//! - Legacy: JSON files (default, backwards compatible)
+//! - OBFS: Optimized Binary File System (rkyv + Zstd, ~84% space savings)
 
 use crate::hall_of_fame::HallOfFame;
 use crate::GenerationStats;
@@ -13,6 +17,26 @@ use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
 use tracing::info;
+
+/// Output format for persistence artifacts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArtifactFormat {
+    /// Legacy JSON format (backwards compatible)
+    #[default]
+    Legacy,
+    /// OBFS binary format (rkyv + Zstd compression)
+    Obfs,
+}
+
+impl ArtifactFormat {
+    /// Parse from string (for config files).
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "obfs" | "binary" | "compressed" => Self::Obfs,
+            _ => Self::Legacy,
+        }
+    }
+}
 
 /// Errors during persistence operations.
 #[derive(Debug, Error)]
@@ -66,18 +90,54 @@ pub enum ExperimentStatus {
 }
 
 /// Persistence manager for experiments.
+/// Supports both Legacy (JSON) and OBFS (compressed binary) formats.
 pub struct ExperimentPersistence {
     output_dir: PathBuf,
     experiment_id: String,
+    format: ArtifactFormat,
+    obfs: Option<obfs::Obfs>,
 }
 
 impl ExperimentPersistence {
-    /// Create a new persistence manager.
+    /// Create a new persistence manager (Legacy format by default).
     pub fn new(output_dir: impl Into<PathBuf>, experiment_id: impl Into<String>) -> Self {
         Self {
             output_dir: output_dir.into(),
             experiment_id: experiment_id.into(),
+            format: ArtifactFormat::Legacy,
+            obfs: None,
         }
+    }
+
+    /// Set the artifact format (builder pattern).
+    pub fn with_format(mut self, format: ArtifactFormat) -> Self {
+        self.format = format;
+        if format == ArtifactFormat::Obfs {
+            self.init_obfs();
+        }
+        self
+    }
+
+    /// Initialize OBFS storage backend.
+    fn init_obfs(&mut self) {
+        let obfs_path = self.output_dir.join("obfs");
+        let config = obfs::ObfsConfig {
+            root_path: obfs_path.to_string_lossy().to_string(),
+            compression_level: 3,
+            enable_blake3: true,
+            enable_xxh3: true,
+            max_file_size: 1024 * 1024 * 1024, // 1 GB
+        };
+        let obfs_instance = obfs::Obfs::with_config(config);
+        if let Err(e) = obfs_instance.initialize() {
+            tracing::warn!("Failed to initialize OBFS: {}", e);
+        }
+        self.obfs = Some(obfs_instance);
+    }
+
+    /// Get current format.
+    pub fn format(&self) -> ArtifactFormat {
+        self.format
     }
 
     /// Create the experiment directory.
@@ -97,9 +157,28 @@ impl ExperimentPersistence {
 
     /// Write the experiment manifest.
     pub fn write_manifest(&self, manifest: &ExperimentManifest) -> Result<(), PersistenceError> {
-        let path = self.experiment_dir().join("manifest.json");
-        let content = serde_json::to_string_pretty(manifest)?;
-        fs::write(path, content)?;
+        match self.format {
+            ArtifactFormat::Legacy => {
+                let path = self.experiment_dir().join("manifest.json");
+                let content = serde_json::to_string_pretty(manifest)?;
+                fs::write(path, content)?;
+            }
+            ArtifactFormat::Obfs => {
+                // Write compressed manifest using OBFS compression pipeline
+                if let Some(ref obfs) = self.obfs {
+                    let json_bytes = serde_json::to_vec(manifest)?;
+                    let compressed = obfs.compression_pipeline().compress(&json_bytes)
+                        .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                    let path = self.experiment_dir().join("manifest.obfs");
+                    fs::write(path, compressed)?;
+                } else {
+                    // Fallback to legacy if OBFS not initialized
+                    let path = self.experiment_dir().join("manifest.json");
+                    let content = serde_json::to_string_pretty(manifest)?;
+                    fs::write(path, content)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -114,18 +193,55 @@ impl ExperimentPersistence {
         let gen_dir = self.experiment_dir().join("generations").join(format!("gen_{:03}", generation));
         fs::create_dir_all(&gen_dir)?;
 
-        // Write population
-        let pop_json = serde_json::to_string_pretty(population)?;
-        fs::write(gen_dir.join("population.json"), pop_json)?;
+        match self.format {
+            ArtifactFormat::Legacy => {
+                // Write population
+                let pop_json = serde_json::to_string_pretty(population)?;
+                fs::write(gen_dir.join("population.json"), pop_json)?;
 
-        // Write Pareto indices
-        let pareto: Vec<_> = pareto_indices.iter().map(|&i| &population[i]).collect();
-        let pareto_json = serde_json::to_string_pretty(&pareto)?;
-        fs::write(gen_dir.join("pareto.json"), pareto_json)?;
+                // Write Pareto indices
+                let pareto: Vec<_> = pareto_indices.iter().map(|&i| &population[i]).collect();
+                let pareto_json = serde_json::to_string_pretty(&pareto)?;
+                fs::write(gen_dir.join("pareto.json"), pareto_json)?;
 
-        // Write stats
-        let stats_json = serde_json::to_string_pretty(stats)?;
-        fs::write(gen_dir.join("stats.json"), stats_json)?;
+                // Write stats
+                let stats_json = serde_json::to_string_pretty(stats)?;
+                fs::write(gen_dir.join("stats.json"), stats_json)?;
+            }
+            ArtifactFormat::Obfs => {
+                if let Some(ref obfs) = self.obfs {
+                    let pipeline = obfs.compression_pipeline();
+
+                    // Compress population
+                    let pop_bytes = serde_json::to_vec(population)?;
+                    let pop_compressed = pipeline.compress(&pop_bytes)
+                        .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                    fs::write(gen_dir.join("population.obfs"), pop_compressed)?;
+
+                    // Compress Pareto
+                    let pareto: Vec<_> = pareto_indices.iter().map(|&i| &population[i]).collect();
+                    let pareto_bytes = serde_json::to_vec(&pareto)?;
+                    let pareto_compressed = pipeline.compress(&pareto_bytes)
+                        .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                    fs::write(gen_dir.join("pareto.obfs"), pareto_compressed)?;
+
+                    // Compress stats
+                    let stats_bytes = serde_json::to_vec(stats)?;
+                    let stats_compressed = pipeline.compress(&stats_bytes)
+                        .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                    fs::write(gen_dir.join("stats.obfs"), stats_compressed)?;
+                } else {
+                    // Fallback to legacy
+                    let pop_json = serde_json::to_string_pretty(population)?;
+                    fs::write(gen_dir.join("population.json"), pop_json)?;
+                    let pareto: Vec<_> = pareto_indices.iter().map(|&i| &population[i]).collect();
+                    let pareto_json = serde_json::to_string_pretty(&pareto)?;
+                    fs::write(gen_dir.join("pareto.json"), pareto_json)?;
+                    let stats_json = serde_json::to_string_pretty(stats)?;
+                    fs::write(gen_dir.join("stats.json"), stats_json)?;
+                }
+            }
+        }
 
         Ok(())
     }
@@ -135,7 +251,7 @@ impl ExperimentPersistence {
         let hof_dir = self.experiment_dir().join("hall_of_fame");
         fs::create_dir_all(&hof_dir)?;
 
-        // Write ranking
+        // Build ranking data
         let ranking: Vec<_> = hof.entries().iter().map(|e| {
             serde_json::json!({
                 "rank": e.rank,
@@ -146,31 +262,83 @@ impl ExperimentPersistence {
                 "max_drawdown": e.genome.fitness.as_ref().map(|f| f.max_drawdown),
             })
         }).collect();
-        let ranking_json = serde_json::to_string_pretty(&ranking)?;
-        fs::write(hof_dir.join("ranking.json"), ranking_json)?;
 
-        // Write each strategy
-        for (i, entry) in hof.entries().iter().enumerate() {
-            let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
-            fs::create_dir_all(&strategy_dir)?;
+        match self.format {
+            ArtifactFormat::Legacy => {
+                let ranking_json = serde_json::to_string_pretty(&ranking)?;
+                fs::write(hof_dir.join("ranking.json"), ranking_json)?;
 
-            // Genome JSON
-            let genome_json = serde_json::to_string_pretty(&entry.genome)?;
-            fs::write(strategy_dir.join("genome.json"), genome_json)?;
+                for (i, entry) in hof.entries().iter().enumerate() {
+                    let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
+                    fs::create_dir_all(&strategy_dir)?;
 
-            // Config TOML
-            if let Ok(toml_str) = entry.genome.to_toml() {
-                fs::write(strategy_dir.join("config.toml"), toml_str)?;
+                    let genome_json = serde_json::to_string_pretty(&entry.genome)?;
+                    fs::write(strategy_dir.join("genome.json"), genome_json)?;
+
+                    if let Ok(toml_str) = entry.genome.to_toml() {
+                        fs::write(strategy_dir.join("config.toml"), toml_str)?;
+                    }
+
+                    if let Some(ref fitness) = entry.genome.fitness {
+                        let metrics_json = serde_json::to_string_pretty(fitness)?;
+                        fs::write(strategy_dir.join("metrics.json"), metrics_json)?;
+                    }
+                }
             }
+            ArtifactFormat::Obfs => {
+                if let Some(ref obfs) = self.obfs {
+                    let pipeline = obfs.compression_pipeline();
 
-            // Metrics JSON
-            if let Some(ref fitness) = entry.genome.fitness {
-                let metrics_json = serde_json::to_string_pretty(fitness)?;
-                fs::write(strategy_dir.join("metrics.json"), metrics_json)?;
+                    // Compress ranking
+                    let ranking_bytes = serde_json::to_vec(&ranking)?;
+                    let ranking_compressed = pipeline.compress(&ranking_bytes)
+                        .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                    fs::write(hof_dir.join("ranking.obfs"), ranking_compressed)?;
+
+                    // Compress each strategy
+                    for (i, entry) in hof.entries().iter().enumerate() {
+                        let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
+                        fs::create_dir_all(&strategy_dir)?;
+
+                        let genome_bytes = serde_json::to_vec(&entry.genome)?;
+                        let genome_compressed = pipeline.compress(&genome_bytes)
+                            .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                        fs::write(strategy_dir.join("genome.obfs"), genome_compressed)?;
+
+                        // Keep TOML uncompressed for human readability
+                        if let Ok(toml_str) = entry.genome.to_toml() {
+                            fs::write(strategy_dir.join("config.toml"), toml_str)?;
+                        }
+
+                        if let Some(ref fitness) = entry.genome.fitness {
+                            let metrics_bytes = serde_json::to_vec(fitness)?;
+                            let metrics_compressed = pipeline.compress(&metrics_bytes)
+                                .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+                            fs::write(strategy_dir.join("metrics.obfs"), metrics_compressed)?;
+                        }
+                    }
+                } else {
+                    // Fallback to legacy
+                    let ranking_json = serde_json::to_string_pretty(&ranking)?;
+                    fs::write(hof_dir.join("ranking.json"), ranking_json)?;
+                    for (i, entry) in hof.entries().iter().enumerate() {
+                        let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
+                        fs::create_dir_all(&strategy_dir)?;
+                        let genome_json = serde_json::to_string_pretty(&entry.genome)?;
+                        fs::write(strategy_dir.join("genome.json"), genome_json)?;
+                        if let Ok(toml_str) = entry.genome.to_toml() {
+                            fs::write(strategy_dir.join("config.toml"), toml_str)?;
+                        }
+                        if let Some(ref fitness) = entry.genome.fitness {
+                            let metrics_json = serde_json::to_string_pretty(fitness)?;
+                            fs::write(strategy_dir.join("metrics.json"), metrics_json)?;
+                        }
+                    }
+                }
             }
         }
 
-        info!("Wrote {} strategies to {:?}", hof.len(), hof_dir);
+        info!("Wrote {} strategies to {:?} (format: {:?})", hof.len(), hof_dir, self.format);
         Ok(())
     }
 

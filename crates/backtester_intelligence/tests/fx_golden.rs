@@ -17,11 +17,11 @@ use serde_json::Value;
 
 #[test]
 fn test_schema_version_constant() {
-    // Verify the current schema version (v1.3 adds compliance/risk controls)
+    // Verify the current schema version (v1.4 adds execution_reality_check)
     assert_eq!(
         PERFORMANCE_REPORT_SCHEMA_VERSION, 
-        "fx_report_v1.3",
-        "Schema version should be fx_report_v1.3"
+        "fx_report_v1.4",
+        "Schema version should be fx_report_v1.4"
     );
 }
 
@@ -73,12 +73,22 @@ fn test_golden_file_parses() {
     assert_eq!(report_v13.schema_version, "fx_report_v1.3");
     // v1.3 should have compliance field
     assert!(report_v13.compliance.is_some());
+    
+    // Test v1.4 with execution_reality_check (backward compatible - field is optional)
+    let golden_v14 = include_str!("golden/performance_report_v1.4.json");
+    let parsed_v14: Result<PerformanceReport, _> = serde_json::from_str(golden_v14);
+    
+    assert!(parsed_v14.is_ok(), "Golden v1.4 file should parse: {:?}", parsed_v14.err());
+    let report_v14 = parsed_v14.unwrap();
+    assert_eq!(report_v14.schema_version, "fx_report_v1.4");
+    // v1.4 compliance should still be present
+    assert!(report_v14.compliance.is_some());
 }
 
 #[test]
 fn test_golden_schema_version_matches() {
-    // v1.3 golden file should match current version
-    let golden = include_str!("golden/performance_report_v1.3.json");
+    // v1.4 golden file should match current version
+    let golden = include_str!("golden/performance_report_v1.4.json");
     let parsed: Value = serde_json::from_str(golden).unwrap();
     
     let schema_version = parsed.get("schema_version")

@@ -11,12 +11,45 @@ use tracing::{error, info};
 
 use std::path::Path;
 
-use combiner_engine::{EvolutionConfig, EvolutionEngine};
+use combiner_engine::{EvolutionConfig, EvolutionEngine, ArtifactFormat};
 use backtester_intelligence::monitoring::{
     DataIntegrityGate, AuditMode, DataContext, UniverseType,
 };
 use backtester_intelligence::filters::Market;
 use combiner_runner::{CliExecutor, ValidationCache};
+
+/// Compression pipeline for OBFS writes (lazily initialized).
+static OBFS_PIPELINE: std::sync::OnceLock<obfs::CompressionPipeline> = std::sync::OnceLock::new();
+
+/// Get or initialize the OBFS compression pipeline.
+fn get_compression_pipeline() -> &'static obfs::CompressionPipeline {
+    OBFS_PIPELINE.get_or_init(|| obfs::CompressionPipeline::with_level(3))
+}
+
+/// Write JSON data with optional OBFS compression.
+/// When format is OBFS, writes compressed .obfs file; otherwise writes .json file.
+fn write_json_artifact<T: serde::Serialize>(
+    base_path: &str,
+    name: &str,
+    data: &T,
+    format: ArtifactFormat,
+) -> Result<()> {
+    match format {
+        ArtifactFormat::Legacy => {
+            let path = format!("{}/{}.json", base_path, name);
+            std::fs::write(&path, serde_json::to_string_pretty(data)?)?;
+        }
+        ArtifactFormat::Obfs => {
+            let json_bytes = serde_json::to_vec(data)?;
+            let compressed = get_compression_pipeline()
+                .compress(&json_bytes)
+                .map_err(|e| anyhow::anyhow!("OBFS compression failed: {}", e))?;
+            let path = format!("{}/{}.obfs", base_path, name);
+            std::fs::write(&path, compressed)?;
+        }
+    }
+    Ok(())
+}
 
 use super::config::CampaignConfig;
 use super::registry::{
@@ -683,9 +716,9 @@ async fn execute_single_run(
             "data_source": "neon_b3_market_data"
         }
     });
-    let manifest_path = format!("{}/manifest.json", output_dir);
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
-    info!(run_id, "Generated manifest.json");
+    let artifact_format = config.output.artifact_format_enum();
+    write_json_artifact(&output_dir, "manifest", &manifest, artifact_format)?;
+    info!(run_id, "Generated manifest (format: {:?})", artifact_format);
 
     // 2. Generate hall_of_fame/ directory with ranking.json and genomes/
     let hof_dir = format!("{}/hall_of_fame", output_dir);
@@ -709,10 +742,7 @@ async fn execute_single_run(
         .collect();
     
     // Write ranking as array (audit expects array format)
-    std::fs::write(
-        format!("{}/ranking.json", hof_dir),
-        serde_json::to_string_pretty(&ranking)?
-    )?;
+    write_json_artifact(&hof_dir, "ranking", &ranking, artifact_format)?;
     
     // Save individual genomes
     for (rank, entry) in result.stage_a_hall_of_fame.entries().iter().enumerate() {
@@ -742,10 +772,7 @@ async fn execute_single_run(
         "total_generations": result.total_generations,
         "snapshots": snapshots
     });
-    std::fs::write(
-        format!("{}/summary.json", gen_dir),
-        serde_json::to_string_pretty(&gen_summary)?
-    )?;
+    write_json_artifact(&gen_dir, "summary", &gen_summary, artifact_format)?;
     info!(run_id, "Generated generations/ with {} snapshots", snapshots.len());
 
     // 4. Generate report.json with generation_stats (for audit compatibility)
@@ -773,10 +800,7 @@ async fn execute_single_run(
         "duration_secs": result.total_time_secs,
         "generation_stats": generation_stats
     });
-    std::fs::write(
-        format!("{}/report.json", output_dir),
-        serde_json::to_string_pretty(&report)?
-    )?;
+    write_json_artifact(&output_dir, "report", &report, artifact_format)?;
     info!(run_id, "Generated report.json");
 
     // ==========================================================================
@@ -818,10 +842,7 @@ async fn execute_single_run(
         "passed": sanity_passed,
         "summary": if sanity_passed { "Todas as verificações de sanidade passaram" } else { "Atenção: há flags de alerta" }
     });
-    std::fs::write(
-        format!("{}/sanity.json", output_dir),
-        serde_json::to_string_pretty(&sanity)?
-    )?;
+    write_json_artifact(&output_dir, "sanity", &sanity, artifact_format)?;
     info!(run_id, "Generated sanity.json (passed={})", sanity_passed);
     
     // 6. Generate human_report.json - human-readable summary
@@ -890,10 +911,7 @@ async fn execute_single_run(
         "recommendation": recommendation,
         "sanity_check": sanity_passed
     });
-    std::fs::write(
-        format!("{}/human_report.json", output_dir),
-        serde_json::to_string_pretty(&human_report)?
-    )?;
+    write_json_artifact(&output_dir, "human_report", &human_report, artifact_format)?;
     info!(run_id, "Generated human_report.json");
     
     // 7. Generate attribution.json - best/worst performers by strategy
@@ -917,10 +935,7 @@ async fn execute_single_run(
             })
         }).collect::<Vec<_>>()
     });
-    std::fs::write(
-        format!("{}/attribution.json", output_dir),
-        serde_json::to_string_pretty(&attribution)?
-    )?;
+    write_json_artifact(&output_dir, "attribution", &attribution, artifact_format)?;
     info!(run_id, "Generated attribution.json");
 
     // ==========================================================================
@@ -929,10 +944,7 @@ async fn execute_single_run(
     
     // 8. Generate asset_attribution.json - PnL by asset (aggregate from backtests)
     let asset_attribution = generate_asset_attribution(&output_dir, run_id, &created_at);
-    std::fs::write(
-        format!("{}/asset_attribution.json", output_dir),
-        serde_json::to_string_pretty(&asset_attribution)?
-    )?;
+    write_json_artifact(&output_dir, "asset_attribution", &asset_attribution, artifact_format)?;
     info!(run_id, "Generated asset_attribution.json");
     
     // 9. Generate audit_crosscheck.json - independent metric recalculation
@@ -941,26 +953,17 @@ async fn execute_single_run(
         0.05, // 5% tolerance
         &created_at,
     );
-    std::fs::write(
-        format!("{}/audit_crosscheck.json", output_dir),
-        serde_json::to_string_pretty(&crosscheck_result)?
-    )?;
+    write_json_artifact(&output_dir, "audit_crosscheck", &crosscheck_result, artifact_format)?;
     info!(run_id, "Generated audit_crosscheck.json (checked {} strategies)", crosscheck_result.strategies_checked);
     
     // 10. Generate validation_overview.json - aggregate WFA/PBO/DSR/Stress
     let validation_overview = generate_validation_overview(&output_dir, run_id, &created_at, &candidates);
-    std::fs::write(
-        format!("{}/validation_overview.json", output_dir),
-        serde_json::to_string_pretty(&validation_overview)?
-    )?;
+    write_json_artifact(&output_dir, "validation_overview", &validation_overview, artifact_format)?;
     info!(run_id, "Generated validation_overview.json");
     
     // 11. Generate audit_marcos.json - result of all 6 audit marcos
     let audit_marcos = generate_audit_marcos(&output_dir, run_id, &created_at, sanity_passed);
-    std::fs::write(
-        format!("{}/audit_marcos.json", output_dir),
-        serde_json::to_string_pretty(&audit_marcos)?
-    )?;
+    write_json_artifact(&output_dir, "audit_marcos", &audit_marcos, artifact_format)?;
     info!(run_id, "Generated audit_marcos.json");
 
     Ok(RunResult {

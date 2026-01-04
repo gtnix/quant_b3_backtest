@@ -47,7 +47,7 @@ pub use operators::{Selection, Crossover, Mutation, AdaptiveMutation};
 pub use pareto::ParetoFrontier;
 pub use hall_of_fame::HallOfFame;
 pub use engine::{EvolutionEngine, GenerationStats, UltraEvolutionResult};
-pub use persistence::{ExperimentPersistence, ExperimentManifest, ExperimentStatus, generate_experiment_id};
+pub use persistence::{ExperimentPersistence, ExperimentManifest, ExperimentStatus, ArtifactFormat, generate_experiment_id};
 pub use validation::{
     GenomeValidatorAntiOverfit, ValidationConfig, ValidationReport,
     WfaResult, CpcvResult, PboDsrResult,

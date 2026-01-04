@@ -39,8 +39,8 @@ class FREDProvider(FxProvider):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        timeout: int = 30,
-        max_retries: int = 3,
+        timeout: int = 60,
+        max_retries: int = 5,
     ):
         self.api_key = api_key or os.environ.get("FRED_API_KEY")
         self.timeout = timeout
@@ -82,6 +82,8 @@ class FREDProvider(FxProvider):
         
         logger.info(f"Fetching {pair} from FRED: {start_date} to {end_date}")
         
+        import time
+        data = None
         for attempt in range(self.max_retries):
             try:
                 response = self.session.get(self.BASE_URL, params=params, timeout=self.timeout)
@@ -89,9 +91,14 @@ class FREDProvider(FxProvider):
                 data = response.json()
                 break
             except requests.RequestException as e:
-                logger.warning(f"FRED request attempt {attempt + 1} failed: {e}")
+                wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, 16s
+                logger.warning(f"FRED request attempt {attempt + 1} failed: {e}, retrying in {wait_time}s")
                 if attempt == self.max_retries - 1:
                     raise ConnectionError(f"Failed to fetch from FRED after {self.max_retries} attempts: {e}")
+                time.sleep(wait_time)
+        
+        if data is None:
+            return []
         
         records = []
         observations = data.get("observations", [])

@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import FxConfig, DEFAULT_CONFIG
-from ..providers import BCBProvider, FREDProvider, FxProvider
+from ..providers import BCBProvider, FREDProvider, BrapiProvider, FxProvider
 from ..storage import CsvFxStorage
+from ..db import get_connection, ensure_table_exists, upsert_rates
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +17,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_PAIRS = ["USD/BRL", "EUR/BRL", "EUR/USD"]
 
 
-def get_provider_for_pair(pair: str) -> Optional[FxProvider]:
-    """Get the appropriate provider for a currency pair."""
+def get_provider_for_pair(pair: str, prefer_brapi: bool = True) -> Optional[FxProvider]:
+    """Get the appropriate provider for a currency pair.
+    
+    Priority: Brapi (current rates) > BCB (historical BRL) > FRED (historical USD)
+    """
+    brapi = BrapiProvider()
     bcb = BCBProvider()
     fred = FREDProvider()
     
-    if pair in bcb.supported_pairs:
+    # Brapi is preferred for current rates (more reliable)
+    if prefer_brapi and pair in brapi.supported_pairs:
+        return brapi
+    elif pair in bcb.supported_pairs:
         return bcb
     elif pair in fred.supported_pairs:
         return fred
+    elif pair in brapi.supported_pairs:
+        return brapi
     else:
         return None
 
@@ -56,8 +66,17 @@ def sync_pair(
         records = provider.fetch(pair, start_date, end_date)
         
         if records:
+            # Save to CSV cache
             count = storage.save(pair, records)
-            logger.info(f"Synced {count} records for {pair}")
+            logger.info(f"Synced {count} records for {pair} to CSV")
+            
+            # Persist to Neon DB
+            db_records = [(r.pair, r.date, r.rate, r.source) for r in records]
+            with get_connection() as conn:
+                ensure_table_exists(conn)
+                db_count = upsert_rates(conn, db_records)
+                logger.info(f"Synced {db_count} records for {pair} to Neon DB")
+            
             return {
                 "pair": pair,
                 "status": "success",
