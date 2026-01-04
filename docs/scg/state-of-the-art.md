@@ -439,3 +439,7 @@ Ajusta o Sharpe pelo número de estratégias testadas.
 | Fitness SoA | `crates/combiner_core/src/fitness_soa.rs` |
 | Validação | `crates/combiner_engine/src/validation.rs` |
 
+
+
+
+

@@ -77,6 +77,16 @@ pub struct BacktestMetrics {
     pub total_trades: u32,
     pub winning_trades: Option<u32>,
     pub losing_trades: Option<u32>,
+    /// Whether the backtest result is valid (false if 0 trades or critical issues)
+    #[serde(default = "default_true")]
+    pub is_valid: bool,
+    /// Warnings about the backtest result
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Output from a backtest execution.
@@ -187,6 +197,10 @@ pub struct CliExecutor {
     timeout: Duration,
     /// Path to market data CSV file for real backtesting
     market_data_path: Option<PathBuf>,
+    /// Data source: "database" or "csv"
+    data_source: Option<String>,
+    /// Risk profile name (e.g., "arrojado")
+    risk_profile: Option<String>,
 }
 
 impl CliExecutor {
@@ -207,6 +221,8 @@ impl CliExecutor {
             output_dir: PathBuf::from("output/scg/backtests"),
             timeout: Duration::from_secs(60),
             market_data_path: None,
+            data_source: None,
+            risk_profile: None,
         }
     }
     
@@ -264,6 +280,22 @@ impl CliExecutor {
     /// Get the market data path if set
     pub fn market_data_path(&self) -> Option<&PathBuf> {
         self.market_data_path.as_ref()
+    }
+    
+    /// Set the data source for backtesting.
+    /// When "database", uses DATABASE_URL env var; when "csv", uses market_data_path.
+    pub fn with_data_source(mut self, source: impl Into<String>) -> Self {
+        self.data_source = Some(source.into());
+        info!("Data source set to: {:?}", self.data_source);
+        self
+    }
+    
+    /// Set the risk profile for backtesting.
+    /// Passes --risk-profile <name> to the CLI.
+    pub fn with_risk_profile(mut self, profile: impl Into<String>) -> Self {
+        self.risk_profile = Some(profile.into());
+        info!("Risk profile set to: {:?}", self.risk_profile);
+        self
     }
     
     /// Validate backtester exists and is executable.
@@ -383,6 +415,20 @@ impl BacktestExecutor for CliExecutor {
             args.push(market_data.to_str().unwrap().to_string());
             debug!("Using market data from: {:?}", market_data);
         }
+        
+        // Add data source if configured (database uses DATABASE_URL env var)
+        if let Some(ref source) = self.data_source {
+            args.push("--data-source".to_string());
+            args.push(source.clone());
+            debug!("Using data source: {}", source);
+        }
+        
+        // Add risk profile if configured
+        if let Some(ref profile) = self.risk_profile {
+            args.push("--risk-profile".to_string());
+            args.push(profile.clone());
+            debug!("Using risk profile: {}", profile);
+        }
 
         // Execute CLI
         let output = Command::new(&self.cli_path)
@@ -478,12 +524,31 @@ impl BacktestExecutor for CliExecutor {
             e
         })?;
 
+        // CRITICAL: Reject invalid results (0 trades, etc.)
+        // This prevents the combiner from accepting artificial metrics
+        if !metrics.is_valid {
+            let warning_summary = if metrics.warnings.is_empty() {
+                "Unknown validation failure".to_string()
+            } else {
+                metrics.warnings.join("; ")
+            };
+            warn!(
+                "Backtest marked as invalid (run_id={}): {}",
+                run_id, warning_summary
+            );
+            return Err(ExecutionError::InvalidConfig(format!(
+                "Backtest result is invalid: {}",
+                warning_summary
+            )));
+        }
+
         info!(
-            "Backtest successful: run_id={}, duration={}ms, sharpe={:.3}, cagr={:.2}%",
+            "Backtest successful: run_id={}, duration={}ms, sharpe={:.3}, cagr={:.2}%, trades={}",
             run_id,
             start.elapsed().as_millis(),
             metrics.sharpe_ratio,
-            metrics.cagr * 100.0
+            metrics.cagr * 100.0,
+            metrics.total_trades
         );
 
         Ok(BacktestOutput {

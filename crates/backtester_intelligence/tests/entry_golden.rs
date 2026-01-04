@@ -57,6 +57,7 @@ fn run_golden_scenario() -> String {
             top_n_br: 5,
             top_n_us: 5,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.30,
@@ -196,6 +197,7 @@ fn golden_exclusion_counts() {
             top_n_br: 2, // Only top 2, so others excluded
             top_n_us: 2,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };

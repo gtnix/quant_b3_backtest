@@ -1,0 +1,67 @@
+# Muito Arrojado Risk Profile
+# Maximum risk within academically defensible bounds.
+#
+# Target: Exponential gains with speculative exposure.
+# Expected Max Drawdown: 30%
+# Daily Loss Limit: 5%
+# Weekly Loss Limit: 10%
+#
+# WARNING: This profile has significant risk of large drawdowns.
+# Only suitable for high-conviction strategies with proven edge.
+#
+# Academic Basis:
+# - Kelly fraction capped at 0.5 (never exceed Half-Kelly per Thorp 2006)
+# - Risk per trade 2.0-2.5% - upper industry limit
+# - Tighter stops 1.0-2.0x for maximized R:R
+
+[profile]
+name = "Muito Arrojado"
+base = "moderado"
+market_adjustments = true
+
+[sizing]
+kelly_fraction = 0.50            # Half-Kelly (NEVER exceed)
+max_risk_per_trade_pct = 0.0225  # 2.25%
+max_exposure_per_asset_pct = 0.30
+max_sector_concentration_pct = 0.45
+max_positions = 10               # Highly concentrated
+min_position_weight = 0.05
+
+[stops]
+atr_multiplier_br = 1.75         # Tight stops
+atr_multiplier_us = 1.50
+fixed_stop_pct = 0.18
+trailing_activation_pct = 0.15
+trailing_atr_multiplier = 1.50
+
+[portfolio_risk]
+volatility_target_br = 0.25
+volatility_target_us = 0.20
+max_drawdown_pct = -0.30         # 30% max DD (extreme)
+max_leverage = 1.5               # Allow leverage
+cvar_limit_95 = -0.06
+
+[circuit_breakers]
+daily_loss_limit_pct = -0.05     # -5% daily
+weekly_loss_limit_pct = -0.10    # -10% weekly
+monthly_loss_limit_pct = -0.20
+drawdown_action = "Alert"        # Alert only, don't auto-reduce
+cooldown_days = 0
+
+[operational]
+min_liquidity_usd_br = 3000000   # Lower liquidity bar
+min_liquidity_usd_us = 12000000
+max_spread_bps_br = 45           # Accept even wider spreads
+max_spread_bps_us = 23
+slippage_cost_bps = 15
+max_participation_rate = 0.08
+
+[universe_filters]
+min_market_cap_br = 200000000    # R$ 200M - include small caps
+min_market_cap_us = 500000000    # $500M
+max_annualized_vol = 0.60        # Include high-vol assets
+min_dividend_yield = -0.08
+top_quantile = 0.10              # Very selective
+
+
+

@@ -29,6 +29,60 @@ pub use backtester_portfolio::{Portfolio, Trade};
 // BACKTEST RESULT (Complete)
 // =============================================================================
 
+/// Critical warning in a backtest result.
+/// These indicate issues that make the results unreliable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BacktestWarning {
+    /// Strategy executed zero trades. Metrics are artificial and unreliable.
+    /// This typically indicates:
+    /// - Filter thresholds too restrictive
+    /// - Empty universe after gating
+    /// - Entry signals never triggered
+    ZeroTrades,
+    
+    /// Very few trades executed (less than minimum for statistical significance).
+    /// Metrics may be unreliable due to small sample size.
+    LowTradeCount {
+        /// Actual trade count
+        actual: u32,
+        /// Recommended minimum
+        recommended_min: u32,
+    },
+    
+    /// Suspiciously high Sharpe ratio that may indicate data issues.
+    /// Common causes: survivorship bias, look-ahead bias, overfitting.
+    UnrealisticSharpe {
+        /// Reported Sharpe ratio
+        sharpe: f64,
+    },
+    
+    /// Suspiciously high returns with zero drawdown.
+    /// This pattern typically indicates data errors or backtest bugs.
+    PerfectEquityCurve,
+    
+    /// Empty universe was encountered during the backtest.
+    EmptyUniverseEncountered {
+        /// Number of times empty universe occurred
+        occurrences: u32,
+    },
+}
+
+impl std::fmt::Display for BacktestWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroTrades => write!(f, "CRITICAL: Strategy executed 0 trades. Metrics are artificial and unreliable."),
+            Self::LowTradeCount { actual, recommended_min } => 
+                write!(f, "WARNING: Only {} trades (recommended min: {}). Results may be unreliable.", actual, recommended_min),
+            Self::UnrealisticSharpe { sharpe } => 
+                write!(f, "WARNING: Sharpe ratio {:.2} is suspiciously high. Check for bias.", sharpe),
+            Self::PerfectEquityCurve => 
+                write!(f, "WARNING: Perfect equity curve with 0 drawdown. Likely data error."),
+            Self::EmptyUniverseEncountered { occurrences } => 
+                write!(f, "WARNING: Empty universe encountered {} times during backtest.", occurrences),
+        }
+    }
+}
+
 /// Complete backtest result with all metrics.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BacktestResult {
@@ -101,6 +155,19 @@ pub struct BacktestResult {
     pub events_processed: u64,
     /// Total fills executed.
     pub fills_executed: u64,
+
+    // Validation
+    /// Whether this result is considered valid for analysis.
+    /// False if critical warnings are present (e.g., zero trades).
+    #[serde(default = "default_true")]
+    pub is_valid: bool,
+    /// Warnings about potential issues with the backtest.
+    #[serde(default)]
+    pub warnings: Vec<BacktestWarning>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl BacktestResult {
@@ -228,7 +295,41 @@ impl BacktestResult {
             result.max_consecutive_losses = max_losses;
         }
 
+        // Validation and warnings
+        result.validate();
+
         result
+    }
+
+    /// Validate the result and add warnings for suspicious patterns.
+    fn validate(&mut self) {
+        self.is_valid = true;
+        self.warnings.clear();
+
+        // CRITICAL: Zero trades makes all metrics meaningless
+        if self.num_trades == 0 {
+            self.warnings.push(BacktestWarning::ZeroTrades);
+            self.is_valid = false;
+        } else if self.num_trades < 30 {
+            // Statistical significance requires at least 30 trades
+            self.warnings.push(BacktestWarning::LowTradeCount {
+                actual: self.num_trades,
+                recommended_min: 30,
+            });
+        }
+
+        // Suspiciously high Sharpe (> 3.0 is extremely rare in practice)
+        if self.sharpe_ratio > 3.0 && self.num_trades > 0 {
+            self.warnings.push(BacktestWarning::UnrealisticSharpe {
+                sharpe: self.sharpe_ratio,
+            });
+        }
+
+        // Perfect equity curve with positive returns and zero drawdown
+        if self.total_return > 0.05 && self.max_drawdown < 0.001 && self.num_trades > 10 {
+            self.warnings.push(BacktestWarning::PerfectEquityCurve);
+            self.is_valid = false;
+        }
     }
 
     /// Convert to JSON string.

@@ -31,7 +31,7 @@ pub use init::execute_init;
 pub use list::{execute_list, execute_show};
 pub use run_campaign::{execute_run, execute_resume};
 pub use compare::execute_compare;
-pub use promote::execute_promote;
+pub use promote::{execute_promote, auto_promote_to_hall_of_fame};
 pub use audit::execute_audit;
 pub use audit_process::execute_audit_process;
 pub use export_top::{execute_export_top, CandidateClassFilter};

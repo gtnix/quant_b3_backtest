@@ -227,6 +227,103 @@ impl RiskCalculator {
         exposure
     }
 
+    /// Calculate CVaR (Conditional Value at Risk) / Expected Shortfall.
+    ///
+    /// CVaR at 95% is the mean of the worst 5% of returns.
+    /// This is a more robust tail risk measure than VaR.
+    ///
+    /// Reference: Rockafellar & Uryasev (2000)
+    pub fn calculate_cvar(&self, returns: &[Decimal], confidence: f64) -> Decimal {
+        if returns.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        let mut sorted = returns.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let n = sorted.len();
+        // Number of observations in the tail
+        let tail_count = ((n as f64) * (1.0 - confidence)).ceil() as usize;
+        let tail_count = tail_count.max(1).min(n);
+
+        // CVaR = mean of the worst tail_count observations
+        let tail_sum: Decimal = sorted[..tail_count].iter().sum();
+        tail_sum / Decimal::from(tail_count as u32)
+    }
+
+    /// Calculate CVaR at 95% confidence (mean of worst 5%).
+    pub fn calculate_cvar_95(&self, returns: &[Decimal]) -> Decimal {
+        self.calculate_cvar(returns, 0.95)
+    }
+
+    /// Calculate CVaR at 97.5% confidence (regulatory standard - FRTB).
+    pub fn calculate_cvar_975(&self, returns: &[Decimal]) -> Decimal {
+        self.calculate_cvar(returns, 0.975)
+    }
+
+    /// Calculate Drawdown Beta between an asset and the portfolio.
+    ///
+    /// Measures how much an asset's drawdowns correlate with portfolio drawdowns.
+    /// Used for anti-concentration: DD Beta > 0.8 indicates high crisis correlation.
+    ///
+    /// Reference: Ding & Uryasev (2022)
+    ///
+    /// Formula: Cov(DD_asset, DD_portfolio) / Var(DD_portfolio)
+    pub fn calculate_drawdown_beta(
+        &self,
+        asset_drawdowns: &[Decimal],
+        portfolio_drawdowns: &[Decimal],
+    ) -> Decimal {
+        if asset_drawdowns.len() != portfolio_drawdowns.len() || asset_drawdowns.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        let n = asset_drawdowns.len();
+        let n_dec = Decimal::from(n as u32);
+
+        // Calculate means
+        let mean_asset: Decimal = asset_drawdowns.iter().sum::<Decimal>() / n_dec;
+        let mean_portfolio: Decimal = portfolio_drawdowns.iter().sum::<Decimal>() / n_dec;
+
+        // Calculate covariance and variance
+        let mut cov = Decimal::ZERO;
+        let mut var_portfolio = Decimal::ZERO;
+
+        for i in 0..n {
+            let diff_asset = asset_drawdowns[i] - mean_asset;
+            let diff_portfolio = portfolio_drawdowns[i] - mean_portfolio;
+            cov += diff_asset * diff_portfolio;
+            var_portfolio += diff_portfolio * diff_portfolio;
+        }
+
+        cov /= n_dec;
+        var_portfolio /= n_dec;
+
+        if var_portfolio.is_zero() {
+            return Decimal::ZERO;
+        }
+
+        // Beta = Cov / Var
+        cov / var_portfolio
+    }
+
+    /// Calculate Recovery Factor.
+    ///
+    /// RF = Total Net Profit / Max Drawdown
+    /// RF > 3 indicates a robust strategy.
+    ///
+    /// Reference: Vince (1992)
+    pub fn calculate_recovery_factor(
+        &self,
+        total_profit: Decimal,
+        max_drawdown: Decimal,
+    ) -> Decimal {
+        if max_drawdown.is_zero() || max_drawdown.is_sign_negative() {
+            return Decimal::ZERO;
+        }
+        total_profit / max_drawdown.abs()
+    }
+
     /// Calculate Sharpe ratio from returns.
     /// Clamped to [-10, 10] to prevent unrealistic values from low volatility data.
     pub fn calculate_sharpe(&self, returns: &[Decimal]) -> Decimal {
@@ -744,6 +841,172 @@ mod tests {
         // Very small positive
         let tiny = decimal_sqrt(dec!(0.0001));
         assert!((tiny - dec!(0.01)).abs() < dec!(0.001));
+    }
+
+    // =========================================================================
+    // CVaR / Expected Shortfall Tests
+    // =========================================================================
+
+    #[test]
+    fn test_cvar_95_basic() {
+        let calc = RiskCalculator::default();
+        
+        // Returns: -10%, -5%, -2%, 0%, 1%, 2%, 3%, 4%, 5%, 10%
+        let returns: Vec<Decimal> = vec![
+            dec!(-0.10), dec!(-0.05), dec!(-0.02), dec!(0.0), dec!(0.01),
+            dec!(0.02), dec!(0.03), dec!(0.04), dec!(0.05), dec!(0.10),
+        ];
+        
+        let cvar = calc.calculate_cvar_95(&returns);
+        
+        // CVaR95 should be the mean of worst 5% (1 observation = -10%)
+        assert!(cvar < Decimal::ZERO, "CVaR should be negative: {}", cvar);
+        assert!(cvar <= dec!(-0.05), "CVaR should be <= -5%: {}", cvar);
+    }
+
+    #[test]
+    fn test_cvar_worse_than_var() {
+        let calc = RiskCalculator::default();
+        
+        let returns: Vec<Decimal> = (-10..10)
+            .map(|i| Decimal::from(i) / Decimal::from(100))
+            .collect();
+        
+        let var = calc.calculate_var(&returns, dec!(1));
+        let cvar = calc.calculate_cvar_95(&returns);
+        
+        // CVaR should be worse (more negative) than VaR95
+        assert!(cvar <= var.var_95 || (cvar - var.var_95).abs() < dec!(0.001),
+            "CVaR {} should be <= VaR95 {}", cvar, var.var_95);
+    }
+
+    #[test]
+    fn test_cvar_975_regulatory() {
+        let calc = RiskCalculator::default();
+        
+        let returns: Vec<Decimal> = (-20..80)
+            .map(|i| Decimal::from(i) / Decimal::from(1000))
+            .collect();
+        
+        let cvar_95 = calc.calculate_cvar_95(&returns);
+        let cvar_975 = calc.calculate_cvar_975(&returns);
+        
+        // CVaR at 97.5% should be worse than at 95%
+        assert!(cvar_975 <= cvar_95,
+            "CVaR97.5 {} should be <= CVaR95 {}", cvar_975, cvar_95);
+    }
+
+    #[test]
+    fn test_cvar_empty() {
+        let calc = RiskCalculator::default();
+        assert_eq!(calc.calculate_cvar_95(&[]), Decimal::ZERO);
+    }
+
+    // =========================================================================
+    // Drawdown Beta Tests
+    // =========================================================================
+
+    #[test]
+    fn test_drawdown_beta_perfect_correlation() {
+        let calc = RiskCalculator::default();
+        
+        // Asset DD exactly equals portfolio DD
+        let asset_dd = vec![dec!(0.05), dec!(0.10), dec!(0.15), dec!(0.08), dec!(0.03)];
+        let portfolio_dd = vec![dec!(0.05), dec!(0.10), dec!(0.15), dec!(0.08), dec!(0.03)];
+        
+        let beta = calc.calculate_drawdown_beta(&asset_dd, &portfolio_dd);
+        
+        // Beta should be 1.0 for perfect correlation
+        assert!((beta - dec!(1)).abs() < dec!(0.001),
+            "Perfect correlation should have beta 1.0: {}", beta);
+    }
+
+    #[test]
+    fn test_drawdown_beta_scaled() {
+        let calc = RiskCalculator::default();
+        
+        // Asset DD = 2x portfolio DD
+        let asset_dd = vec![dec!(0.10), dec!(0.20), dec!(0.30), dec!(0.16), dec!(0.06)];
+        let portfolio_dd = vec![dec!(0.05), dec!(0.10), dec!(0.15), dec!(0.08), dec!(0.03)];
+        
+        let beta = calc.calculate_drawdown_beta(&asset_dd, &portfolio_dd);
+        
+        // Beta should be 2.0 for 2x scaled correlation
+        assert!((beta - dec!(2)).abs() < dec!(0.001),
+            "2x scaled should have beta 2.0: {}", beta);
+    }
+
+    #[test]
+    fn test_drawdown_beta_zero_variance() {
+        let calc = RiskCalculator::default();
+        
+        // Constant portfolio DD
+        let asset_dd = vec![dec!(0.05), dec!(0.10), dec!(0.15)];
+        let portfolio_dd = vec![dec!(0.10), dec!(0.10), dec!(0.10)];
+        
+        let beta = calc.calculate_drawdown_beta(&asset_dd, &portfolio_dd);
+        
+        // Zero variance should return 0
+        assert_eq!(beta, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_drawdown_beta_mismatched_lengths() {
+        let calc = RiskCalculator::default();
+        
+        let asset_dd = vec![dec!(0.05), dec!(0.10)];
+        let portfolio_dd = vec![dec!(0.05)];
+        
+        let beta = calc.calculate_drawdown_beta(&asset_dd, &portfolio_dd);
+        assert_eq!(beta, Decimal::ZERO);
+    }
+
+    // =========================================================================
+    // Recovery Factor Tests
+    // =========================================================================
+
+    #[test]
+    fn test_recovery_factor_basic() {
+        let calc = RiskCalculator::default();
+        
+        // 30% profit, 10% max DD => RF = 3
+        let rf = calc.calculate_recovery_factor(dec!(0.30), dec!(0.10));
+        assert_eq!(rf, dec!(3));
+    }
+
+    #[test]
+    fn test_recovery_factor_robust_strategy() {
+        let calc = RiskCalculator::default();
+        
+        // 50% profit, 10% max DD => RF = 5 (robust)
+        let rf = calc.calculate_recovery_factor(dec!(0.50), dec!(0.10));
+        assert!(rf > dec!(3), "RF {} should indicate robust strategy", rf);
+    }
+
+    #[test]
+    fn test_recovery_factor_zero_dd() {
+        let calc = RiskCalculator::default();
+        
+        let rf = calc.calculate_recovery_factor(dec!(0.30), Decimal::ZERO);
+        assert_eq!(rf, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_recovery_factor_negative_dd() {
+        let calc = RiskCalculator::default();
+        
+        // Negative DD (shouldn't happen but handle gracefully)
+        let rf = calc.calculate_recovery_factor(dec!(0.30), dec!(-0.10));
+        assert_eq!(rf, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_recovery_factor_loss() {
+        let calc = RiskCalculator::default();
+        
+        // -20% loss, 30% max DD
+        let rf = calc.calculate_recovery_factor(dec!(-0.20), dec!(0.30));
+        assert!(rf < Decimal::ZERO, "RF should be negative for losing strategy");
     }
 }
 

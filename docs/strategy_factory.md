@@ -430,3 +430,35 @@ Given the same:
 - Top N parameter
 
 The export will produce **identical output** (same candidates, same order).
+
+---
+
+## Consumo de Recursos
+
+### Espaço em Disco
+
+> ⚠️ **Importante**: Campanhas SCG consomem espaço significativo em disco.
+
+| Duração | Backtests | Espaço Estimado |
+|---------|-----------|-----------------|
+| 5 min | ~97k | 6.7 GB |
+| 30 min | ~580k | 40 GB |
+| 1 hora | ~1.16M | 80 GB |
+| 4 horas | ~4.64M | 320 GB |
+
+**Causa principal**: O arquivo `timeseries.csv` (57KB por backtest) é gerado para todos os backtests e representa 94% do espaço consumido.
+
+Para análise detalhada, consulte [Análise de Armazenamento](operations/storage-analysis.md).
+
+### Gerenciamento de Espaço
+
+```bash
+# Ver uso de espaço por run
+du -sh output/scg/*/
+
+# Limpar runs antigos (> 7 dias)
+find output/scg -type d -mtime +7 -exec rm -rf {} \;
+
+# Manter apenas Hall of Fame e relatórios
+find output/scg/*/backtests -type d -exec rm -rf {} \;
+```

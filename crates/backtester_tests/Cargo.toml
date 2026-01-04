@@ -14,9 +14,11 @@ real_data = []
 [dependencies]
 backtester_core.workspace = true
 backtester_engine.workspace = true
+backtester_intelligence.workspace = true
 backtester_portfolio.workspace = true
 backtester_execution.workspace = true
 chrono.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -36,6 +38,10 @@ path = "tests/anti_look_ahead.rs"
 [[test]]
 name = "real_data_integration"
 path = "tests/real_data_integration.rs"
+
+[[test]]
+name = "risk_profiles_integration"
+path = "tests/risk_profiles_integration.rs"
 
 [[bench]]
 name = "scenarios_bench"

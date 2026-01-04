@@ -30,6 +30,70 @@ pub enum Market {
     US,
 }
 
+/// Market-specific filter defaults.
+/// Based on "Determinação de Operação: Parâmetros de Risco para Brasil e EUA"
+/// and calibrated for each market's characteristics.
+#[derive(Debug, Clone)]
+pub struct MarketFilterDefaults {
+    /// Maximum annualized volatility (BR more volatile)
+    pub max_annualized_vol: f64,
+    /// Minimum market cap in local currency (BR smaller companies)
+    pub min_market_cap: i64,
+    /// Minimum daily liquidity in USD
+    pub min_liquidity_usd: f64,
+    /// Maximum bid-ask spread in basis points
+    pub max_spread_bps: f64,
+    /// Expected slippage in basis points
+    pub slippage_bps: f64,
+    /// Minimum carry threshold (DY - risk-free)
+    /// BR: typically negative due to high Selic
+    pub min_carry: f64,
+    /// Minimum dividend yield for dividend filter
+    pub min_dividend_yield: f64,
+    /// Minimum momentum return threshold
+    pub min_momentum_return: f64,
+}
+
+impl MarketFilterDefaults {
+    /// Get defaults for Brazilian market.
+    /// Calibrated for B3's higher volatility, lower liquidity, wider spreads.
+    pub fn br() -> Self {
+        Self {
+            max_annualized_vol: 0.50,      // 50% - BR more volatile
+            min_market_cap: 1_000_000_000, // R$ 1B
+            min_liquidity_usd: 5_000_000.0, // $5M/day
+            max_spread_bps: 30.0,          // 30 bps
+            slippage_bps: 15.0,            // 15 bps
+            min_carry: -0.06,              // Allow negative carry (DY < Selic)
+            min_dividend_yield: 0.02,      // 2% min DY
+            min_momentum_return: -0.10,    // Allow some negative momentum
+        }
+    }
+
+    /// Get defaults for US market.
+    /// Calibrated for higher liquidity, tighter spreads, lower volatility.
+    pub fn us() -> Self {
+        Self {
+            max_annualized_vol: 0.35,       // 35% - US less volatile
+            min_market_cap: 5_000_000_000,  // $5B
+            min_liquidity_usd: 20_000_000.0, // $20M/day
+            max_spread_bps: 15.0,           // 15 bps
+            slippage_bps: 8.0,              // 8 bps
+            min_carry: 0.0,                 // US: DY can exceed T-Bill
+            min_dividend_yield: 0.015,      // 1.5% min DY
+            min_momentum_return: -0.05,     // Stricter momentum
+        }
+    }
+
+    /// Get defaults for a specific market.
+    pub fn for_market(market: Market) -> Self {
+        match market {
+            Market::BR => Self::br(),
+            Market::US => Self::us(),
+        }
+    }
+}
+
 /// Infer market from symbol pattern.
 ///
 /// BR patterns: 4 letters + 1-2 digits (PETR4, VALE3, BOVA11)

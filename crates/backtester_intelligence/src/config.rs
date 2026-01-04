@@ -68,6 +68,21 @@ pub enum FilterMode {
     Cascade,
 }
 
+/// Mode for threshold evaluation.
+/// Supports absolute thresholds or quantile-based (relative to universe).
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterThresholdMode {
+    /// Use absolute threshold values (e.g., min_return = 0.05 means 5%).
+    /// WARNING: Absolute thresholds can cause empty universe in different market conditions.
+    #[default]
+    Absolute,
+    
+    /// Use quantile-based thresholds (e.g., top 20% of universe).
+    /// More robust: adapts to market conditions and data distribution.
+    Quantile,
+}
+
 /// Base filter configuration with common fields.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AssetFilterConfig {
@@ -78,6 +93,20 @@ pub struct AssetFilterConfig {
     /// Weight for scoring mode (0.0 to 1.0).
     #[serde(default)]
     pub weight: f64,
+    
+    /// Threshold mode: absolute or quantile-based.
+    /// Quantile mode is more robust against empty universe issues.
+    #[serde(default)]
+    pub threshold_mode: FilterThresholdMode,
+    
+    /// For quantile mode: what percentile to use (e.g., 0.20 = top 20%).
+    /// Ignored in absolute mode.
+    #[serde(default = "default_quantile")]
+    pub top_quantile: f64,
+}
+
+fn default_quantile() -> f64 {
+    0.20
 }
 
 /// Momentum filter configuration.
@@ -112,6 +141,8 @@ impl Default for MomentumConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.25,
+                threshold_mode: FilterThresholdMode::Quantile, // Prefer quantile for robustness
+                top_quantile: 0.20,
             },
             lookback_days: 126,
             min_return: 0.0,
@@ -152,6 +183,8 @@ impl Default for ValueConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.20,
+                threshold_mode: FilterThresholdMode::Quantile,
+                top_quantile: 0.20,
             },
             max_pe: 15.0,
             max_pb: 2.0,
@@ -199,6 +232,8 @@ impl Default for QualityConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.20,
+                threshold_mode: FilterThresholdMode::Quantile,
+                top_quantile: 0.20,
             },
             min_roe: 0.12,
             max_debt_equity: 1.0,
@@ -236,6 +271,8 @@ impl Default for LowVolConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.15,
+                threshold_mode: FilterThresholdMode::Quantile,
+                top_quantile: 0.20,
             },
             lookback_days: 60,
             max_annualized_vol: 0.30,
@@ -268,6 +305,8 @@ impl Default for DividendYieldConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.10,
+                threshold_mode: FilterThresholdMode::Quantile,
+                top_quantile: 0.25,
             },
             min_yield: 0.03,
             max_yield: Some(0.15),
@@ -300,6 +339,8 @@ impl Default for SizeConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.10,
+                threshold_mode: FilterThresholdMode::Absolute, // Size uses absolute for market cap
+                top_quantile: 0.50,
             },
             min_market_cap: 5_000_000_000,
             max_market_cap: None,
@@ -340,6 +381,8 @@ impl Default for CarryConfig {
             base: AssetFilterConfig {
                 enabled: false,
                 weight: 0.15,
+                threshold_mode: FilterThresholdMode::Quantile,
+                top_quantile: 0.30,
             },
             min_carry: 0.0,
             fallback_selic_br: 0.1075,

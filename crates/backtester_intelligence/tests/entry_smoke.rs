@@ -71,6 +71,7 @@ fn smoke_test_br_multiple_rebalances() {
             top_n_br: 10,
             top_n_us: 10,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
@@ -145,6 +146,7 @@ fn smoke_test_us_without_fundamentals() {
             top_n_br: 10,
             top_n_us: 10,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
@@ -261,6 +263,7 @@ fn test_volatility_anti_lookahead() {
             top_n_br: 3,
             top_n_us: 3,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.80, // Allow weights to vary without capping
@@ -468,6 +471,7 @@ fn test_past_fundamentals_allowed() {
             top_n_br: 1,
             top_n_us: 1,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };

@@ -1,7 +1,7 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.3.0  
-**Última Atualização**: 2025-12-30  
+**Versão**: 3.4.0  
+**Última Atualização**: 2026-01-04  
 **Status**: Produção (VPS + Neon)
 
 ---
@@ -122,10 +122,11 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 
 1. [Strategy Factory](strategy_factory.md)
 2. [Artefatos de Output](operations/artifacts.md)
-3. [Dashboard](dashboard/README.md)
-4. [Cockpit - Controle SCG](dashboard/cockpit.md)
-5. [API Server (Browser Mode)](dashboard/api-server.md)
-6. **[VPS Deployment](dashboard/vps-deployment.md)** ← NOVO
+3. **[Análise de Armazenamento](operations/storage-analysis.md)** ← NOVO
+4. [Dashboard](dashboard/README.md)
+5. [Cockpit - Controle SCG](dashboard/cockpit.md)
+6. [API Server (Browser Mode)](dashboard/api-server.md)
+7. [VPS Deployment](dashboard/vps-deployment.md)
 
 ---
 
@@ -398,7 +399,8 @@ docs/
 │   └── performance-engine.md   # Métricas e atribuição
 ├── operations/                  # Manual de operações
 │   ├── cli-reference.md        # Comandos backtester_cli
-│   └── artifacts.md            # Estrutura de output/artifacts
+│   ├── artifacts.md            # Estrutura de output/artifacts
+│   └── storage-analysis.md     # Análise de consumo de espaço ← NOVO
 ├── validation/                  # Relatório de validação
 │   ├── determinism.md          # Invariantes
 │   └── benchmarks.md           # Baselines de performance

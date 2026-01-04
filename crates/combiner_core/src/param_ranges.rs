@@ -118,6 +118,7 @@ impl ParamRanges {
     }
 
     fn register_selection_blocks(blocks: &mut HashMap<String, BlockSpec>) {
+        // B3-calibrated: min_return range -0.10 to +0.15 (realista para 3-6 meses)
         blocks.insert(
             "momentum".into(),
             BlockSpec {
@@ -126,7 +127,7 @@ impl ParamRanges {
                 params: vec![
                     ParamSpec::int("lookback_days", 126, 21, 252, 21, "Lookback period in days"),
                     ParamSpec::float("top_pct", 20.0, 5.0, 50.0, 5.0, "Top % of assets to select"),
-                    ParamSpec::float("min_return", 0.0, -0.5, 0.5, 0.05, "Minimum return threshold"),
+                    ParamSpec::float("min_return", 0.0, -0.10, 0.15, 0.02, "Minimum return threshold"),
                     ParamSpec::int("skip_last_days", 21, 0, 63, 7, "Days to skip at end"),
                 ],
                 description: "Momentum selection - ranks by 6-12 month returns".into(),
@@ -164,6 +165,7 @@ impl ParamRanges {
             },
         );
 
+        // B3-calibrated: vol tipica B3 = 25-40%, max_annualized_vol range 0.20 to 0.60
         blocks.insert(
             "low_vol".into(),
             BlockSpec {
@@ -172,9 +174,9 @@ impl ParamRanges {
                 params: vec![
                     ParamSpec::float(
                         "max_annualized_vol",
-                        0.25,
-                        0.10,
-                        0.50,
+                        0.30,
+                        0.20,
+                        0.60,
                         0.05,
                         "Maximum annualized volatility",
                     ),
@@ -186,13 +188,14 @@ impl ParamRanges {
             },
         );
 
+        // B3-calibrated: boas pagadoras DY 4-7%, max realista 8%
         blocks.insert(
             "dividend".into(),
             BlockSpec {
                 block_id: "dividend".into(),
                 block_type: BlockType::Selection,
                 params: vec![
-                    ParamSpec::float("min_yield", 0.04, 0.01, 0.15, 0.01, "Minimum dividend yield"),
+                    ParamSpec::float("min_yield", 0.03, 0.01, 0.08, 0.01, "Minimum dividend yield"),
                     ParamSpec::float("top_pct", 20.0, 5.0, 50.0, 5.0, "Top % of assets"),
                 ],
                 description: "Dividend yield selection".into(),
@@ -200,6 +203,7 @@ impl ParamRanges {
             },
         );
 
+        // B3-calibrated: min_market_cap max 25B (inclui mid-caps), max_market_cap max 500B
         blocks.insert(
             "size".into(),
             BlockSpec {
@@ -210,7 +214,7 @@ impl ParamRanges {
                         "min_market_cap",
                         1_000_000_000.0,
                         100_000_000.0,
-                        100_000_000_000.0,
+                        25_000_000_000.0,
                         1_000_000_000.0,
                         "Minimum market cap",
                     ),
@@ -218,7 +222,7 @@ impl ParamRanges {
                         "max_market_cap",
                         100_000_000_000.0,
                         1_000_000_000.0,
-                        1_000_000_000_000.0,
+                        500_000_000_000.0,
                         10_000_000_000.0,
                         "Maximum market cap",
                     ),
@@ -229,6 +233,7 @@ impl ParamRanges {
             },
         );
 
+        // B3-calibrated: com Selic ~10.5%, carry > 4% e impossivel (DY - Selic)
         blocks.insert(
             "carry".into(),
             BlockSpec {
@@ -237,9 +242,9 @@ impl ParamRanges {
                 params: vec![
                     ParamSpec::float(
                         "min_carry",
-                        0.02,
-                        -0.05,
-                        0.15,
+                        0.0,
+                        -0.08,
+                        0.04,
                         0.01,
                         "Minimum carry (yield - risk-free)",
                     ),
@@ -310,6 +315,7 @@ impl ParamRanges {
             },
         );
 
+        // B3-calibrated: Z=3 e evento rarissimo, max 2.5 para eventos mais frequentes
         blocks.insert(
             "zscore".into(),
             BlockSpec {
@@ -317,7 +323,7 @@ impl ParamRanges {
                 block_type: BlockType::Entry,
                 params: vec![
                     ParamSpec::int("period", 20, 10, 60, 5, "Z-score lookback period"),
-                    ParamSpec::float("threshold", 2.0, 1.0, 3.0, 0.5, "Z-score threshold"),
+                    ParamSpec::float("threshold", 1.5, 1.0, 2.5, 0.25, "Z-score threshold"),
                 ],
                 description: "Z-Score mean reversion entry".into(),
                 fast_supported: false,
@@ -410,15 +416,18 @@ impl ParamRanges {
     }
 
     fn register_sizing_blocks(blocks: &mut HashMap<String, BlockSpec>) {
+        // ARROJADO-COMPATIBLE: Adjusted max_weight range from 0.05-0.50 to 0.10-0.40
+        // This prevents weight violations when fewer assets are selected
+        // (e.g., with 3 assets, equal weight would be 0.33 which needs max_weight >= 0.33)
         blocks.insert(
             "equal_weight".into(),
             BlockSpec {
                 block_id: "equal_weight".into(),
                 block_type: BlockType::Sizing,
                 params: vec![
-                    ParamSpec::float("max_weight", 0.20, 0.05, 0.50, 0.05, "Maximum weight per position"),
+                    ParamSpec::float("max_weight", 0.25, 0.10, 0.40, 0.05, "Maximum weight per position"),
                     ParamSpec::float("min_weight", 0.02, 0.01, 0.10, 0.01, "Minimum weight per position"),
-                    ParamSpec::int("max_positions", 20, 5, 50, 5, "Maximum number of positions"),
+                    ParamSpec::int("max_positions", 15, 5, 30, 5, "Maximum number of positions"),
                 ],
                 description: "Equal weight sizing (1/N)".into(),
                 fast_supported: true,

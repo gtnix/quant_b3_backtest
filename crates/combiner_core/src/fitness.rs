@@ -196,6 +196,11 @@ impl MultiObjectiveFitness {
         turnover_annual: f64,
         config: &FitnessConfig,
     ) -> Self {
+        // Zero trades = invalid strategy (eliminates artificial metrics)
+        if total_trades == 0 {
+            return Self::invalid("Zero trades executed - strategy failed to operate");
+        }
+
         let mut fitness = Self {
             cagr,
             sharpe_ratio,
@@ -214,9 +219,15 @@ impl MultiObjectiveFitness {
             error: None,
         };
 
-        // Apply penalties
-        if total_trades < config.min_trades {
-            fitness.penalty_low_trades = 0.5;
+        // Graduated penalty for low trade counts
+        let min_trades_third = config.min_trades / 3;
+        let min_trades_half = config.min_trades / 2;
+        if total_trades < min_trades_third {
+            fitness.penalty_low_trades = 0.9; // -90% severe penalty
+        } else if total_trades < min_trades_half {
+            fitness.penalty_low_trades = 0.7; // -70% heavy penalty
+        } else if total_trades < config.min_trades {
+            fitness.penalty_low_trades = 0.5; // -50% standard penalty
         }
 
         if turnover_annual > config.max_turnover_annual {
@@ -392,11 +403,59 @@ mod tests {
         };
 
         let low_trades = MultiObjectiveFitness::from_metrics(
-            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 10, // Only 10 trades
+            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 15, // 15 trades (< 30, >= 15)
             0.12, 2.5, &config,
         );
 
         assert!(low_trades.penalty_low_trades > 0.0);
+        assert_eq!(low_trades.penalty_low_trades, 0.5); // Standard penalty
+    }
+
+    #[test]
+    fn test_zero_trades_invalid() {
+        let config = FitnessConfig::default();
+
+        let zero_trades = MultiObjectiveFitness::from_metrics(
+            0.25, 10.0, 0.0, 0.0, 0.0, 0.0, 0, // 0 trades = artificial metrics
+            0.001, 0.0, &config,
+        );
+
+        // Zero trades should be marked as invalid
+        assert!(!zero_trades.is_valid);
+        assert!(zero_trades.error.is_some());
+        assert_eq!(zero_trades.sharpe_ratio, f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn test_graduated_penalties() {
+        let config = FitnessConfig {
+            min_trades: 30,
+            ..Default::default()
+        };
+
+        // Very low trades (< 10 = 30/3) -> 90% penalty
+        let very_low = MultiObjectiveFitness::from_metrics(
+            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 5, 0.12, 2.5, &config,
+        );
+        assert_eq!(very_low.penalty_low_trades, 0.9);
+
+        // Low trades (< 15 = 30/2, >= 10) -> 70% penalty
+        let low = MultiObjectiveFitness::from_metrics(
+            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 12, 0.12, 2.5, &config,
+        );
+        assert_eq!(low.penalty_low_trades, 0.7);
+
+        // Moderate trades (< 30, >= 15) -> 50% penalty
+        let moderate = MultiObjectiveFitness::from_metrics(
+            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 20, 0.12, 2.5, &config,
+        );
+        assert_eq!(moderate.penalty_low_trades, 0.5);
+
+        // Sufficient trades (>= 30) -> no penalty
+        let sufficient = MultiObjectiveFitness::from_metrics(
+            0.15, 1.0, -0.10, 1.5, 1.0, 1.5, 50, 0.12, 2.5, &config,
+        );
+        assert_eq!(sufficient.penalty_low_trades, 0.0);
     }
 }
 

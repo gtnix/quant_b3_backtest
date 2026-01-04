@@ -216,6 +216,7 @@ fn determinism_runner_with_grid() {
         embargo_days: 5,
         market: Market::BR,
         grid: Some(grid),
+        execution_config: None,
     };
 
     let start = date(2020, 1, 1);
@@ -419,6 +420,8 @@ fn determinism_cross_run_simulation() {
         }
     }
 }
+
+
 
 
 

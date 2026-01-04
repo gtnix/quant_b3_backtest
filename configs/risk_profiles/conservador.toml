@@ -1,0 +1,55 @@
+# Conservador Risk Profile
+# Consistent growth with controlled drawdowns.
+#
+# Target: Good Sharpe ratio with limited drawdowns.
+# Expected Max Drawdown: 12%
+# Daily Loss Limit: 1.5%
+# Weekly Loss Limit: 3.5%
+#
+# Academic Basis:
+# - Kelly fraction 0.25-0.4 per Ziemba & MacLean (2011)
+# - Risk per trade 0.5-1.0% per Vince (1992)
+# - ATR multiplier 2.5-3.5x per Chan (2013)
+
+[profile]
+name = "Conservador"
+base = "moderado"
+market_adjustments = true
+
+[sizing]
+kelly_fraction = 0.30
+max_risk_per_trade_pct = 0.0075  # 0.75%
+max_exposure_per_asset_pct = 0.15
+max_sector_concentration_pct = 0.30
+max_positions = 25
+min_position_weight = 0.02
+
+[stops]
+atr_multiplier_br = 3.00
+atr_multiplier_us = 2.55
+fixed_stop_pct = 0.10
+trailing_activation_pct = 0.08
+trailing_atr_multiplier = 2.50
+
+[portfolio_risk]
+volatility_target_br = 0.12
+volatility_target_us = 0.10
+max_drawdown_pct = -0.12         # 12% max DD
+max_leverage = 1.0
+cvar_limit_95 = -0.025
+
+[circuit_breakers]
+daily_loss_limit_pct = -0.015    # -1.5% daily
+weekly_loss_limit_pct = -0.035   # -3.5% weekly
+monthly_loss_limit_pct = -0.08
+drawdown_action = "ReduceRisk"
+cooldown_days = 1
+
+[universe_filters]
+min_market_cap_br = 1000000000   # R$ 1B
+min_market_cap_us = 5000000000   # $5B
+max_annualized_vol = 0.45
+top_quantile = 0.25
+
+
+

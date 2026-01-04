@@ -54,6 +54,8 @@ pub enum RiskViolation {
     TurnoverExceeded,
     /// Portfolio drawdown exceeds threshold
     DrawdownExceeded,
+    /// CVaR (Conditional Value-at-Risk) exceeds threshold
+    CVaRExceeded,
 }
 
 impl fmt::Display for RiskViolation {
@@ -63,6 +65,7 @@ impl fmt::Display for RiskViolation {
             Self::MarketExposureExceeded => write!(f, "exposição de mercado excedida"),
             Self::TurnoverExceeded => write!(f, "turnover excedido"),
             Self::DrawdownExceeded => write!(f, "drawdown excedido"),
+            Self::CVaRExceeded => write!(f, "CVaR excedido"),
         }
     }
 }
@@ -406,6 +409,10 @@ mod tests {
         assert!((dd - (-0.15)).abs() < 0.001); // -15% drawdown
     }
 }
+
+
+
+
 
 
 

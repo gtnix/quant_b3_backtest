@@ -407,6 +407,7 @@ fn make_golden_nested_report() -> NestedAggregateReport {
         selection_criteria: SelectionCriteria::PSR,
         psr_threshold: dec!(0.5),
         penalties: PenaltyConfig::default(),
+        gates: None,
     };
 
     let make_nested_window = |idx: usize, train_sharpe: f64, val_sharpe: f64, test_sharpe: f64, psr: f64, dsr: Option<f64>| -> NestedWindowResult {
@@ -472,6 +473,8 @@ fn make_golden_nested_report() -> NestedAggregateReport {
                 turnover_penalty: dec!(0),
                 cost_penalty: dec!(0),
                 drawdown_penalty: dec!(0),
+                slippage_penalty: dec!(0),
+                capacity_penalty: dec!(0),
                 final_score: Decimal::try_from(psr).unwrap(),
                 tiebreaker_used: None,
             },

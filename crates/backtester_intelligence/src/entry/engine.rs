@@ -14,7 +14,7 @@ use super::weighting::{WeightingCandidate, WeightingConfig, Weighter};
 use super::orders::{OrderGenerator, OrderGeneratorConfig, OrderTarget};
 use super::audit::{RebalanceAuditLog, SelectedAsset};
 use super::types::{
-    EntryContext, EntryResult, EntryTarget, Order, SelectionReason,
+    EntryContext, EntryResult, EntryTarget, EntryWarning, Order, SelectionReason,
 };
 use super::universe_range::UniverseRangeProvider;
 use super::eligibility::EligibilityProvider;
@@ -208,9 +208,54 @@ impl EntryEngine {
             })
             .collect();
 
-        let (eligible, gating_excluded) = self.gating.apply(gating_candidates);
+        let (eligible, gating_excluded) = self.gating.apply(gating_candidates.clone());
         result.diagnostics.gating_excluded = gating_excluded.len();
-        result.exclusions.extend(gating_excluded);
+        result.exclusions.extend(gating_excluded.clone());
+
+        // GUARDRAIL: Check for empty universe after gating
+        if eligible.is_empty() && !gating_candidates.is_empty() {
+            // Count exclusion reasons
+            let mut reason_counts: HashMap<String, usize> = HashMap::new();
+            for excl in &gating_excluded {
+                *reason_counts.entry(excl.reason.to_string()).or_insert(0) += 1;
+            }
+            let mut top_reasons: Vec<_> = reason_counts.into_iter().collect();
+            top_reasons.sort_by(|a, b| b.1.cmp(&a.1));
+            let top_reasons: Vec<String> = top_reasons
+                .into_iter()
+                .take(3)
+                .map(|(reason, count)| format!("{} ({})", reason, count))
+                .collect();
+
+            let warning = EntryWarning::EmptyUniverse {
+                candidates_before: gating_candidates.len(),
+                gating_excluded: gating_excluded.len(),
+                top_reasons,
+            };
+            
+            // Log warning
+            tracing::warn!(
+                market = ?ctx.market,
+                date = %ctx.date,
+                candidates = gating_candidates.len(),
+                "[GUARDRAIL] Empty universe: all candidates excluded by gating"
+            );
+            
+            result.diagnostics.warnings.push(warning);
+        } else if eligible.len() < 5 && !gating_candidates.is_empty() {
+            // Warn if very few assets
+            let warning = EntryWarning::LowUniverse {
+                eligible_count: eligible.len(),
+                recommended_min: 10,
+            };
+            tracing::warn!(
+                market = ?ctx.market,
+                date = %ctx.date,
+                eligible = eligible.len(),
+                "[GUARDRAIL] Low universe: very few assets eligible"
+            );
+            result.diagnostics.warnings.push(warning);
+        }
 
         // Map eligible symbols for lookup
         let eligible_symbols: std::collections::HashSet<_> = 
@@ -424,6 +469,7 @@ mod tests {
                 top_n_br: 2,
                 top_n_us: 2,
                 min_score_threshold: None,
+                ..Default::default()
             },
             ..Default::default()
         };

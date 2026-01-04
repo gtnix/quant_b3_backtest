@@ -17,6 +17,7 @@ pub mod catalog;
 pub mod stress;
 pub mod stability;
 pub mod market_data;
+pub mod sensitivity;
 
 pub use types::*;
 pub use runner::{
@@ -41,4 +42,8 @@ pub use stability::{
     StabilityAnalyzer, StabilityConfig, StabilityReport, StabilitySummary, BlockResult, BlockMetrics, StabilityMetadata,
 };
 pub use market_data::{MarketDataProvider, OhlcvBar, MarketDataError};
+pub use sensitivity::{
+    SensitivityAnalyzer, SensitivityConfig, SensitivityReport, PerturbationGenerator,
+    Perturbation, PerturbationResult, MetricsSnapshot as SensitivityMetrics,
+};
 

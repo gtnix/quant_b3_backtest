@@ -211,7 +211,19 @@ export interface BacktestMetrics {
   win_rate?: number;
   profit_factor?: number;
   total_trades?: number;
+  /** Whether this result is considered valid for analysis */
+  is_valid?: boolean;
+  /** Warnings about potential issues */
+  warnings?: BacktestWarning[];
 }
+
+/** Critical warning in a backtest result */
+export type BacktestWarning =
+  | { type: 'ZeroTrades' }
+  | { type: 'LowTradeCount'; actual: number; recommended_min: number }
+  | { type: 'UnrealisticSharpe'; sharpe: number }
+  | { type: 'PerfectEquityCurve' }
+  | { type: 'EmptyUniverseEncountered'; occurrences: number };
 
 export interface TimeseriesPoint {
   date: string;

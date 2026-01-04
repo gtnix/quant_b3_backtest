@@ -83,6 +83,14 @@ enum Commands {
         /// Path to market data CSV file for backtesting
         #[arg(short = 'm', long)]
         market_data: Option<PathBuf>,
+        
+        /// Data source: "database" or "csv" (uses DATABASE_URL env var when "database")
+        #[arg(long)]
+        data_source: Option<String>,
+        
+        /// Risk profile name (muito_conservador, conservador, moderado, arrojado, muito_arrojado)
+        #[arg(long)]
+        risk_profile: Option<String>,
     },
 
     /// Run all strategy configs in a folder
@@ -381,6 +389,8 @@ fn run_command(
     strict: bool,
     execution_config: Option<PathBuf>,
     market_data: Option<PathBuf>,
+    data_source: Option<String>,
+    risk_profile: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║                    STRATEGY RUNNER                           ║");
@@ -394,6 +404,22 @@ fn run_command(
     // Log market data if provided
     if let Some(ref md_path) = market_data {
         println!("Market data: {}", md_path.display());
+    }
+    
+    // Log data source if provided
+    if let Some(ref ds) = data_source {
+        println!("Data source: {}", ds);
+        if ds == "database" {
+            if std::env::var("DATABASE_URL").is_err() {
+                return Err("data_source='database' requires DATABASE_URL environment variable".into());
+            }
+            println!("DATABASE_URL is set, will use Neon database for market data");
+        }
+    }
+    
+    // Log risk profile if provided
+    if let Some(ref rp) = risk_profile {
+        println!("Risk profile: {}", rp);
     }
     
     let runner_config = RunnerConfig {
@@ -886,7 +912,9 @@ fn main() {
             strict,
             execution,
             market_data,
-        } => run_command(config, output, dry_run, strict, execution, market_data),
+            data_source,
+            risk_profile,
+        } => run_command(config, output, dry_run, strict, execution, market_data, data_source, risk_profile),
         Commands::RunBatch {
             folder,
             output,

@@ -1,9 +1,12 @@
 # Artefatos e Estrutura de Output
 
-**Versão**: 1.2.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 1.3.0  
+**Última Atualização**: 2026-01-04
 
 ## Visão Geral
+
+> ⚠️ **Atenção**: Campanhas SCG consomem espaço significativo (~6.7 GB para 5 min de execução).  
+> Ver [Análise de Armazenamento](storage-analysis.md) para diagnóstico detalhado.
 
 O sistema gera artefatos em dois diretórios principais:
 
@@ -617,6 +620,33 @@ scg_YYYYMMDD_HHMMSS
 <8 caracteres hex do SHA256>
 Exemplo: a1b2c3d4
 ```
+
+---
+
+---
+
+## Consumo de Espaço
+
+### Referência por Campanha
+
+| Duração | Backtests | Espaço Estimado |
+|---------|-----------|-----------------|
+| 5 min | ~97k | 6.7 GB |
+| 30 min | ~580k | 40 GB |
+| 1 hora | ~1.16M | 80 GB |
+| 4 horas | ~4.64M | 320 GB |
+
+### Breakdown por Arquivo
+
+| Componente | % do Espaço | Por Backtest |
+|------------|-------------|--------------|
+| `timeseries.csv` | 94% | 57 KB |
+| Overhead FS | 5.6% | 4 KB |
+| `trace.jsonl` | 2.4% | 1.8 KB |
+| `metadata.json` | 1.1% | 820 B |
+| `metrics.json` | 0.7% | 502 B |
+
+> 📊 Para análise detalhada, consulte [storage-analysis.md](storage-analysis.md)
 
 ---
 

@@ -224,6 +224,7 @@ dependencies = [
  "criterion",
  "dotenvy",
  "proptest",
+ "rand 0.8.5",
  "rust_decimal",
  "rust_decimal_macros",
  "rustls 0.23.35",
@@ -307,9 +308,11 @@ dependencies = [
  "backtester_core",
  "backtester_engine",
  "backtester_execution",
+ "backtester_intelligence",
  "backtester_portfolio",
  "chrono",
  "criterion",
+ "serde_json",
 ]
 
 [[package]]

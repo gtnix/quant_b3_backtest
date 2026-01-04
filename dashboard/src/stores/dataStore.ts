@@ -342,7 +342,19 @@ export interface BacktestMetrics {
   total_days?: number;
   sortino_ratio?: number;
   calmar_ratio?: number;
+  /** Whether this result is considered valid for analysis */
+  is_valid?: boolean;
+  /** Warnings about potential issues with the backtest */
+  warnings?: BacktestWarning[];
 }
+
+/** Critical warning in a backtest result */
+export type BacktestWarning =
+  | { type: 'ZeroTrades' }
+  | { type: 'LowTradeCount'; actual: number; recommended_min: number }
+  | { type: 'UnrealisticSharpe'; sharpe: number }
+  | { type: 'PerfectEquityCurve' }
+  | { type: 'EmptyUniverseEncountered'; occurrences: number };
 
 // =============================================================================
 // LEGACY TYPES (for backward compatibility)

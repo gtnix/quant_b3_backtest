@@ -98,6 +98,11 @@ pub enum ExclusionReason {
     /// Asset not found in universe range data (conservative exclusion)
     /// Applied when universe validation is enabled but symbol has no range data.
     NoUniverseRangeData,
+    /// Drawdown Beta too high - asset's drawdowns correlate too strongly with portfolio.
+    /// Reference: Ding & Uryasev (2022)
+    HighDrawdownBeta,
+    /// Return correlation too high with existing portfolio.
+    HighCorrelation,
 }
 
 impl fmt::Display for ExclusionReason {
@@ -115,6 +120,8 @@ impl fmt::Display for ExclusionReason {
             Self::FutureFundamentals => write!(f, "dados fundamentais do futuro (look-ahead)"),
             Self::OutsideUniverseDateRange => write!(f, "fora do período de existência (survivorship)"),
             Self::NoUniverseRangeData => write!(f, "sem dados de período no universo"),
+            Self::HighDrawdownBeta => write!(f, "DD Beta alto com portfólio (anti-concentração)"),
+            Self::HighCorrelation => write!(f, "correlação alta com portfólio"),
         }
     }
 }
@@ -160,6 +167,53 @@ impl fmt::Display for EntryExclusion {
     }
 }
 
+/// Warning type for entry evaluation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EntryWarning {
+    /// Universe became empty after filters - no assets to select.
+    /// This is a critical warning that indicates filter thresholds may be too restrictive.
+    EmptyUniverse {
+        /// Number of candidates before gating
+        candidates_before: usize,
+        /// Number excluded by gating
+        gating_excluded: usize,
+        /// Most common exclusion reasons
+        top_reasons: Vec<String>,
+    },
+    /// Very few assets available for selection.
+    LowUniverse {
+        /// Number of eligible assets
+        eligible_count: usize,
+        /// Minimum recommended
+        recommended_min: usize,
+    },
+    /// All candidates were excluded by a single filter.
+    FilterTooRestrictive {
+        /// Filter that excluded all/most candidates
+        filter_name: String,
+        /// Threshold that was too restrictive
+        threshold_info: String,
+    },
+}
+
+impl fmt::Display for EntryWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyUniverse { candidates_before, gating_excluded, top_reasons } => {
+                write!(f, "EMPTY UNIVERSE: {} candidates → {} excluded by gating → 0 eligible. Top reasons: {}",
+                    candidates_before, gating_excluded, top_reasons.join(", "))
+            }
+            Self::LowUniverse { eligible_count, recommended_min } => {
+                write!(f, "LOW UNIVERSE: only {} assets eligible (recommended min: {})",
+                    eligible_count, recommended_min)
+            }
+            Self::FilterTooRestrictive { filter_name, threshold_info } => {
+                write!(f, "FILTER TOO RESTRICTIVE: {} - {}", filter_name, threshold_info)
+            }
+        }
+    }
+}
+
 /// Diagnostics from entry evaluation.
 #[derive(Debug, Clone, Default)]
 pub struct EntryDiagnostics {
@@ -179,6 +233,8 @@ pub struct EntryDiagnostics {
     pub total_weight: f64,
     /// Cash residual after allocation (capital - sum(shares * price))
     pub cash_residual: Decimal,
+    /// Warnings generated during evaluation
+    pub warnings: Vec<EntryWarning>,
 }
 
 /// Result of entry policy evaluation.

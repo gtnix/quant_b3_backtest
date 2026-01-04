@@ -358,6 +358,8 @@ mod tests {
             avg_win: 100.0,
             avg_loss: 66.0,
             win_loss_ratio: 1.5,
+            is_valid: true,
+            warnings: Vec::new(),
         }
     }
 

@@ -302,6 +302,7 @@ mod tests {
                 estimated_costs: dec!(24),
                 total_weight: 0.27,
                 cash_residual: dec!(730000),
+                warnings: vec![],
             },
         }
     }

@@ -184,7 +184,7 @@ mod tests {
         let mut genome = StrategyGenome::new(vec![BlockGene::new(
             BlockType::Sizing,
             "equal_weight",
-            vec![("max_weight", ParamValue::float(sharpe * 0.1, 0.05, 0.5, 0.05))],
+            vec![("max_weight", ParamValue::float((sharpe * 0.1).clamp(0.10, 0.40), 0.10, 0.40, 0.05))],
         )]);
         let mut fitness =
             MultiObjectiveFitness::from_metrics(0.1, sharpe, -0.1, 1.0, 1.0, 1.5, 100, 0.12, 2.5, &config);

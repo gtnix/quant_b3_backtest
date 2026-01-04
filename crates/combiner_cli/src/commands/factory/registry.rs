@@ -814,6 +814,58 @@ impl Registry {
         Ok(())
     }
 
+    /// Register a Hall of Fame promotion with full metrics.
+    pub async fn register_hall_of_fame_promotion(
+        &self,
+        promotion_id: &str,
+        candidate_id: &str,
+        oos_sharpe_net: f32,
+        pbo: f32,
+        dsr: Option<f32>,
+        max_drawdown_net: Option<f32>,
+        cagr_net: Option<f32>,
+        stress_passed: Option<i32>,
+        stress_total: Option<i32>,
+        gates_passed: bool,
+        git_sha: Option<&str>,
+        market: &str,
+        notes: &str,
+    ) -> Result<()> {
+        self.client
+            .execute(
+                r#"
+                INSERT INTO scg_promotions 
+                    (promotion_id, candidate_id, stage, promotion_class,
+                     oos_sharpe_net, pbo, dsr, max_drawdown_net, cagr_net,
+                     stress_passed, stress_total, gates_passed,
+                     git_sha, market, notes)
+                VALUES ($1, $2, 'hall_of_fame', 'hall_of_fame',
+                        $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (candidate_id, stage) DO NOTHING
+                "#,
+                &[
+                    &promotion_id,
+                    &candidate_id,
+                    &oos_sharpe_net,
+                    &pbo,
+                    &dsr,
+                    &max_drawdown_net,
+                    &cagr_net,
+                    &stress_passed,
+                    &stress_total,
+                    &gates_passed,
+                    &git_sha,
+                    &market,
+                    &notes,
+                ],
+            )
+            .await
+            .context("Failed to register hall of fame promotion")?;
+
+        info!(promotion_id, candidate_id, "Registered Hall of Fame promotion");
+        Ok(())
+    }
+
     /// Get promotions for a stage.
     pub async fn list_promotions(&self, stage: Option<&str>) -> Result<Vec<Promotion>> {
         let rows = if let Some(stage) = stage {

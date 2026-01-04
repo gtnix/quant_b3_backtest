@@ -1,0 +1,58 @@
+# Muito Conservador Risk Profile
+# Capital preservation with minimal risk of ruin.
+#
+# Target: Beat inflation with negligible drawdowns.
+# Expected Max Drawdown: 8%
+# Daily Loss Limit: 1%
+# Weekly Loss Limit: 2%
+#
+# Academic Basis:
+# - Quarter-Kelly (0.10-0.25) per Ziemba & MacLean (2011)
+# - Risk per trade 0.25-0.5% per Vince (1992)
+# - Wide ATR stops (3.5-4.0x) per Chan (2013)
+
+[profile]
+name = "Muito Conservador"
+base = "moderado"  # Inherits from moderado, then overrides
+market_adjustments = true
+
+[sizing]
+kelly_fraction = 0.15            # Quarter-Kelly: minimal risk
+max_risk_per_trade_pct = 0.005   # 0.5% per trade max
+max_exposure_per_asset_pct = 0.10
+max_sector_concentration_pct = 0.25
+max_positions = 30               # More diversification
+min_position_weight = 0.02
+
+[stops]
+atr_multiplier_br = 3.50         # Wide stops to avoid noise
+atr_multiplier_us = 3.00
+fixed_stop_pct = 0.08
+trailing_activation_pct = 0.05
+trailing_atr_multiplier = 3.00
+
+[portfolio_risk]
+volatility_target_br = 0.10      # Low vol target
+volatility_target_us = 0.08
+max_drawdown_pct = -0.08         # Very tight: 8% max DD
+max_leverage = 1.0               # No leverage
+cvar_limit_95 = -0.02
+
+[circuit_breakers]
+daily_loss_limit_pct = -0.01     # -1% daily triggers pause
+weekly_loss_limit_pct = -0.02    # -2% weekly triggers pause
+monthly_loss_limit_pct = -0.05
+drawdown_action = "CashOut"      # Exit all on DD breach
+cooldown_days = 2
+
+[operational]
+max_participation_rate = 0.03    # Conservative execution
+
+[universe_filters]
+min_market_cap_br = 2000000000   # R$ 2B - larger caps only
+min_market_cap_us = 10000000000  # $10B
+max_annualized_vol = 0.40        # Exclude high-vol assets
+top_quantile = 0.30              # Wider selection pool
+
+
+

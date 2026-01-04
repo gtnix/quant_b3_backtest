@@ -1,7 +1,7 @@
 # Sistema Combinador Generativo (SCG) - Overview
 
-**Versão**: 1.2.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 1.3.0  
+**Última Atualização**: 2026-01-04
 
 ## O que é o SCG?
 
@@ -204,12 +204,36 @@ StageBParallelValidator::validate_top_k(hall_of_fame, k=10)
 
 ---
 
+## Consumo de Recursos
+
+### Espaço em Disco
+
+> ⚠️ **Importante**: Campanhas SCG consomem espaço significativo.
+
+| Duração | Backtests | Espaço |
+|---------|-----------|--------|
+| 5 min | ~97k | 6.7 GB |
+| 30 min | ~580k | 40 GB |
+| 1 hora | ~1.16M | 80 GB |
+
+**Causa principal**: O arquivo `timeseries.csv` (57KB) é gerado para cada backtest e representa **94% do espaço consumido**.
+
+Para análise detalhada, ver [Análise de Armazenamento](../operations/storage-analysis.md).
+
+---
+
 ## Artefatos de Saída
 
 ```
 output/scg/<experiment_id>/
 ├── manifest.json           # Metadados do experimento
 ├── report.json             # Relatório final
+├── backtests/              # Backtests individuais (94% do espaço)
+│   └── <uuid>/
+│       ├── metadata.json   (820 B)
+│       ├── metrics.json    (502 B)
+│       ├── timeseries.csv  (57 KB)  ← Principal consumidor
+│       └── trace.jsonl     (1.8 KB)
 ├── generations/            # Estatísticas por geração
 │   ├── gen_000.json
 │   ├── gen_001.json

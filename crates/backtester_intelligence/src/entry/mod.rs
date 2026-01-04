@@ -29,7 +29,7 @@ pub mod timeline_provider;
 
 pub use types::{
     EntryContext, EntryTarget, EntryExclusion, EntryResult, EntryDiagnostics,
-    ExclusionReason, ExclusionStage, SelectionReason, Order, OrderSide,
+    ExclusionReason, ExclusionStage, SelectionReason, Order, OrderSide, EntryWarning,
 };
 pub use gating::{GatingFilter, GatingConfig, GatingCandidate};
 pub use selection::{SelectionConfig, Selector, ScoredCandidate};

@@ -280,6 +280,8 @@ fn create_sample_report() -> PerformanceReport {
         regime_summary: None,
         // Compliance fields (v1.3)
         compliance: None,
+        // Execution reality check (v1.4)
+        execution_reality_check: None,
     }
 }
 

@@ -212,6 +212,52 @@ pub struct RunMetrics {
     pub avg_loss: f64,
     /// Win/loss ratio
     pub win_loss_ratio: f64,
+    /// Whether this result is valid (false if 0 trades or other critical issues)
+    #[serde(default = "default_true")]
+    pub is_valid: bool,
+    /// Critical warnings about the backtest
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl RunMetrics {
+    /// Validate metrics and mark as invalid if there are critical issues.
+    /// Call this after populating all fields.
+    pub fn validate(&mut self) {
+        self.warnings.clear();
+        self.is_valid = true;
+        
+        // CRITICAL: Zero trades makes all metrics meaningless
+        if self.total_trades == 0 {
+            self.warnings.push("CRITICAL: Zero trades executed. Metrics are artificial.".to_string());
+            self.is_valid = false;
+        } else if self.total_trades < 30 {
+            self.warnings.push(format!(
+                "WARNING: Only {} trades (min 30 recommended for statistical significance).",
+                self.total_trades
+            ));
+        }
+        
+        // Suspiciously high Sharpe (> 3.0 is extremely rare in practice)
+        if self.sharpe_ratio > 3.0 && self.total_trades > 0 {
+            self.warnings.push(format!(
+                "WARNING: Sharpe ratio {:.2} is suspiciously high. Check for bias.",
+                self.sharpe_ratio
+            ));
+        }
+        
+        // Clamped values indicate potential issues
+        if (self.sharpe_ratio - 10.0).abs() < 0.01 || (self.sharpe_ratio - (-10.0)).abs() < 0.01 {
+            self.warnings.push("WARNING: Sharpe ratio at clamp limit. Likely artificial.".to_string());
+            if self.total_trades == 0 {
+                self.is_valid = false;
+            }
+        }
+    }
 }
 
 /// Equity point for timeseries output.

@@ -36,6 +36,7 @@ fn stress_extreme_volatility() {
             top_n_br: 20,
             top_n_us: 20,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.30,    // Allow higher weight to test capping
@@ -310,6 +311,7 @@ fn stress_penny_stocks() {
             top_n_br: 5,
             top_n_us: 5,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -366,6 +368,7 @@ fn stress_large_universe() {
             top_n_br: 50,
             top_n_us: 50,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -435,6 +438,7 @@ fn stress_high_turnover() {
             top_n_br: 10,
             top_n_us: 10,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -498,6 +502,7 @@ fn stress_partial_turnover() {
             top_n_br: 5,
             top_n_us: 5,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -554,6 +559,7 @@ fn perf_smoke_1k_under_50ms() {
             top_n_br: 20,
             top_n_us: 20,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };

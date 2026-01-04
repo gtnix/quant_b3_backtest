@@ -126,7 +126,7 @@ impl<F: AssetFilter + 'static> StrategyBlock for SelectionAdapter<F> {
 /// Momentum selection (Technique 1)
 pub fn momentum_block(lookback_days: i32, min_return: f64) -> Box<dyn StrategyBlock> {
     let config = MomentumConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         lookback_days,
         min_return,
         skip_last_days: 21,
@@ -141,7 +141,7 @@ pub fn momentum_block(lookback_days: i32, min_return: f64) -> Box<dyn StrategyBl
 /// Value selection (Technique 2)
 pub fn value_block(max_pe: f64, max_pb: f64) -> Box<dyn StrategyBlock> {
     let config = ValueConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         max_pe,
         max_pb,
         min_pe: 0.0,
@@ -156,7 +156,7 @@ pub fn value_block(max_pe: f64, max_pb: f64) -> Box<dyn StrategyBlock> {
 /// Quality selection (Technique 3)
 pub fn quality_block(min_roe: f64, max_debt_equity: f64) -> Box<dyn StrategyBlock> {
     let config = QualityConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         min_roe,
         max_debt_equity,
         min_profit_margin: 0.05,
@@ -172,7 +172,7 @@ pub fn quality_block(min_roe: f64, max_debt_equity: f64) -> Box<dyn StrategyBloc
 /// Low volatility selection (Technique 4)
 pub fn low_vol_block(max_vol: f64, lookback_days: i32) -> Box<dyn StrategyBlock> {
     let config = LowVolConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         lookback_days,
         max_annualized_vol: max_vol,
     };
@@ -186,7 +186,7 @@ pub fn low_vol_block(max_vol: f64, lookback_days: i32) -> Box<dyn StrategyBlock>
 /// Dividend yield selection (Technique 5)
 pub fn dividend_block(min_yield: f64, max_yield: Option<f64>) -> Box<dyn StrategyBlock> {
     let config = DividendYieldConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         min_yield,
         max_yield,
     };
@@ -200,7 +200,7 @@ pub fn dividend_block(min_yield: f64, max_yield: Option<f64>) -> Box<dyn Strateg
 /// Size selection (Technique 6)
 pub fn size_block(min_market_cap: i64, max_market_cap: Option<i64>) -> Box<dyn StrategyBlock> {
     let config = SizeConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         min_market_cap,
         max_market_cap,
     };
@@ -214,7 +214,7 @@ pub fn size_block(min_market_cap: i64, max_market_cap: Option<i64>) -> Box<dyn S
 /// Carry selection (Technique 7)
 pub fn carry_block(min_carry: f64) -> Box<dyn StrategyBlock> {
     let config = CarryConfig {
-        base: AssetFilterConfig { enabled: true, weight: 1.0 },
+        base: AssetFilterConfig { enabled: true, weight: 1.0, ..Default::default() },
         min_carry,
         fallback_selic_br: 0.1075,
         fallback_tbill_us: 0.0435,

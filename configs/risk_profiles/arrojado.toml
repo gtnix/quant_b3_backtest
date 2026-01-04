@@ -1,0 +1,62 @@
+# Arrojado Risk Profile
+# Aggressive growth with high risk tolerance.
+#
+# Target: High returns using maximum defensible risk.
+# Expected Max Drawdown: 25%
+# Daily Loss Limit: 3.5%
+# Weekly Loss Limit: 8%
+#
+# Academic Basis:
+# - Kelly fraction 0.5 (Half-Kelly maximum) per Thorp (2006)
+# - Risk per trade 1.5-2.0% per Vince (1992)
+# - Tighter ATR stops 1.5-2.5x for better R:R
+
+[profile]
+name = "Arrojado"
+base = "moderado"
+market_adjustments = true
+
+[sizing]
+kelly_fraction = 0.50            # Half-Kelly max
+max_risk_per_trade_pct = 0.0175  # 1.75%
+max_exposure_per_asset_pct = 0.25
+max_sector_concentration_pct = 0.40
+max_positions = 15               # More concentrated
+min_position_weight = 0.03
+
+[stops]
+atr_multiplier_br = 2.00         # Tighter stops
+atr_multiplier_us = 1.70
+fixed_stop_pct = 0.15
+trailing_activation_pct = 0.12
+trailing_atr_multiplier = 1.75
+
+[portfolio_risk]
+volatility_target_br = 0.20
+volatility_target_us = 0.16
+max_drawdown_pct = -0.25         # 25% max DD
+max_leverage = 1.2               # Allow slight leverage
+cvar_limit_95 = -0.045
+
+[circuit_breakers]
+daily_loss_limit_pct = -0.035    # -3.5% daily
+weekly_loss_limit_pct = -0.08    # -8% weekly
+monthly_loss_limit_pct = -0.15
+drawdown_action = "ReduceRisk"
+cooldown_days = 1
+
+[operational]
+max_spread_bps_br = 36           # Accept wider spreads
+max_spread_bps_us = 18
+slippage_cost_bps = 12
+max_participation_rate = 0.06
+
+[universe_filters]
+min_market_cap_br = 300000000    # R$ 300M - include smaller caps
+min_market_cap_us = 1000000000   # $1B
+max_annualized_vol = 0.55
+min_dividend_yield = -0.05
+top_quantile = 0.15              # More selective
+
+
+

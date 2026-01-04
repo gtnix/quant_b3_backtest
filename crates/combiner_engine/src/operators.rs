@@ -476,7 +476,7 @@ mod tests {
             BlockGene::new(
                 BlockType::Sizing,
                 "equal_weight",
-                vec![("max_weight", ParamValue::float(0.2, 0.05, 0.5, 0.05))],
+                vec![("max_weight", ParamValue::float(0.25, 0.10, 0.40, 0.05))],
             ),
         ])
     }
@@ -538,7 +538,7 @@ mod tests {
             BlockGene::new(
                 BlockType::Sizing,
                 "equal_weight",
-                vec![("max_weight", ParamValue::float(0.2, 0.05, 0.5, 0.05))],
+                vec![("max_weight", ParamValue::float(0.25, 0.10, 0.40, 0.05))],
             ),
         ]);
         

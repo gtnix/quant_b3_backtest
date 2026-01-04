@@ -119,7 +119,7 @@ impl MetricsCalculator {
             Self::trade_stats(trades);
         let turnover = Self::compute_turnover(trades, timeseries);
 
-        RunMetrics {
+        let mut metrics = RunMetrics {
             cagr,
             volatility,
             sharpe_ratio: sharpe,
@@ -135,7 +135,14 @@ impl MetricsCalculator {
             avg_win,
             avg_loss,
             win_loss_ratio,
-        }
+            is_valid: true,
+            warnings: Vec::new(),
+        };
+        
+        // Validate and populate warnings
+        metrics.validate();
+        
+        metrics
     }
 
     /// Compute daily returns from equity curve.

@@ -36,6 +36,9 @@ pub struct CampaignConfig {
     /// Data integrity configuration.
     #[serde(default)]
     pub data_integrity: DataIntegrityConfig,
+    /// Risk profile configuration.
+    #[serde(default)]
+    pub risk_profile: RiskProfileConfig,
 }
 
 /// Campaign metadata.
@@ -76,6 +79,20 @@ pub struct DatasetConfig {
     /// When set, passes --market-data to backtester CLI for real data simulation.
     #[serde(default)]
     pub market_data_path: Option<String>,
+    /// Data source: "database" or "csv". When "database", uses DATABASE_URL env var.
+    #[serde(default)]
+    pub data_source: Option<String>,
+}
+
+/// Risk profile configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RiskProfileConfig {
+    /// Risk profile name: muito_conservador, conservador, moderado, arrojado, muito_arrojado.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional overrides for specific parameters.
+    #[serde(default)]
+    pub overrides: Option<toml::Table>,
 }
 
 fn default_market() -> String {
@@ -519,6 +536,7 @@ mod tests {
             budget: BudgetConfig::default(),
             promotion: PromotionConfig::default(),
             data_integrity: DataIntegrityConfig::default(),
+            risk_profile: RiskProfileConfig::default(),
         };
 
         let config2 = config1.clone();

@@ -53,6 +53,20 @@ impl MetricsParser {
             total_trades: Self::get_u32(value, "total_trades").unwrap_or(0),
             winning_trades: Self::get_u32_opt(value, "winning_trades"),
             losing_trades: Self::get_u32_opt(value, "losing_trades"),
+            is_valid: Self::get_bool(value, "is_valid").unwrap_or(true),
+            warnings: Self::get_string_array(value, "warnings").unwrap_or_default(),
+        })
+    }
+    
+    fn get_bool(value: &Value, field: &str) -> Option<bool> {
+        value.get(field).and_then(|v| v.as_bool())
+    }
+    
+    fn get_string_array(value: &Value, field: &str) -> Option<Vec<String>> {
+        value.get(field).and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
         })
     }
 

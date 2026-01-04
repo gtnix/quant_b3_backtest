@@ -40,16 +40,18 @@ pub mod fx;
 pub mod monitoring;
 pub mod orchestrator;
 pub mod performance;
+pub mod risk_clusters;
 pub mod risk_free;
+pub mod risk_profiles;
 pub mod scorer;
 pub mod walkforward;
 
 pub use config::{
-    AssetFilterConfig, CarryConfig, FilterMode, FundamentalsConfig, IntelligenceConfig,
-    RiskFreeConfig, FxMissingPolicy, PerformanceReportingConfig,
+    AssetFilterConfig, CarryConfig, FilterMode, FilterThresholdMode, FundamentalsConfig, 
+    IntelligenceConfig, RiskFreeConfig, FxMissingPolicy, PerformanceReportingConfig,
 };
 pub use currency::{Currency, Money, FxPair, FxRate, CurrencyMismatchError};
-pub use filters::{infer_market_from_symbol, AssetData, AssetFilter, FilterResult, Market};
+pub use filters::{infer_market_from_symbol, AssetData, AssetFilter, FilterResult, Market, MarketFilterDefaults};
 pub use fx::{FxRateProvider, InMemoryFxProvider, FxError, convert_money};
 pub use risk_free::{DbRiskFreeRateProvider, FallbackRiskFreeProvider, RiskFreeRateProvider};
 pub use scorer::{AssetScorer, ScoredAsset};
@@ -57,9 +59,10 @@ pub use scorer::{AssetScorer, ScoredAsset};
 // Entry module exports
 pub use entry::{
     AssetCandidate, EntryEngine, EntryEngineConfig, EntryContext, EntryResult, EntryTarget, 
-    EntryExclusion, EntryDiagnostics, GatingFilter, GatingConfig, Selector, SelectionConfig, 
-    Weighter, WeightingConfig, WeightingMethod, OrderGenerator, OrderGeneratorConfig, Order, 
-    OrderSide, AuditLogger, RebalanceAuditLog, ExclusionReason, ExclusionStage, SelectionReason,
+    EntryExclusion, EntryDiagnostics, EntryWarning, GatingFilter, GatingConfig, Selector, 
+    SelectionConfig, Weighter, WeightingConfig, WeightingMethod, OrderGenerator, 
+    OrderGeneratorConfig, Order, OrderSide, AuditLogger, RebalanceAuditLog, ExclusionReason, 
+    ExclusionStage, SelectionReason,
     // Universe range V1 (survivorship bias prevention)
     UniverseRangeProvider, DateRange, EligibilityResult, UniverseLoadError, LoadStats,
     // Eligibility V2 (event-based universe)
@@ -108,6 +111,14 @@ pub use walkforward::{
     ParamSet, ParamRange, GridConfig, WindowMetrics, WindowResult,
     AggregateMetrics, AggregateReport, TimeSplitter, RollingSplitter,
     MetricsCalculator, RobustnessScorer, WalkForwardRunner, WalkForwardReporter,
+};
+
+// Risk profiles exports
+pub use risk_profiles::{
+    RiskProfile, RiskProfileParams, MarketParams,
+    RiskProfileLoader, LoadError as RiskProfileLoadError,
+    SizingParams, StopParams, PortfolioRiskParams, CircuitBreakerParams, OperationalParams,
+    get_profile_params, available_profiles, log_effective_params, log_filter_chain,
 };
 
 // Monitoring exports
@@ -181,5 +192,10 @@ pub mod prelude {
     pub use crate::monitoring::{
         MonitoringEngine, MonitoringContext, MonitoringConfig,
         MonitoringReport, MonitoringReporter, Severity, CircuitAction,
+    };
+    
+    // Risk Profiles
+    pub use crate::risk_profiles::{
+        RiskProfile, RiskProfileParams, get_profile_params, available_profiles,
     };
 }

@@ -55,6 +55,7 @@ fn invariant_weight_sum_within_bounds() {
             top_n_br: 20,
             top_n_us: 20,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.20,
@@ -112,6 +113,7 @@ fn invariant_weights_respect_bounds() {
             top_n_br: 10,
             top_n_us: 10,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.25,
@@ -156,6 +158,7 @@ fn invariant_graceful_degradation_below_top_n() {
             top_n_br: 20, // Want 20, but will get fewer
             top_n_us: 20,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -335,6 +338,7 @@ fn invariant_determinism_identical_outputs() {
             top_n_br: 10,
             top_n_us: 10,
             min_score_threshold: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -412,6 +416,7 @@ fn invariant_volatility_uses_passed_value() {
             top_n_br: 3,
             top_n_us: 3,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig {
             max_weight: 0.80,

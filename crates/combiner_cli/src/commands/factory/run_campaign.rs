@@ -24,6 +24,7 @@ use super::registry::{
     CampaignStatus, Registry, RunStatus,
 };
 use super::crosscheck;
+use super::promote::auto_promote_to_hall_of_fame;
 
 /// Execute factory run command.
 pub fn execute_run(campaign_path: &str) -> Result<()> {
@@ -266,6 +267,18 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
                     // Run validation pipeline on outputs (Stage C validation)
                     run_output_validation(&run_result.artifact_path, &run_id);
 
+                    // Auto-promote to Hall of Fame (Rust-native, no Node dependency)
+                    let market = &config.dataset.market;
+                    match auto_promote_to_hall_of_fame(&registry, &run_id, market).await {
+                        Ok(promoted) if promoted > 0 => {
+                            info!(run_id, promoted, "Auto-promoted {} candidates to Hall of Fame", promoted);
+                        }
+                        Ok(_) => {} // No candidates met criteria
+                        Err(e) => {
+                            error!(run_id, error = %e, "Hall of Fame auto-promotion failed");
+                        }
+                    }
+
                     completed += 1;
                     info!(run_id, seed, "Run completed successfully");
                 }
@@ -405,6 +418,28 @@ async fn execute_single_run(
     if let Some(ref market_data) = config.dataset.market_data_path {
         info!("Using market data from: {}", market_data);
         executor = executor.with_market_data(market_data);
+    }
+    
+    // Add data source if configured (database uses DATABASE_URL env var)
+    if let Some(ref data_source) = config.dataset.data_source {
+        info!("Using data source: {}", data_source);
+        executor = executor.with_data_source(data_source);
+        
+        // Verify DATABASE_URL is set when using database source
+        if data_source == "database" {
+            if std::env::var("DATABASE_URL").is_err() {
+                return Err(anyhow::anyhow!(
+                    "data_source='database' requires DATABASE_URL environment variable to be set"
+                ));
+            }
+            info!("DATABASE_URL is set, will use Neon database for market data");
+        }
+    }
+    
+    // Add risk profile if configured
+    if let Some(ref profile) = config.risk_profile.name {
+        info!("Using risk profile: {}", profile);
+        executor = executor.with_risk_profile(profile);
     }
 
     // Create validation cache

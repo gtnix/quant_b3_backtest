@@ -1,0 +1,107 @@
+# =============================================================================
+# SCG 5-Minute MAX POWER Campaign
+# =============================================================================
+# Maximiza geração de estratégias em 5 minutos usando todos os recursos
+# 16 cores, 20GB RAM disponível
+# =============================================================================
+
+[campaign]
+name = "scg_5min_maxpower"
+description = "5-minute max throughput test"
+version = "1.0.0"
+
+[dataset]
+market = "BR"
+market_data_path = "data/market_data_ibov.csv"
+
+[risk_profile]
+name = "arrojado"
+
+[evolution]
+population_size = 200        # Maior população para mais diversidade
+max_generations = 500        # Alto limite (limitado por tempo)
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08         # Ligeiramente maior para exploração
+convergence_generations = 15
+max_runtime_seconds = 300    # 5 minutos
+workers = 14                 # 16 cores - 2 para overhead
+hall_of_fame_size = 50       # Guardar mais estratégias
+
+[diversity]
+enabled = true
+sigma_share = 0.10
+sharing_alpha = 1.0
+fitness_sharing = true
+phenotypic_distance = true
+critical_threshold = 0.15
+
+[adaptation]
+enabled = true
+base_mutation_rate = 0.08
+min_mutation_rate = 0.01
+max_mutation_rate = 0.35
+amplification_factor = 2.0
+
+[stagnation]
+detection_enabled = true
+window_size = 8             # Detectar estagnação mais rápido
+improvement_threshold = 0.003
+restart_enabled = true
+restart_elite_ratio = 0.20
+post_restart_boost_generations = 5
+max_restarts = 5
+
+[execution]
+mode = "fast"               # Modo mais rápido
+has_costs = true
+slippage_bps = 10.0
+commission_bps = 5.0
+emolument_bps = 2.5
+market_impact_model = "linear"
+
+[validation]
+enabled = true
+top_k = 20                  # Validar mais candidatos
+wfa_enabled = true
+wfa_num_folds = 3           # Menos folds = mais rápido
+wfa_is_ratio = 0.6
+wfa_purge_days = 5
+pbo_enabled = false         # Desabilitar para velocidade
+stress_enabled = true
+stress_min_pass = 3
+
+[gates]
+gates_required = true
+min_oos_sharpe_net = 0.40   # Ligeiramente relaxado
+max_pbo = 0.20
+min_stress_passed = 3
+max_degradation = 0.45
+min_oos_trades = 25
+
+[data_integrity]
+enabled = true
+lookback_requirements = true
+survivorship_bias_check = true
+
+[metrics]
+objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
+sharpe_weight = 1.5
+cagr_weight = 1.0
+drawdown_weight = 1.0
+calmar_weight = 0.5
+sortino_weight = 0.5
+low_trades_penalty = true
+min_trades = 25
+extreme_turnover_penalty = true
+max_turnover_annual = 500.0
+high_volatility_penalty = true
+max_volatility = 0.40
+
+[output]
+save_generations = true
+save_all_genomes = false
+save_diversity_metrics = true
+save_restart_events = true
+

@@ -1,7 +1,7 @@
 # Framework de Validação - SCG
 
-**Versão**: 1.1.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 1.2.0  
+**Última Atualização**: 2026-01-04
 
 ## Motivação
 
@@ -428,6 +428,52 @@ min_trades_oos = 30
 
 ---
 
+---
+
+## Validações Avançadas (v1.2)
+
+### Análise de Sensibilidade
+
+Testa robustez da estratégia via perturbação de parâmetros.
+
+```toml
+[validation.sensitivity]
+enabled = true
+perturbation_pct = 0.10   # ±10% de variação nos parâmetros
+num_perturbations = 20    # 20 variações por parâmetro
+min_stability_score = 0.70  # 70% das perturbações devem manter performance
+```
+
+**Implementação**: `SensitivityAnalyzer` em `backtester_strategy/src/experiment/sensitivity.rs`
+
+### CVaR Circuit Breaker
+
+Monitora Conditional Value-at-Risk (95%) como circuit breaker.
+
+```toml
+[risk.circuit_breakers]
+cvar_limit_95 = -0.20  # Limite de 20% de perda esperada no pior 5%
+check_cvar = true
+```
+
+**Implementação**: `RiskGuard::check_cvar()` em `backtester_intelligence/src/exit/risk_guard.rs`
+
+### Anti-Concentração
+
+Previne concentração excessiva via correlação e drawdown beta.
+
+```toml
+[risk.portfolio]
+check_drawdown_beta = true
+max_drawdown_beta = 0.80
+check_correlation = true
+max_correlation = 0.70
+```
+
+**Implementação**: `Selector::select_with_portfolio()` em `backtester_intelligence/src/entry/selection.rs`
+
+---
+
 ## Localização no Código
 
 - Crate: `combiner_engine`
@@ -437,6 +483,11 @@ min_trades_oos = 30
   - `src/evaluation/stress.rs` - StressTest
 - Crate: `backtester_intelligence`
   - `src/walkforward/` - Walk-Forward Analysis engine
+  - `src/performance/kelly.rs` - KellyCalculator (v1.2)
+  - `src/risk_clusters.rs` - RiskClusterer (v1.2)
+  - `src/exit/risk_guard.rs` - CVaR check (v1.2)
+- Crate: `backtester_strategy`
+  - `src/experiment/sensitivity.rs` - SensitivityAnalyzer (v1.2)
 
 ---
 

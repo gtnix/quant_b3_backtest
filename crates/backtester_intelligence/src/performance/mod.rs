@@ -22,6 +22,8 @@ pub mod concentration;
 pub mod regime;
 pub mod compliance;
 pub mod constraints;
+pub mod monte_carlo;
+pub mod kelly;
 
 pub use types::{
     PerformanceSnapshot, PnLBreakdown, CostBreakdown, ExposureBreakdown,
@@ -63,6 +65,13 @@ pub use compliance::{
 pub use constraints::{
     ConstraintId, ConstraintScope, ConstraintAction, ConstraintPolicy,
     ConstraintsConfig, ConstraintsEngine,
+};
+pub use monte_carlo::{
+    MonteCarloEngine, MonteCarloConfig, RoRResult, TradeResult as MonteCarloTrade,
+    monte_carlo_ror, monte_carlo_ror_with_threshold,
+};
+pub use kelly::{
+    KellyCalculator, KellyConfig, KellyResult, TradeForKelly,
 };
 
 

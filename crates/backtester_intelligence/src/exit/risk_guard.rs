@@ -25,6 +25,11 @@ pub struct RiskConfig {
     #[serde(default = "default_max_drawdown")]
     pub max_drawdown_pct: f64,
 
+    /// CVaR limit at 95% confidence (negative, e.g., -0.03 for 3%)
+    /// Reference: Rockafellar & Uryasev (2000)
+    #[serde(default = "default_cvar_limit")]
+    pub cvar_limit_95: f64,
+
     /// Action to take when drawdown is exceeded
     #[serde(default)]
     pub drawdown_action: DrawdownAction,
@@ -41,6 +46,10 @@ pub struct RiskConfig {
     #[serde(default = "default_true")]
     pub check_drawdown: bool,
 
+    /// Whether to check CVaR limit
+    #[serde(default = "default_true")]
+    pub check_cvar: bool,
+
     /// Separate limits by market (BR/US)
     #[serde(default = "default_true")]
     pub per_market_limits: bool,
@@ -50,6 +59,7 @@ fn default_max_single() -> f64 { 0.20 }
 fn default_max_market() -> f64 { 1.0 }
 fn default_max_turnover() -> f64 { 0.50 }
 fn default_max_drawdown() -> f64 { -0.15 }
+fn default_cvar_limit() -> f64 { -0.03 } // 3% CVaR limit at 95% confidence
 fn default_true() -> bool { true }
 
 impl Default for RiskConfig {
@@ -59,10 +69,12 @@ impl Default for RiskConfig {
             max_market_exposure: default_max_market(),
             max_turnover_per_rebalance: default_max_turnover(),
             max_drawdown_pct: default_max_drawdown(),
+            cvar_limit_95: default_cvar_limit(),
             drawdown_action: DrawdownAction::default(),
             check_exposure: true,
             check_turnover: true,
             check_drawdown: true,
+            check_cvar: true,
             per_market_limits: true,
         }
     }
@@ -163,9 +175,50 @@ impl RiskGuard {
         }
     }
 
+    /// Check if CVaR (Conditional Value-at-Risk) exceeds limit.
+    /// 
+    /// CVaR at 95% is the mean of the worst 5% of daily returns.
+    /// Reference: Rockafellar & Uryasev (2000)
+    pub fn check_cvar(&self, daily_returns: &[f64]) -> Option<RiskViolation> {
+        if !self.config.check_cvar || daily_returns.len() < 20 {
+            return None; // Need at least 20 days for meaningful CVaR
+        }
+
+        let cvar = Self::calculate_cvar_95(daily_returns);
+
+        // cvar is negative, cvar_limit_95 is negative
+        if cvar <= self.config.cvar_limit_95 {
+            Some(RiskViolation::CVaRExceeded)
+        } else {
+            None
+        }
+    }
+
+    /// Calculate CVaR at 95% confidence (mean of worst 5% of returns).
+    fn calculate_cvar_95(returns: &[f64]) -> f64 {
+        if returns.is_empty() {
+            return 0.0;
+        }
+
+        let mut sorted = returns.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let n = sorted.len();
+        let tail_count = ((n as f64) * 0.05).ceil() as usize;
+        let tail_count = tail_count.max(1).min(n);
+
+        let tail_sum: f64 = sorted[..tail_count].iter().sum();
+        tail_sum / tail_count as f64
+    }
+
     /// Get the drawdown action when drawdown is exceeded.
     pub fn drawdown_action(&self) -> DrawdownAction {
         self.config.drawdown_action
+    }
+
+    /// Get CVaR limit.
+    pub fn cvar_limit(&self) -> f64 {
+        self.config.cvar_limit_95
     }
 
     /// Get max single exposure limit.
@@ -190,6 +243,17 @@ impl RiskGuard {
         context: &ExitContext,
         turnover: Decimal,
     ) -> Vec<RiskViolation> {
+        self.run_all_checks_with_returns(positions, context, turnover, &[])
+    }
+
+    /// Run all risk checks including CVaR with daily returns.
+    pub fn run_all_checks_with_returns(
+        &self,
+        positions: &[Position],
+        context: &ExitContext,
+        turnover: Decimal,
+        daily_returns: &[f64],
+    ) -> Vec<RiskViolation> {
         let mut violations = Vec::new();
 
         // Single exposure checks
@@ -211,6 +275,11 @@ impl RiskGuard {
 
         // Drawdown check
         if let Some(v) = self.check_drawdown(context) {
+            violations.push(v);
+        }
+
+        // CVaR check
+        if let Some(v) = self.check_cvar(daily_returns) {
             violations.push(v);
         }
 
@@ -350,7 +419,81 @@ mod tests {
         assert!(violations.contains(&RiskViolation::DrawdownExceeded));
         assert!(!violations.contains(&RiskViolation::TurnoverExceeded)); // 10% is OK
     }
+
+    #[test]
+    fn test_cvar_violation() {
+        let guard = RiskGuard::new(RiskConfig {
+            cvar_limit_95: -0.03, // 3% CVaR limit
+            check_cvar: true,
+            ..Default::default()
+        });
+
+        // Returns with severe tail risk (CVaR should exceed -3%)
+        let returns: Vec<f64> = vec![
+            -0.10, -0.08, -0.05, -0.02, 0.01,
+            0.02, 0.01, 0.02, 0.01, 0.02,
+            0.01, 0.02, 0.01, 0.02, 0.01,
+            0.02, 0.01, 0.02, 0.01, 0.02,
+        ];
+
+        let violation = guard.check_cvar(&returns);
+        assert!(violation.is_some());
+        assert_eq!(violation.unwrap(), RiskViolation::CVaRExceeded);
+    }
+
+    #[test]
+    fn test_no_cvar_violation() {
+        let guard = RiskGuard::new(RiskConfig {
+            cvar_limit_95: -0.05, // 5% CVaR limit (more relaxed)
+            check_cvar: true,
+            ..Default::default()
+        });
+
+        // Returns with moderate tail risk (CVaR within -5%)
+        let returns: Vec<f64> = vec![
+            -0.03, -0.02, -0.01, 0.01, 0.02,
+            0.01, 0.02, 0.01, 0.02, 0.01,
+            0.02, 0.01, 0.02, 0.01, 0.02,
+            0.01, 0.02, 0.01, 0.02, 0.01,
+        ];
+
+        let violation = guard.check_cvar(&returns);
+        assert!(violation.is_none());
+    }
+
+    #[test]
+    fn test_cvar_insufficient_data() {
+        let guard = RiskGuard::new(RiskConfig {
+            cvar_limit_95: -0.03,
+            check_cvar: true,
+            ..Default::default()
+        });
+
+        // Only 10 days - should not trigger (needs 20+)
+        let returns: Vec<f64> = vec![-0.10, -0.08, -0.05, -0.02, 0.01, 0.02, 0.01, 0.02, 0.01, 0.02];
+
+        let violation = guard.check_cvar(&returns);
+        assert!(violation.is_none());
+    }
+
+    #[test]
+    fn test_cvar_calculation() {
+        // Test the CVaR calculation directly
+        let returns = vec![
+            -0.10, -0.05, -0.02, 0.0, 0.01,
+            0.02, 0.03, 0.04, 0.05, 0.10,
+        ];
+        
+        // 5% of 10 = 0.5 → ceil = 1 observation
+        // CVaR95 should be mean of worst 1 = -0.10
+        let cvar = RiskGuard::calculate_cvar_95(&returns);
+        assert!((cvar - (-0.10)).abs() < 0.001);
+    }
 }
+
+
+
+
 
 
 

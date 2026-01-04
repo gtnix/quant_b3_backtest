@@ -243,6 +243,8 @@ mod tests {
                 base: AssetFilterConfig {
                     enabled: true,
                     weight: 1.0,
+                    threshold_mode: crate::config::FilterThresholdMode::Quantile,
+                    top_quantile: 0.20,
                 },
                 ..Default::default()
             }),
@@ -274,6 +276,8 @@ mod tests {
                 base: AssetFilterConfig {
                     enabled: true,
                     weight: 0.5,
+                    threshold_mode: crate::config::FilterThresholdMode::Quantile,
+                    top_quantile: 0.20,
                 },
                 min_return: 0.05,
                 ..Default::default()
@@ -282,6 +286,8 @@ mod tests {
                 base: AssetFilterConfig {
                     enabled: true,
                     weight: 0.5,
+                    threshold_mode: crate::config::FilterThresholdMode::Quantile,
+                    top_quantile: 0.20,
                 },
                 max_pe: 20.0,
                 max_pb: 3.0,

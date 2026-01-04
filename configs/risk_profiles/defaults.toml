@@ -1,0 +1,78 @@
+# Risk Profile Defaults
+# Base configuration that all profiles inherit from.
+# Individual profiles can override any parameter.
+#
+# Academic References:
+# - Ziemba & MacLean (2011): Kelly Criterion
+# - Vince (1992): Money Management
+# - Chan (2013, 2021): Algorithmic Trading
+# - Harvey et al. (2017): Volatility Targeting
+# - Chekhlov et al. (2003): Drawdown Constraints
+# - Thorp (2006): Kelly in Stock Market
+
+[profile]
+name = "defaults"
+market_adjustments = true
+
+# Position Sizing Defaults
+# Based on Ziemba & MacLean (2011) and Vince (1992)
+[sizing]
+kelly_fraction = 0.40           # Half-Kelly (0.5) is academic max
+max_risk_per_trade_pct = 0.0125 # 1.25% per trade
+max_exposure_per_asset_pct = 0.20
+max_sector_concentration_pct = 0.35
+max_positions = 20
+min_position_weight = 0.02
+
+# Stop-Loss Defaults
+# ATR-based per Wilder (1978) and Chan (2013)
+[stops]
+stop_type = "ATR"
+atr_period = 14
+atr_multiplier_br = 2.50        # BR: wider stops due to volatility
+atr_multiplier_us = 2.10        # US: tighter stops
+fixed_stop_pct = 0.12
+enable_trailing = true
+trailing_activation_pct = 0.10
+trailing_atr_multiplier = 2.00
+
+# Portfolio Risk Defaults
+# Based on Harvey et al. (2017) and Chekhlov et al. (2003)
+[portfolio_risk]
+volatility_target_br = 0.16     # 16% vol target for BR
+volatility_target_us = 0.12     # 12% vol target for US
+max_drawdown_pct = -0.20        # 20% max DD
+max_leverage = 1.0
+cvar_limit_95 = -0.035
+
+# Circuit Breaker Defaults
+[circuit_breakers]
+daily_loss_limit_pct = -0.025   # -2.5% daily
+weekly_loss_limit_pct = -0.06   # -6% weekly
+monthly_loss_limit_pct = -0.12  # -12% monthly
+drawdown_action = "ReduceRisk"
+cooldown_days = 1
+
+# Operational Defaults (Microstructure)
+# BR vs US calibrated per package research
+[operational]
+min_liquidity_usd_br = 5000000   # $5M for BR
+min_liquidity_usd_us = 20000000  # $20M for US
+max_spread_bps_br = 30           # 30 bps for BR
+max_spread_bps_us = 15           # 15 bps for US
+slippage_cost_bps = 10
+commission_rate = 0.001          # 0.1%
+max_participation_rate = 0.05    # 5% of daily volume
+
+# Universe Filter Defaults
+[universe_filters]
+min_market_cap_br = 1000000000   # R$ 1B
+min_market_cap_us = 5000000000   # $5B
+max_annualized_vol = 0.50        # 50%
+min_dividend_yield = -0.02       # Allow slightly negative carry
+min_momentum_return = 0.0
+use_quantile_thresholds = true
+top_quantile = 0.20              # Top 20%
+
+
+
