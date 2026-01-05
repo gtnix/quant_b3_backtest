@@ -5,6 +5,7 @@
 //! T3: Determinism with dividends
 //! T4: Edge cases (no position, partial, buy on ex-date)
 
+use backtester_core::Money;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -272,7 +273,7 @@ fn t3_determinism_with_dividends() {
             portfolio.update_prices(&prices);
         }
         
-        (portfolio.equity, total_divs, div_count)
+        (portfolio.equity.to_decimal(), total_divs, div_count)
     }
     
     let (equity1, divs1, count1) = run_scenario();
@@ -333,7 +334,7 @@ fn t4_partial_position_receives_full_dividend() {
     portfolio.add_cash(cashflow);
     
     assert_eq!(cashflow, dec!(500), "Should receive 0.50 * 1000 = 500");
-    assert_eq!(portfolio.cash, cash_before + dec!(500));
+    assert_eq!(portfolio.cash, cash_before + Money::from(dec!(500)));
     
     // Sell 500 shares after ex-date
     portfolio.apply_sell("TAEE11", 500, dec!(39.50), dec!(0)).unwrap();

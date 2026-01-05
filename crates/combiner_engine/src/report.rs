@@ -303,36 +303,38 @@ impl FinalReportGenerator {
             let strategy_config = self.converter.to_strategy_config(&entry.genome)?;
             let toml_content = toml::to_string_pretty(&strategy_config)?;
 
+            let v = entry.validation_ref();
+            
             // Generate validation JSON
             let evidence = ValidationEvidence {
                 genome_id: entry.genome_id.to_string(),
                 genome_hash: format!("{:016x}", entry.genome_hash),
-                validation: entry.validation.clone(),
-                validated_generation: entry.validated_generation,
+                validation: v.clone(),
+                validated_generation: entry.validated_generation(),
                 rank: entry.rank,
                 score: entry.score,
             };
             let validation_json = serde_json::to_string(&evidence)?;
 
             // Calculate production score
-            let production_score = entry.validation.oos_sharpe_median 
-                * (1.0 - entry.validation.pbo)
-                * (1.0 - entry.validation.degradation_pct / 100.0);
+            let production_score = v.oos_sharpe_median 
+                * (1.0 - v.pbo)
+                * (1.0 - v.degradation_pct / 100.0);
 
             bundle_writer.add(
                 entry.genome_id,
                 entry.genome_hash,
                 (rank + 1) as u32,
-                entry.validated_generation,
+                entry.validated_generation(),
                 production_score,
-                entry.validation.oos_sharpe_median,
-                entry.validation.oos_cagr_median,
-                entry.validation.oos_max_dd_worst,
-                entry.validation.pbo,
-                entry.validation.dsr,
-                entry.validation.degradation_pct,
-                entry.validation.splits_passed as u16,
-                entry.validation.splits_evaluated as u16,
+                v.oos_sharpe_median,
+                v.oos_cagr_median,
+                v.oos_max_dd_worst,
+                v.pbo,
+                v.dsr,
+                v.degradation_pct,
+                v.splits_passed,
+                v.splits_evaluated,
                 &toml_content,
                 &validation_json,
             ).map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
@@ -395,8 +397,8 @@ impl FinalReportGenerator {
         HallOfFameSummary {
             total_entries: hof.len(),
             validated_entries: hof.len(), // All entries are validated
-            avg_oos_sharpe: hof_stats.avg_oos_sharpe,
-            avg_pbo: hof_stats.avg_pbo,
+            avg_oos_sharpe: hof_stats.avg_oos_sharpe.unwrap_or(0.0),
+            avg_pbo: hof_stats.avg_pbo.unwrap_or(1.0),
             avg_degradation_pct: hof_stats.avg_degradation_pct,
             best_oos_sharpe: hof_stats.best_oos_sharpe,
             best_pbo: hof_stats.best_pbo,
@@ -451,9 +453,9 @@ impl FinalReportGenerator {
             };
         }
 
-        let pbos: Vec<f64> = entries.iter().map(|e| e.validation.pbo).collect();
-        let degradations: Vec<f64> = entries.iter().map(|e| e.validation.degradation_pct).collect();
-        let dsrs: Vec<f64> = entries.iter().map(|e| e.validation.dsr).collect();
+        let pbos: Vec<f64> = entries.iter().map(|e| e.validation_ref().pbo).collect();
+        let degradations: Vec<f64> = entries.iter().map(|e| e.validation_ref().degradation_pct).collect();
+        let dsrs: Vec<f64> = entries.iter().map(|e| e.validation_ref().dsr).collect();
 
         let avg_pbo = pbos.iter().sum::<f64>() / pbos.len() as f64;
         let avg_dsr = dsrs.iter().sum::<f64>() / dsrs.len() as f64;
@@ -465,8 +467,8 @@ impl FinalReportGenerator {
         // Count candidates meeting institutional criteria
         let criteria = hof.criteria();
         let candidates_above_threshold = entries.iter()
-            .filter(|e| e.validation.pbo < criteria.max_pbo && 
-                       e.validation.oos_sharpe_median >= criteria.min_oos_sharpe)
+            .filter(|e| e.validation_ref().pbo < criteria.max_pbo && 
+                       e.validation_ref().oos_sharpe_median >= criteria.min_oos_sharpe)
             .count();
 
         // Classify overall risk
@@ -541,10 +543,11 @@ impl FinalReportGenerator {
         let mut candidates = Vec::new();
 
         for (rank, entry) in hof.entries().iter().enumerate() {
+            let v = entry.validation_ref();
             // Calculate production score (emphasizes robustness)
-            let production_score = entry.validation.oos_sharpe_median 
-                * (1.0 - entry.validation.pbo)
-                * (1.0 - entry.validation.degradation_pct / 100.0);
+            let production_score = v.oos_sharpe_median 
+                * (1.0 - v.pbo)
+                * (1.0 - v.degradation_pct / 100.0);
 
             let toml_path = format!("candidates/{}.toml", entry.genome_id);
             let evidence_path = format!("candidates/{}_validation.json", entry.genome_id);
@@ -553,13 +556,13 @@ impl FinalReportGenerator {
                 rank: rank + 1,
                 genome_id: entry.genome_id.to_string(),
                 genome_hash: format!("{:016x}", entry.genome_hash),
-                oos_sharpe: entry.validation.oos_sharpe_median,
-                oos_cagr: entry.validation.oos_cagr_median,
-                max_drawdown: entry.validation.oos_max_dd_worst,
-                pbo: entry.validation.pbo,
-                dsr: entry.validation.dsr,
-                degradation_pct: entry.validation.degradation_pct,
-                splits_passed: format!("{}/{}", entry.validation.splits_passed, entry.validation.splits_evaluated),
+                oos_sharpe: v.oos_sharpe_median,
+                oos_cagr: v.oos_cagr_median,
+                max_drawdown: v.oos_max_dd_worst,
+                pbo: v.pbo,
+                dsr: v.dsr,
+                degradation_pct: v.degradation_pct,
+                splits_passed: format!("{}/{}", v.splits_passed, v.splits_evaluated),
                 toml_path,
                 validation_evidence_path: evidence_path,
                 production_score,
@@ -586,8 +589,8 @@ impl FinalReportGenerator {
         let evidence = ValidationEvidence {
             genome_id: entry.genome_id.to_string(),
             genome_hash: format!("{:016x}", entry.genome_hash),
-            validation: entry.validation.clone(),
-            validated_generation: entry.validated_generation,
+            validation: entry.validation_ref().clone(),
+            validated_generation: entry.validated_generation(),
             rank: entry.rank,
             score: entry.score,
         };

@@ -2,6 +2,7 @@
 //!
 //! These tests prove that risk limits are never violated.
 
+use backtester_core::Money;
 use backtester_intelligence::exit::{
     ExitContext, ExitEngine, ExitEngineConfig, ExitPolicyConfig, ExitReason,
     Position, RiskConfig, RiskViolation, DrawdownAction,
@@ -35,9 +36,9 @@ fn make_positions(count: usize) -> Vec<Position> {
 fn make_context(equity: Decimal, peak: Decimal) -> ExitContext {
     ExitContext {
         date: fixed_date(),
-        capital: dec!(1_000_000),
-        equity,
-        peak_equity: peak,
+        capital: Money::from_int(1_000_000),
+        equity: Money::from(equity),
+        peak_equity: Money::from(peak),
         market: Market::BR,
     }
 }
@@ -332,7 +333,7 @@ fn invariant_costs_non_negative() {
     let (_, orders, _) = engine.evaluate(&positions, &ctx);
 
     for order in &orders {
-        assert!(order.estimated_cost >= Decimal::ZERO);
+        assert!(order.estimated_cost >= Money::ZERO);
     }
 }
 

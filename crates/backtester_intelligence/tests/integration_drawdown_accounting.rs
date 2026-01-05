@@ -52,7 +52,7 @@ fn integration_drawdown_flash_crash() {
 
     // Initial equity = 1M - (5000*50 + 3000*60 + 4000*30) + positions value
     // = 1M - 550k + 550k = 1M (just bought at market price)
-    assert_eq!(portfolio.equity, dec!(1_000_000));
+    assert_eq!(portfolio.equity.to_decimal(), dec!(1_000_000));
 
     // Simulate flash crash: all positions drop 25%
     let mut crash_prices = HashMap::new();
@@ -88,14 +88,17 @@ fn integration_drawdown_flash_crash() {
     );
 
     // Build ExitContext from portfolio
+    // Need to set peak_equity manually since it's different from current equity
+    use backtester_core::Money;
     let positions: Vec<_> = portfolio.positions.values().cloned().collect();
-    let exit_ctx = ExitContext {
-        date: make_date(5),
-        capital: portfolio.equity,
-        equity: portfolio.equity,
-        peak_equity: portfolio.peak_equity,
-        market: Market::BR,
-    };
+    let mut exit_ctx = ExitContext::new(
+        make_date(5),
+        portfolio.equity.to_decimal(),
+        portfolio.equity.to_decimal(),
+        Market::BR,
+    );
+    // Set peak_equity to initial capital (1M) for drawdown calculation
+    exit_ctx.peak_equity = Money::from_int(1_000_000);
 
     let (exit_result, _, _) = exit_engine.evaluate(&positions, &exit_ctx);
 
@@ -122,7 +125,7 @@ fn integration_drawdown_recovery() {
 
     // Buy position
     portfolio.apply_buy("PETR4", 10000, dec!(50), dec!(0), Market::BR, make_date(1)).unwrap();
-    assert_eq!(portfolio.peak_equity, dec!(1_000_000));
+    assert_eq!(portfolio.peak_equity.to_decimal(), dec!(1_000_000));
 
     // Drop 10%
     let mut prices = HashMap::new();
@@ -138,7 +141,7 @@ fn integration_drawdown_recovery() {
 
     // Peak should update
     assert!(
-        portfolio.peak_equity > dec!(1_000_000),
+        portfolio.peak_equity.to_decimal() > dec!(1_000_000),
         "Peak should update on new high: {}", portfolio.peak_equity
     );
 
@@ -159,19 +162,19 @@ fn integration_equity_invariant() {
 
     // Series of operations
     portfolio.apply_buy("PETR4", 1000, dec!(50), dec!(50), Market::BR, make_date(1)).unwrap();
-    assert_eq!(portfolio.equity, portfolio.calculate_equity());
+    assert_eq!(portfolio.equity, portfolio.calculate_equity_fast());
 
     portfolio.apply_buy("VALE3", 500, dec!(60), dec!(30), Market::BR, make_date(2)).unwrap();
-    assert_eq!(portfolio.equity, portfolio.calculate_equity());
+    assert_eq!(portfolio.equity, portfolio.calculate_equity_fast());
 
     let mut prices = HashMap::new();
     prices.insert("PETR4".to_string(), dec!(55));
     prices.insert("VALE3".to_string(), dec!(58));
     portfolio.update_prices(&prices);
-    assert_eq!(portfolio.equity, portfolio.calculate_equity());
+    assert_eq!(portfolio.equity, portfolio.calculate_equity_fast());
 
     portfolio.apply_sell("PETR4", 500, dec!(55), dec!(28)).unwrap();
-    assert_eq!(portfolio.equity, portfolio.calculate_equity());
+    assert_eq!(portfolio.equity, portfolio.calculate_equity_fast());
 
     // Validate invariants
     portfolio.validate().expect("Invariants should hold");
@@ -190,7 +193,7 @@ fn integration_cash_never_negative() {
     
     assert!(result.is_err(), "Should reject buy exceeding cash");
     assert!(
-        portfolio.cash >= Decimal::ZERO,
+        !portfolio.cash.is_negative(),
         "Cash should remain non-negative: {}", portfolio.cash
     );
 }
@@ -240,14 +243,16 @@ fn integration_drawdown_reduce_risk() {
     prices.insert("WEGE3".to_string(), dec!(34));    // -15%
     portfolio.update_prices(&prices);
 
+    use backtester_core::Money;
     let positions: Vec<_> = portfolio.positions.values().cloned().collect();
-    let exit_ctx = ExitContext {
-        date: make_date(10),
-        capital: portfolio.equity,
-        equity: portfolio.equity,
-        peak_equity: portfolio.peak_equity,
-        market: Market::BR,
-    };
+    let mut exit_ctx = ExitContext::new(
+        make_date(10),
+        portfolio.equity.to_decimal(),
+        portfolio.equity.to_decimal(),
+        Market::BR,
+    );
+    // Set peak_equity to initial capital (1M) for drawdown calculation
+    exit_ctx.peak_equity = Money::from_int(1_000_000);
 
     let (exit_result, _, _) = exit_engine.evaluate(&positions, &exit_ctx);
 
@@ -285,18 +290,20 @@ fn integration_drawdown_determinism() {
         prices.insert("VALE3".to_string(), dec!(48));
         portfolio.update_prices(&prices);
 
+        use backtester_core::Money;
         let positions: Vec<_> = portfolio.positions.values().cloned().collect();
-        let exit_ctx = ExitContext {
-            date: make_date(5),
-            capital: portfolio.equity,
-            equity: portfolio.equity,
-            peak_equity: portfolio.peak_equity,
-            market: Market::BR,
-        };
+        let mut exit_ctx = ExitContext::new(
+            make_date(5),
+            portfolio.equity.to_decimal(),
+            portfolio.equity.to_decimal(),
+            Market::BR,
+        );
+        // Set peak_equity to initial capital for drawdown calculation
+        exit_ctx.peak_equity = Money::from_int(1_000_000);
 
         let (exit_result, _, _) = exit_engine.evaluate(&positions, &exit_ctx);
 
-        (portfolio.equity, portfolio.drawdown(), exit_result.exits.len())
+        (portfolio.equity.to_decimal(), portfolio.drawdown(), exit_result.exits.len())
     }
 
     // Run 5 times
@@ -311,4 +318,3 @@ fn integration_drawdown_determinism() {
         );
     }
 }
-

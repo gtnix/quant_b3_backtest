@@ -1,5 +1,6 @@
 //! Stress tests for Exit Module - extreme scenarios.
 
+use backtester_core::Money;
 use backtester_intelligence::exit::{
     ExitContext, ExitEngine, ExitEngineConfig, ExitPolicyConfig, ExitReason,
     Position, RiskConfig, DrawdownAction,
@@ -106,7 +107,7 @@ fn stress_flash_crash() {
     assert_eq!(orders.len(), 100);
 
     // All PnL should be negative
-    assert!(result.diagnostics.total_exit_pnl < Decimal::ZERO);
+    assert!(result.diagnostics.total_exit_pnl < Money::ZERO);
 }
 
 // =============================================================================
@@ -292,7 +293,7 @@ fn stress_drawdown_cascade() {
         dec!(850_000), // Current equity
         Market::BR,
     );
-    ctx.peak_equity = dec!(1_000_000); // Peak was 1M, now 850k = 15% drawdown
+    ctx.peak_equity = Money::from_int(1_000_000); // Peak was 1M, now 850k = 15% drawdown
 
     let (result, _, _) = engine.evaluate(&positions, &ctx);
 

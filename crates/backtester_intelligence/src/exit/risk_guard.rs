@@ -311,8 +311,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     fn make_context(equity: Decimal, peak: Decimal) -> ExitContext {
-        ExitContext::new(NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(), 
-            dec!(1_000_000), equity, Market::BR)
+        let mut ctx = ExitContext::new(NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(), 
+            dec!(1_000_000), equity, Market::BR);
+        ctx.peak_equity = Money::from(peak);
+        ctx
     }
 
     #[test]
@@ -353,7 +355,7 @@ mod tests {
         ];
 
         // Both under 20%
-        let violations = guard.check_exposure(&positions, dec!(1_000_000));
+        let violations = guard.check_exposure(&positions, Money::from_int(1_000_000));
         assert!(violations.is_empty());
     }
 

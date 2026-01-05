@@ -20,9 +20,9 @@ fn make_position(symbol: &str, shares: i64, cost: Decimal, current: Decimal) -> 
         symbol,
         Market::BR,
         shares,
-        Money::from(cost),
+        cost,
         NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-        Price::from(current),
+        current,
     )
 }
 

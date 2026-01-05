@@ -372,7 +372,7 @@ fn make_regime_summary() -> RegimeSummary {
 
 #[test]
 fn golden_schema_version() {
-    assert_eq!(PERFORMANCE_REPORT_SCHEMA_VERSION, "fx_report_v1.3");
+    assert_eq!(PERFORMANCE_REPORT_SCHEMA_VERSION, "fx_report_v1.4");
 }
 
 #[test]
@@ -398,7 +398,7 @@ fn golden_research_grade_report() {
     );
     
     // Verify schema version
-    assert_eq!(report.schema_version, "fx_report_v1.3");
+    assert_eq!(report.schema_version, "fx_report_v1.4");
     
     // Verify sector exposure
     assert!(report.sector_exposure.is_some());

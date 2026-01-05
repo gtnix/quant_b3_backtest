@@ -1,0 +1,46 @@
+{
+  "marco": "artifacts",
+  "marco_index": 5,
+  "marco_name": "Artefatos Finais",
+  "checks": [
+    {
+      "name": "provenance_complete",
+      "description": "Verificar proveniência completa",
+      "verdict": "FAIL",
+      "message": "Manifest não encontrado",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "all_files_present",
+      "description": "Verificar presença de todos os arquivos obrigatórios",
+      "verdict": "FAIL",
+      "message": "ranking.json ausente",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "ranking_consistent",
+      "description": "Verificar consistência Stage A ranking vs Stage B diretórios",
+      "verdict": "WARN",
+      "message": "0 Stage A candidates, 0 Stage B validated - nenhuma estratégia passou validação",
+      "evidence": {
+        "stage_a_count": 0
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "report_valid",
+      "description": "Verificar report.json válido",
+      "verdict": "WARN",
+      "message": "Report não encontrado",
+      "evidence": {},
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "FAIL",
+  "summary": "4 checks: 0 passed, 2 warnings, 2 failed",
+  "started_at": "2026-01-05T19:03:50.425990695Z",
+  "completed_at": "2026-01-05T19:03:50.426002158Z",
+  "duration_ms": 0
+}

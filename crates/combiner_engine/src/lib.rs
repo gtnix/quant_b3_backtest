@@ -23,11 +23,38 @@
 pub mod config;
 pub mod population;
 pub mod operators;
-pub mod pareto;
-pub mod pareto_simd;
-pub mod hall_of_fame;
-pub mod hall_of_fame_validated;
+pub mod pareto_unified;
+pub mod hall_of_fame_unified;
 pub mod engine;
+
+// Legacy module aliases (deprecated, use hall_of_fame_unified)
+#[doc(hidden)]
+pub mod hall_of_fame {
+    pub use super::hall_of_fame_unified::{
+        BasicHallOfFame as HallOfFame,
+        UnifiedHofEntry as HofEntry,
+    };
+}
+#[doc(hidden)]
+pub mod hall_of_fame_validated {
+    pub use super::hall_of_fame_unified::{
+        InstitutionalHallOfFame as ValidatedHallOfFame,
+        UnifiedHofEntry as ValidatedHofEntry,
+        InstitutionalCriteria,
+        ValidationSummary as ValidationResultSummary,
+        HofSummary as ValidatedHofSummary,
+    };
+}
+
+// Legacy module aliases (deprecated, use pareto_unified)
+#[doc(hidden)]
+pub mod pareto {
+    pub use super::pareto_unified::ParetoComputer as ParetoFrontier;
+}
+#[doc(hidden)]
+pub mod pareto_simd {
+    pub use super::pareto_unified::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
+}
 pub mod persistence;
 pub mod validation;
 pub mod validation_reports;
@@ -44,8 +71,14 @@ pub mod stagnation;
 pub use config::EvolutionConfig;
 pub use population::Population;
 pub use operators::{Selection, Crossover, Mutation, AdaptiveMutation};
-pub use pareto::ParetoFrontier;
-pub use hall_of_fame::HallOfFame;
+pub use pareto_unified::{ParetoComputer, ParetoComputer as ParetoFrontier};
+pub use hall_of_fame_unified::{
+    UnifiedHallOfFame, UnifiedHofEntry, BasicStrategy, InstitutionalStrategy,
+    BasicHallOfFame, InstitutionalHallOfFame, HofStrategy, ValidatedHofStrategy,
+    HofSummary, ValidationSummary,
+    // Legacy aliases
+    HallOfFame, HofEntry,
+};
 pub use engine::{EvolutionEngine, GenerationStats, UltraEvolutionResult};
 pub use persistence::{ExperimentPersistence, ExperimentManifest, ExperimentStatus, ArtifactFormat, generate_experiment_id};
 pub use validation::{
@@ -56,8 +89,10 @@ pub use evaluation::{
     StageABatchEvaluator, StageBParallelValidator, StageBConfig, StageBStats, ValidationResult,
     SplitDataRef, ValidationSplitPlan, ValidationResultArena,
 };
-pub use pareto_simd::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
-pub use hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry, InstitutionalCriteria};
+pub use pareto_unified::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
+pub use hall_of_fame_unified::{
+    ValidatedHallOfFame, ValidatedHofEntry, InstitutionalCriteria,
+};
 pub use performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot, IntegrityStatus};
 pub use report::{FinalReportGenerator, FinalReport, ReportReader, ReportFormat, ReportError};
 pub use institutional_thresholds::InstitutionalThresholds;

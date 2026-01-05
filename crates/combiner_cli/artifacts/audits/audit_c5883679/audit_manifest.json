@@ -1,0 +1,331 @@
+{
+  "audit_id": "audit_5e8d8d53",
+  "schema_version": "1.0.0",
+  "campaign_id": null,
+  "config_path": "/home/bahuan/Documents/GitHub/quant_b3_backtest/.tmp/.tmpp0fqkM/manifest.json",
+  "config_hash": "unknown",
+  "marcos": {
+    "marco_0_init.json": {
+      "marco": "initialization",
+      "marco_index": 0,
+      "marco_name": "Inicialização da Campanha",
+      "checks": [
+        {
+          "name": "seed_present",
+          "description": "Verificar se seed está presente no manifest",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "config_hash_present",
+          "description": "Verificar hash do config para reprodutibilidade",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "dates_valid",
+          "description": "Verificar timestamps em formato ISO 8601 UTC",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "output_structure",
+          "description": "Verificar estrutura de diretórios obrigatórios",
+          "verdict": "PASS",
+          "message": "Todos os diretórios obrigatórios presentes",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "experiment_id_present",
+          "description": "Verificar ID único do experimento",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "FAIL",
+      "summary": "5 checks: 1 passed, 0 warnings, 4 failed",
+      "started_at": "2026-01-05T19:03:50.425878895Z",
+      "completed_at": "2026-01-05T19:03:50.425892898Z",
+      "duration_ms": 0
+    },
+    "marco_3_validation.json": {
+      "marco": "validation",
+      "marco_index": 3,
+      "marco_name": "Validação Completa (Stage B)",
+      "checks": [
+        {
+          "name": "wfa_present",
+          "description": "Verificar presença de relatórios WFA",
+          "verdict": "WARN",
+          "message": "Nenhuma estratégia encontrada",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "oos_sharpe_threshold",
+          "description": "Verificar OOS Sharpe >= 0.2",
+          "verdict": "WARN",
+          "message": "Ranking não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "pbo_threshold",
+          "description": "Verificar PBO <= 0.50 (Lopez de Prado)",
+          "verdict": "WARN",
+          "message": "Nenhum arquivo pbo_dsr.json encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "dsr_threshold",
+          "description": "Verificar DSR >= 0.00",
+          "verdict": "WARN",
+          "message": "Nenhum valor DSR encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "stress_pass_rate",
+          "description": "Verificar pass rate stress >= 1/5",
+          "verdict": "WARN",
+          "message": "Nenhum arquivo stress_report.json encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "sharpe_sanity",
+          "description": "Verificar Sharpe sanity (< 10)",
+          "verdict": "WARN",
+          "message": "Ranking não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "trades_threshold",
+          "description": "Verificar trades >= 30",
+          "verdict": "PASS",
+          "message": "Trade count verificado durante Stage B validation",
+          "evidence": {
+            "note": "Detailed check at backtest level"
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "WARN",
+      "summary": "7 checks: 1 passed, 6 warnings, 0 failed",
+      "started_at": "2026-01-05T19:03:50.425918765Z",
+      "completed_at": "2026-01-05T19:03:50.425968726Z",
+      "duration_ms": 0
+    },
+    "marco_2_evolution.json": {
+      "marco": "evolution",
+      "marco_index": 2,
+      "marco_name": "Evolução Genética (Stage A)",
+      "checks": [
+        {
+          "name": "population_diversity",
+          "description": "Verificar diversidade da população (> 10%)",
+          "verdict": "FAIL",
+          "message": "Report não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "fitness_variance",
+          "description": "Verificar variância de fitness > 0",
+          "verdict": "FAIL",
+          "message": "Report não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "convergence_real",
+          "description": "Verificar convergência real (melhoria ao longo das gerações)",
+          "verdict": "FAIL",
+          "message": "Report não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "no_degenerate_population",
+          "description": "Verificar população não-degenerada",
+          "verdict": "WARN",
+          "message": "Ranking não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "penalties_applied",
+          "description": "Verificar aplicação de penalidades (low trades, turnover)",
+          "verdict": "PASS",
+          "message": "Verificação de penalidades não implementada - assumindo OK",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "FAIL",
+      "summary": "5 checks: 1 passed, 1 warnings, 3 failed",
+      "started_at": "2026-01-05T19:03:50.425912712Z",
+      "completed_at": "2026-01-05T19:03:50.425914730Z",
+      "duration_ms": 0
+    },
+    "marco_1_data.json": {
+      "marco": "data_integrity",
+      "marco_index": 1,
+      "marco_name": "Data Integrity Gate",
+      "checks": [
+        {
+          "name": "delay_bars_check",
+          "description": "Verificar delay_bars >= 1 (anti-lookahead)",
+          "verdict": "WARN",
+          "message": "Config não disponível - não é possível verificar delay_bars",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "universe_config",
+          "description": "Verificar configuração do universo de ativos",
+          "verdict": "PASS",
+          "message": "Verificação de universo point-in-time não implementada",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "no_generation_gaps",
+          "description": "Verificar sequência contínua de gerações",
+          "verdict": "WARN",
+          "message": "Report não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "timestamps_consistent",
+          "description": "Verificar consistência de timestamps",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "FAIL",
+      "summary": "4 checks: 1 passed, 2 warnings, 1 failed",
+      "started_at": "2026-01-05T19:03:50.425905232Z",
+      "completed_at": "2026-01-05T19:03:50.425907211Z",
+      "duration_ms": 0
+    },
+    "marco_4_gates.json": {
+      "marco": "promotion_gates",
+      "marco_index": 4,
+      "marco_name": "Promotion Gates",
+      "checks": [
+        {
+          "name": "bundle_complete",
+          "description": "Verificar bundle completo por estratégia",
+          "verdict": "WARN",
+          "message": "Nenhuma estratégia encontrada",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "validation_summary_present",
+          "description": "Verificar presença de validation_bundle.json",
+          "verdict": "WARN",
+          "message": "Nenhuma estratégia encontrada",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "no_failed_promoted",
+          "description": "Verificar nenhum candidato FAIL promovido",
+          "verdict": "PASS",
+          "message": "Verificação pendente - assumindo OK",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "thresholds_enforced",
+          "description": "Verificar aplicação de thresholds",
+          "verdict": "WARN",
+          "message": "Ranking não disponível",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "WARN",
+      "summary": "4 checks: 1 passed, 3 warnings, 0 failed",
+      "started_at": "2026-01-05T19:03:50.425974970Z",
+      "completed_at": "2026-01-05T19:03:50.425989844Z",
+      "duration_ms": 0
+    },
+    "marco_5_artifacts.json": {
+      "marco": "artifacts",
+      "marco_index": 5,
+      "marco_name": "Artefatos Finais",
+      "checks": [
+        {
+          "name": "provenance_complete",
+          "description": "Verificar proveniência completa",
+          "verdict": "FAIL",
+          "message": "Manifest não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "all_files_present",
+          "description": "Verificar presença de todos os arquivos obrigatórios",
+          "verdict": "FAIL",
+          "message": "ranking.json ausente",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "ranking_consistent",
+          "description": "Verificar consistência Stage A ranking vs Stage B diretórios",
+          "verdict": "WARN",
+          "message": "0 Stage A candidates, 0 Stage B validated - nenhuma estratégia passou validação",
+          "evidence": {
+            "stage_a_count": 0
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "report_valid",
+          "description": "Verificar report.json válido",
+          "verdict": "WARN",
+          "message": "Report não encontrado",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "FAIL",
+      "summary": "4 checks: 0 passed, 2 warnings, 2 failed",
+      "started_at": "2026-01-05T19:03:50.425990695Z",
+      "completed_at": "2026-01-05T19:03:50.426002158Z",
+      "duration_ms": 0
+    }
+  },
+  "marco_order": [
+    "initialization",
+    "data_integrity",
+    "evolution",
+    "validation",
+    "promotion_gates",
+    "artifacts"
+  ],
+  "final_verdict": "FAIL",
+  "summary": "6 marcos executados, 29 checks totais (5 passed, 10 failed)",
+  "started_at": "2026-01-05T19:03:50.425873705Z",
+  "completed_at": "2026-01-05T19:03:50.426007685Z",
+  "duration_ms": 0,
+  "output_dir": "artifacts/audits/audit_c5883679"
+}

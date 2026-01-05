@@ -4,9 +4,10 @@
 //! tracking timing, cache performance, and throughput metrics.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
-use parking_lot::RwLock;
+use arc_swap::ArcSwap;
 
 /// Atomic timing metric (stores nanoseconds)
 #[derive(Debug, Default)]
@@ -168,9 +169,9 @@ pub struct PerformanceMetrics {
     /// Total evolution time
     total_evolution_time: AtomicDuration,
 
-    // === Snapshots (requires lock) ===
-    /// Per-generation snapshots
-    snapshots: RwLock<Vec<GenerationSnapshot>>,
+    // === Snapshots (lock-free RCU via ArcSwap) ===
+    /// Per-generation snapshots (lock-free reads via ArcSwap)
+    snapshots: ArcSwap<Vec<GenerationSnapshot>>,
     /// Current generation being recorded
     current_generation: AtomicUsize,
 }
@@ -199,7 +200,7 @@ impl PerformanceMetrics {
             total_pareto_time: AtomicDuration::new(),
             total_hof_time: AtomicDuration::new(),
             total_evolution_time: AtomicDuration::new(),
-            snapshots: RwLock::new(Vec::with_capacity(1000)),
+            snapshots: ArcSwap::from_pointee(Vec::with_capacity(1000)),
             current_generation: AtomicUsize::new(0),
             total_backtest_failures: AtomicUsize::new(0),
             backtest_fail_path_not_found: AtomicUsize::new(0),
@@ -302,7 +303,7 @@ impl PerformanceMetrics {
         self.total_pareto_time.reset();
         self.total_hof_time.reset();
         self.total_evolution_time.reset();
-        self.snapshots.write().clear();
+        self.snapshots.store(Arc::new(Vec::with_capacity(1000)));
         self.current_generation.store(0, Ordering::Relaxed);
     }
 
@@ -375,11 +376,16 @@ impl PerformanceMetrics {
 
     // === Snapshot recording ===
 
-    /// Record a generation snapshot
+    /// Record a generation snapshot (RCU pattern: clone, modify, swap)
     pub fn record_generation(&self, snapshot: GenerationSnapshot) {
         self.total_generations.fetch_add(1, Ordering::Relaxed);
         self.current_generation.store(snapshot.generation as usize, Ordering::Relaxed);
-        self.snapshots.write().push(snapshot);
+        // RCU: load current, clone, append, swap atomically
+        self.snapshots.rcu(|current| {
+            let mut new = (**current).clone();
+            new.push(snapshot.clone());
+            new
+        });
     }
 
     /// Get current generation number
@@ -387,14 +393,14 @@ impl PerformanceMetrics {
         self.current_generation.load(Ordering::Relaxed) as u32
     }
 
-    /// Get all snapshots
+    /// Get all snapshots (lock-free read via ArcSwap)
     pub fn snapshots(&self) -> Vec<GenerationSnapshot> {
-        self.snapshots.read().clone()
+        self.snapshots.load().as_ref().clone()
     }
 
-    /// Get latest snapshot
+    /// Get latest snapshot (lock-free read via ArcSwap)
     pub fn latest_snapshot(&self) -> Option<GenerationSnapshot> {
-        self.snapshots.read().last().cloned()
+        self.snapshots.load().last().cloned()
     }
 
     // === Aggregate statistics ===

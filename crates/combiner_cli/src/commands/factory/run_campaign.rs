@@ -525,20 +525,21 @@ async fn execute_single_run(
         );
 
         // Use available fields from ValidationResultSummary
+        let v = entry.validation_ref();
         candidates.push(CandidateResult {
             genome_hash,
-            oos_sharpe_net: entry.validation.oos_sharpe_median as f32,
-            oos_sharpe_gross: entry.validation.oos_sharpe_mean as f32,
-            pbo: entry.validation.pbo as f32,
-            dsr: Some(entry.validation.dsr as f32),
-            stress_passed: entry.validation.splits_passed as i32,
-            stress_total: entry.validation.splits_evaluated as i32,
+            oos_sharpe_net: v.oos_sharpe_median as f32,
+            oos_sharpe_gross: v.oos_sharpe_mean as f32,
+            pbo: v.pbo as f32,
+            dsr: Some(v.dsr as f32),
+            stress_passed: v.splits_passed as i32,
+            stress_total: v.splits_evaluated as i32,
             // Use actual validation.passed which checks all criteria including DSR
-            gates_passed: entry.validation.passed,
+            gates_passed: v.passed,
             turnover_annual: 0.0, // Not available in summary
             capacity_usd: None,   // Not available in summary
-            oos_cagr_net: Some(entry.validation.oos_cagr_median as f32),
-            max_drawdown_net: Some(entry.validation.oos_max_dd_worst as f32),
+            oos_cagr_net: Some(v.oos_cagr_median as f32),
+            max_drawdown_net: Some(v.oos_max_dd_worst as f32),
         });
 
         // Save strategy config and validation reports in hall_of_fame/strategy_N/
@@ -559,14 +560,14 @@ async fn execute_single_run(
         // Save WFA report
         let wfa_report = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
-            "oos_sharpe_median": entry.validation.oos_sharpe_median,
-            "oos_sharpe_mean": entry.validation.oos_sharpe_mean,
-            "oos_sharpe_std": entry.validation.oos_sharpe_std,
-            "oos_cagr_median": entry.validation.oos_cagr_median,
-            "oos_max_dd_worst": entry.validation.oos_max_dd_worst,
-            "degradation_pct": entry.validation.degradation_pct,
-            "splits_evaluated": entry.validation.splits_evaluated,
-            "splits_passed": entry.validation.splits_passed
+            "oos_sharpe_median": v.oos_sharpe_median,
+            "oos_sharpe_mean": v.oos_sharpe_mean,
+            "oos_sharpe_std": v.oos_sharpe_std,
+            "oos_cagr_median": v.oos_cagr_median,
+            "oos_max_dd_worst": v.oos_max_dd_worst,
+            "degradation_pct": v.degradation_pct,
+            "splits_evaluated": v.splits_evaluated,
+            "splits_passed": v.splits_passed
         });
         std::fs::write(
             format!("{}/wfa_report.json", strategy_dir),
@@ -576,9 +577,9 @@ async fn execute_single_run(
         // Save PBO/DSR report
         let pbo_dsr = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
-            "pbo": entry.validation.pbo,
-            "dsr": entry.validation.dsr,
-            "passed": entry.validation.pbo <= 0.25 && entry.validation.dsr >= 0.5
+            "pbo": v.pbo,
+            "dsr": v.dsr,
+            "passed": v.pbo <= 0.25 && v.dsr >= 0.5
         });
         std::fs::write(
             format!("{}/pbo_dsr.json", strategy_dir),
@@ -588,9 +589,9 @@ async fn execute_single_run(
         // Save stress report
         let stress_report = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
-            "splits_evaluated": entry.validation.splits_evaluated,
-            "splits_passed": entry.validation.splits_passed,
-            "pass_rate": entry.validation.splits_passed as f64 / entry.validation.splits_evaluated.max(1) as f64
+            "splits_evaluated": v.splits_evaluated,
+            "splits_passed": v.splits_passed,
+            "pass_rate": v.splits_passed as f64 / v.splits_evaluated.max(1) as f64
         });
         std::fs::write(
             format!("{}/stress_report.json", strategy_dir),
@@ -600,15 +601,15 @@ async fn execute_single_run(
         // Save metrics.json (Marco 4: bundle_complete requirement)
         let metrics = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
-            "sharpe_ratio": entry.validation.oos_sharpe_median,
-            "cagr": entry.validation.oos_cagr_median,
-            "max_drawdown": entry.validation.oos_max_dd_worst,
-            "volatility": entry.validation.oos_sharpe_std.abs() * 0.15, // Approximate
-            "pbo": entry.validation.pbo,
-            "dsr": entry.validation.dsr,
-            "degradation_pct": entry.validation.degradation_pct,
-            "splits_evaluated": entry.validation.splits_evaluated,
-            "splits_passed": entry.validation.splits_passed
+            "sharpe_ratio": v.oos_sharpe_median,
+            "cagr": v.oos_cagr_median,
+            "max_drawdown": v.oos_max_dd_worst,
+            "volatility": v.oos_sharpe_std.abs() * 0.15, // Approximate
+            "pbo": v.pbo,
+            "dsr": v.dsr,
+            "degradation_pct": v.degradation_pct,
+            "splits_evaluated": v.splits_evaluated,
+            "splits_passed": v.splits_passed
         });
         std::fs::write(
             format!("{}/metrics.json", strategy_dir),
@@ -619,25 +620,25 @@ async fn execute_single_run(
         let validation_bundle = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "rank": rank,
-            "validated_generation": entry.validated_generation,
-            "validation_passed": entry.validation.passed,
+            "validated_generation": entry.validated_generation(),
+            "validation_passed": v.passed,
             "promoted_at": promoted_at.clone(),
             "wfa_result": {
-                "oos_sharpe_median": entry.validation.oos_sharpe_median,
-                "oos_sharpe_mean": entry.validation.oos_sharpe_mean,
-                "oos_sharpe_std": entry.validation.oos_sharpe_std,
-                "oos_cagr_median": entry.validation.oos_cagr_median,
-                "oos_max_dd_worst": entry.validation.oos_max_dd_worst,
-                "degradation_pct": entry.validation.degradation_pct
+                "oos_sharpe_median": v.oos_sharpe_median,
+                "oos_sharpe_mean": v.oos_sharpe_mean,
+                "oos_sharpe_std": v.oos_sharpe_std,
+                "oos_cagr_median": v.oos_cagr_median,
+                "oos_max_dd_worst": v.oos_max_dd_worst,
+                "degradation_pct": v.degradation_pct
             },
             "pbo_dsr": {
-                "pbo": entry.validation.pbo,
-                "dsr": entry.validation.dsr
+                "pbo": v.pbo,
+                "dsr": v.dsr
             },
             "stress_result": {
-                "splits_evaluated": entry.validation.splits_evaluated,
-                "splits_passed": entry.validation.splits_passed,
-                "pass_rate": entry.validation.splits_passed as f64 / entry.validation.splits_evaluated.max(1) as f64
+                "splits_evaluated": v.splits_evaluated,
+                "splits_passed": v.splits_passed,
+                "pass_rate": v.splits_passed as f64 / v.splits_evaluated.max(1) as f64
             },
             "score": entry.score
         });

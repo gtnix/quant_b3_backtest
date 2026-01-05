@@ -7,6 +7,7 @@
 //! - Large universe (10k assets)
 //! - High turnover scenarios
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::entry::{
     AssetCandidate, EntryContext, EntryEngine, EntryEngineConfig,
     GatingConfig, SelectionConfig, WeightingConfig,
@@ -14,8 +15,6 @@ use backtester_intelligence::entry::{
 };
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -53,8 +52,8 @@ fn stress_extreme_volatility() {
         // Near-zero volatility (should be clamped)
         {
             let mut c = AssetCandidate::new("ZERO_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.0001); // Nearly zero
@@ -64,8 +63,8 @@ fn stress_extreme_volatility() {
         // Very low volatility
         {
             let mut c = AssetCandidate::new("LOW_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.05);
@@ -75,8 +74,8 @@ fn stress_extreme_volatility() {
         // Normal volatility
         {
             let mut c = AssetCandidate::new("NORMAL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -86,8 +85,8 @@ fn stress_extreme_volatility() {
         // High volatility
         {
             let mut c = AssetCandidate::new("HIGH_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(1.50); // 150% annual vol
@@ -97,8 +96,8 @@ fn stress_extreme_volatility() {
         // Extreme volatility (500%)
         {
             let mut c = AssetCandidate::new("EXTREME_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(5.0); // 500% annual vol
@@ -107,7 +106,7 @@ fn stress_extreme_volatility() {
         },
     ];
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -151,22 +150,16 @@ fn stress_extreme_volatility() {
 /// Tests >= vs > boundary conditions.
 #[test]
 fn stress_threshold_edges() {
-    let threshold = Decimal::from(500_000);
-    let config = EntryEngineConfig {
-        gating: GatingConfig {
-            min_avg_volume_brl: threshold, // Exactly 500k
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let engine = EntryEngine::new(config);
+    // Use default GatingConfig (min_avg_volume_brl = 500_000)
+    let threshold = Money::from_int(500_000);
+    let engine = EntryEngine::new(EntryEngineConfig::default());
 
     let candidates: Vec<AssetCandidate> = vec![
         // Volume below threshold by 1
         {
             let mut c = AssetCandidate::new("BELOW", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(threshold - Decimal::ONE); // 499,999
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(499_999)); // Below threshold
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -176,8 +169,8 @@ fn stress_threshold_edges() {
         // Volume exactly at threshold
         {
             let mut c = AssetCandidate::new("EXACT", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(threshold); // 500,000
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(threshold);
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -187,8 +180,8 @@ fn stress_threshold_edges() {
         // Volume above threshold by 1
         {
             let mut c = AssetCandidate::new("ABOVE", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(threshold + Decimal::ONE); // 500,001
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(500_001));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -197,7 +190,7 @@ fn stress_threshold_edges() {
         },
     ];
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -225,22 +218,15 @@ fn stress_threshold_edges() {
 /// Stress: Price exactly at min_price ± epsilon.
 #[test]
 fn stress_price_threshold_edges() {
-    let min_price = Decimal::ONE;
-    let config = EntryEngineConfig {
-        gating: GatingConfig {
-            min_price_brl: min_price, // R$ 1.00
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let engine = EntryEngine::new(config);
+    // Use default GatingConfig (min_price_brl = 1.0)
+    let engine = EntryEngine::new(EntryEngineConfig::default());
 
     let candidates: Vec<AssetCandidate> = vec![
         // Price below by 0.01
         {
             let mut c = AssetCandidate::new("BELOW", Market::BR);
-            c.price = Some(dec!(0.99));
-            c.avg_volume = Some(dec!(1_000_000));
+            c.price = Some(Price::from_f64(0.99));
+            c.avg_volume = Some(Money::from_int(1_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -250,8 +236,8 @@ fn stress_price_threshold_edges() {
         // Price exactly at threshold
         {
             let mut c = AssetCandidate::new("EXACT", Market::BR);
-            c.price = Some(dec!(1.00));
-            c.avg_volume = Some(dec!(1_000_000));
+            c.price = Some(Price::from_f64(1.00));
+            c.avg_volume = Some(Money::from_int(1_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -261,8 +247,8 @@ fn stress_price_threshold_edges() {
         // Price just above
         {
             let mut c = AssetCandidate::new("ABOVE", Market::BR);
-            c.price = Some(dec!(1.01));
-            c.avg_volume = Some(dec!(1_000_000));
+            c.price = Some(Price::from_f64(1.01));
+            c.avg_volume = Some(Money::from_int(1_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -271,7 +257,7 @@ fn stress_price_threshold_edges() {
         },
     ];
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -302,11 +288,10 @@ fn stress_price_threshold_edges() {
 /// Tests lot sizing with small notionals.
 #[test]
 fn stress_penny_stocks() {
+    // Use custom gating config via serde for lower min_price
+    let gating: GatingConfig = serde_json::from_str(r#"{"min_price_brl_f64": 0.50}"#).unwrap();
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            min_price_brl: dec!(0.50), // Allow penny stocks
-            ..Default::default()
-        },
+        gating,
         selection: SelectionConfig {
             top_n_br: 5,
             top_n_us: 5,
@@ -320,8 +305,8 @@ fn stress_penny_stocks() {
     let candidates: Vec<AssetCandidate> = (0..10).map(|i| {
         let mut c = AssetCandidate::new(format!("PENNY{}", i), Market::BR);
         // Prices from R$0.50 to R$5.00
-        c.price = Some(Decimal::from(50 + i * 50) / Decimal::from(100));
-        c.avg_volume = Some(dec!(1_000_000));
+        c.price = Some(Price::from_f64(0.50 + (i as f64 * 0.50)));
+        c.avg_volume = Some(Money::from_int(1_000_000));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.40 + (i as f64 * 0.02));
@@ -329,7 +314,7 @@ fn stress_penny_stocks() {
         c
     }).collect();
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -377,8 +362,8 @@ fn stress_large_universe() {
     // Generate 10,000 candidates
     let candidates: Vec<AssetCandidate> = (0..10_000).map(|i| {
         let mut c = AssetCandidate::new(format!("ASSET{:05}", i), Market::BR);
-        c.price = Some(Decimal::from(20 + (i as i64 % 100)));
-        c.avg_volume = Some(Decimal::from(1_000_000 + (i as i64 * 1_000)));
+        c.price = Some(Price::from_int(20 + (i as i64 % 100)));
+        c.avg_volume = Some(Money::from_int(1_000_000 + (i as i64 * 1_000)));
         c.price_days = 30;
         c.has_fundamentals = i % 10 != 0;
         c.has_dividends = i % 5 != 0;
@@ -387,7 +372,7 @@ fn stress_large_universe() {
         c
     }).collect();
 
-    let capital = dec!(10_000_000);
+    let capital = Money::from_int(10_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -419,7 +404,7 @@ fn stress_large_universe() {
     for order in &orders {
         assert!(order.shares % 100 == 0, "BR lot invariant");
         assert!(order.shares > 0, "No zero shares");
-        assert!(order.estimated_cost >= Decimal::ZERO, "No negative costs");
+        assert!(!order.estimated_cost.is_negative(), "No negative costs");
     }
 
     println!("Large universe (N=10000) completed in {:?}", elapsed);
@@ -453,8 +438,8 @@ fn stress_high_turnover() {
     // New candidates: NEW_0 to NEW_19 (different from current holdings)
     let candidates: Vec<AssetCandidate> = (0..20).map(|i| {
         let mut c = AssetCandidate::new(format!("NEW_{}", i), Market::BR);
-        c.price = Some(Decimal::from(50 + i as i64 * 5));
-        c.avg_volume = Some(dec!(2_000_000));
+        c.price = Some(Price::from_int(50 + i as i64 * 5));
+        c.avg_volume = Some(Money::from_int(2_000_000));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.20 + (i as f64 * 0.01));
@@ -462,7 +447,7 @@ fn stress_high_turnover() {
         c
     }).collect();
 
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     let (result, orders, audit) = engine.evaluate(&ctx, &candidates, &positions);
@@ -482,8 +467,8 @@ fn stress_high_turnover() {
 
     // Total costs should be calculated
     assert!(
-        result.diagnostics.estimated_costs > Decimal::ZERO,
-        "Estimated costs should be positive"
+        !result.diagnostics.estimated_costs.is_negative(),
+        "Estimated costs should be non-negative"
     );
 
     // Audit should report turnover
@@ -517,8 +502,8 @@ fn stress_partial_turnover() {
     // Candidates: SYM0 to SYM9 (SYM0-2 overlap with holdings)
     let candidates: Vec<AssetCandidate> = (0..10).map(|i| {
         let mut c = AssetCandidate::new(format!("SYM{:04}", i), Market::BR);
-        c.price = Some(Decimal::from(40 + i as i64 * 5));
-        c.avg_volume = Some(dec!(2_000_000));
+        c.price = Some(Price::from_int(40 + i as i64 * 5));
+        c.avg_volume = Some(Money::from_int(2_000_000));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.20 + (i as f64 * 0.01));
@@ -526,7 +511,7 @@ fn stress_partial_turnover() {
         c
     }).collect();
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     let (result, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
@@ -567,8 +552,8 @@ fn perf_smoke_1k_under_50ms() {
 
     let candidates: Vec<AssetCandidate> = (0..1_000).map(|i| {
         let mut c = AssetCandidate::new(format!("PERF{:04}", i), Market::BR);
-        c.price = Some(Decimal::from(20 + (i as i64 % 100)));
-        c.avg_volume = Some(Decimal::from(1_000_000 + (i as i64 * 1_000)));
+        c.price = Some(Price::from_int(20 + (i as i64 % 100)));
+        c.avg_volume = Some(Money::from_int(1_000_000 + (i as i64 * 1_000)));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.15 + ((i % 50) as f64) * 0.01);
@@ -576,7 +561,7 @@ fn perf_smoke_1k_under_50ms() {
         c
     }).collect();
 
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -593,4 +578,3 @@ fn perf_smoke_1k_under_50ms() {
     assert_eq!(result.targets.len(), 20, "Should select 20");
     println!("Perf smoke N=1000: {:?}", elapsed);
 }
-

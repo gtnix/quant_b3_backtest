@@ -1332,9 +1332,9 @@ mod tests {
     fn test_check_fitness_variance_pass() {
         let report = Some(json!({
             "generation_stats": [
-                {"generation": 0, "best_sharpe": 0.5},
-                {"generation": 1, "best_sharpe": 0.7},
-                {"generation": 2, "best_sharpe": 0.9},
+                {"generation": 0, "mean_sharpe": 0.5},
+                {"generation": 1, "mean_sharpe": 0.7},
+                {"generation": 2, "mean_sharpe": 0.9},
             ]
         }));
         let check = check_fitness_variance(&report);

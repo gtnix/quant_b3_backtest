@@ -10,7 +10,6 @@ use backtester_intelligence::{
     TradeLedger, PerformanceEngine,
 };
 use backtester_intelligence::performance::engine::PerformanceConfig;
-use backtester_intelligence::exit::Position;
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -86,15 +85,15 @@ fn e2e_rebalance_snapshot_reconciliation() {
         ("AMZN", dec!(180)), ("NVDA", dec!(500)),
     ]);
 
-    let snap_br1 = perf_br.generate_snapshot(date1, portfolio_br.cash, &br_prices1);
-    let snap_us1 = perf_us.generate_snapshot(date1, portfolio_us.cash, &us_prices1);
+    let snap_br1 = perf_br.generate_snapshot(date1, portfolio_br.cash.to_decimal(), &br_prices1);
+    let snap_us1 = perf_us.generate_snapshot(date1, portfolio_us.cash.to_decimal(), &us_prices1);
 
     // Assert A1.1: equity = cash + mark-to-market
     let br_mtm: Decimal = br_buys.iter().map(|(_, s, p)| *p * Decimal::from(*s)).sum();
-    assert_eq!(snap_br1.equity, portfolio_br.cash + br_mtm, "BR equity mismatch");
+    assert_eq!(snap_br1.equity, portfolio_br.cash.to_decimal() + br_mtm, "BR equity mismatch");
     
     let us_mtm: Decimal = us_buys.iter().map(|(_, s, p)| *p * Decimal::from(*s)).sum();
-    assert_eq!(snap_us1.equity, portfolio_us.cash + us_mtm, "US equity mismatch");
+    assert_eq!(snap_us1.equity, portfolio_us.cash.to_decimal() + us_mtm, "US equity mismatch");
 
     // Rebalance 2: Prices move, partial sells
     let date2 = make_date(5);
@@ -128,8 +127,8 @@ fn e2e_rebalance_snapshot_reconciliation() {
     ledger_us.record_sell(date2, "AAPL", 5, dec!(160), sell_cost_us, Market::US);
     perf_us.record_sell(date2, "AAPL", 5, dec!(160), sell_cost_us, Market::US);
 
-    let snap_br2 = perf_br.generate_snapshot(date2, portfolio_br.cash, &br_prices2);
-    let snap_us2 = perf_us.generate_snapshot(date2, portfolio_us.cash, &us_prices2);
+    let snap_br2 = perf_br.generate_snapshot(date2, portfolio_br.cash.to_decimal(), &br_prices2);
+    let snap_us2 = perf_us.generate_snapshot(date2, portfolio_us.cash.to_decimal(), &us_prices2);
 
     // Assert A1.2: realized + unrealized = total
     let br_pnl = ledger_br.get_pnl_breakdown(&br_prices2);
@@ -165,7 +164,7 @@ fn e2e_rebalance_snapshot_reconciliation() {
     ledger_br.record_buy(date3, "ITUB4", 100, dec!(24), buy_cost, Market::BR);
     perf_br.record_buy(date3, "ITUB4", 100, dec!(24), buy_cost, Market::BR);
 
-    let snap_br3 = perf_br.generate_snapshot(date3, portfolio_br.cash, &br_prices3);
+    let snap_br3 = perf_br.generate_snapshot(date3, portfolio_br.cash.to_decimal(), &br_prices3);
 
     // Final reconciliation
     assert!(snap_br3.equity > Decimal::ZERO);
@@ -189,9 +188,10 @@ fn e2e_double_counting_prevention_netting() {
     // Net = SELL 200
     
     // Method 1: Gross orders (wrong - would double count)
-    let gross_sell = Order::new("PETR4".to_string(), OrderSide::Sell, 400, dec!(50), dec!(20)); // 400 @ 50 = 20000, 10bps = 20
-    let gross_buy = Order::new("PETR4".to_string(), OrderSide::Buy, 200, dec!(50), dec!(10)); // 200 @ 50 = 10000, 10bps = 10
-    let gross_total_cost = gross_sell.estimated_cost + gross_buy.estimated_cost; // 30
+    use backtester_core::{Price, Money};
+    let gross_sell = Order::new("PETR4".to_string(), OrderSide::Sell, 400, Price::from_int(50), Money::from_int(20)); // 400 @ 50 = 20000, 10bps = 20
+    let gross_buy = Order::new("PETR4".to_string(), OrderSide::Buy, 200, Price::from_int(50), Money::from_int(10)); // 200 @ 50 = 10000, 10bps = 10
+    let gross_total_cost = gross_sell.estimated_cost.to_decimal() + gross_buy.estimated_cost.to_decimal(); // 30
     
     // Method 2: Net order (correct)
     let net_shares = 400 - 200; // SELL 200
@@ -278,7 +278,7 @@ fn e2e_ledger_portfolio_cost_consistency() {
     let expected_cash_used: Decimal = trades.iter()
         .map(|(_, s, p, c)| *p * Decimal::from(*s) + *c)
         .sum();
-    let actual_cash_used = dec!(100_000) - portfolio.cash;
+    let actual_cash_used = dec!(100_000) - portfolio.cash.to_decimal();
     assert_eq!(actual_cash_used, expected_cash_used, "Cash consumption mismatch");
 }
 
@@ -574,13 +574,6 @@ fn e2e_portfolio_state_ledger_position_match() {
     let expected_wap = dec!(51.666666666666666666666666667);
     let tolerance = dec!(0.01);
     
-    assert!((portfolio_pos.cost_basis - expected_wap).abs() < tolerance);
+    assert!((portfolio_pos.cost_basis.to_decimal() - expected_wap).abs() < tolerance);
     assert!((ledger_pos.wap_cost_basis - expected_wap).abs() < tolerance);
 }
-
-
-
-
-
-
-

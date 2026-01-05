@@ -184,7 +184,7 @@ impl ExitAuditLog {
 mod tests {
     use super::*;
     use crate::entry::OrderSide;
-    use backtester_core::Money;
+    use backtester_core::{Money, Price};
     use rust_decimal_macros::dec;
 
     fn make_sample_log() -> ExitAuditLog {
@@ -208,8 +208,8 @@ mod tests {
                 },
             ],
             orders: vec![
-                Order::new("PETR4".to_string(), OrderSide::Sell, 500, dec!(45), dec!(225)),
-                Order::new("VALE3".to_string(), OrderSide::Sell, 300, dec!(75), dec!(225)),
+                Order::new("PETR4".to_string(), OrderSide::Sell, 500, Price::from(dec!(45)), Money::from(dec!(225))),
+                Order::new("VALE3".to_string(), OrderSide::Sell, 300, Price::from(dec!(75)), Money::from(dec!(225))),
             ],
             diagnostics: ExitDiagnostics {
                 positions_evaluated: 10,

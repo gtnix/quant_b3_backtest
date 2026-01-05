@@ -1,0 +1,52 @@
+{
+  "marco": "evolution",
+  "marco_index": 2,
+  "marco_name": "Evolução Genética (Stage A)",
+  "checks": [
+    {
+      "name": "population_diversity",
+      "description": "Verificar diversidade da população (> 10%)",
+      "verdict": "FAIL",
+      "message": "Report não disponível",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "fitness_variance",
+      "description": "Verificar variância de fitness > 0",
+      "verdict": "FAIL",
+      "message": "Report não disponível",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "convergence_real",
+      "description": "Verificar convergência real (melhoria ao longo das gerações)",
+      "verdict": "FAIL",
+      "message": "Report não disponível",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "no_degenerate_population",
+      "description": "Verificar população não-degenerada",
+      "verdict": "WARN",
+      "message": "Ranking não disponível",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "penalties_applied",
+      "description": "Verificar aplicação de penalidades (low trades, turnover)",
+      "verdict": "PASS",
+      "message": "Verificação de penalidades não implementada - assumindo OK",
+      "evidence": {},
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "FAIL",
+  "summary": "5 checks: 1 passed, 1 warnings, 3 failed",
+  "started_at": "2026-01-05T19:03:50.425912712Z",
+  "completed_at": "2026-01-05T19:03:50.425914730Z",
+  "duration_ms": 0
+}

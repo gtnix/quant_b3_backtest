@@ -19,21 +19,21 @@ fn make_sample_log() -> ExitAuditLog {
                 symbol: "PETR4".to_string(),
                 shares: 500,
                 reason: ExitReason::StopLoss,
-                pnl: Money::from(dec!(-2500)),
+                pnl: dec!(-2500),
                 return_pct: -0.10,
             },
             ExitedPosition {
                 symbol: "VALE3".to_string(),
                 shares: 300,
                 reason: ExitReason::TakeProfit,
-                pnl: Money::from(dec!(4500)),
+                pnl: dec!(4500),
                 return_pct: 0.25,
             },
             ExitedPosition {
                 symbol: "ITUB4".to_string(),
                 shares: 200,
                 reason: ExitReason::StopLoss,
-                pnl: Money::from(dec!(-800)),
+                pnl: dec!(-800),
                 return_pct: -0.08,
             },
         ],
@@ -74,9 +74,9 @@ SAÍDAS (3):
     VALE3: 300 ações, PnL: 4500, ret: 25.0%
 
 ORDENS DE VENDA (3):
-  VENDA PETR4 x 500 @ 45 (custo: 225)
-  VENDA VALE3 x 300 @ 75 (custo: 225)
-  VENDA ITUB4 x 200 @ 46 (custo: 92)
+  VENDA PETR4 x 500 @ 45.000000 (custo: 225.00)
+  VENDA VALE3 x 300 @ 75.000000 (custo: 225.00)
+  VENDA ITUB4 x 200 @ 46.000000 (custo: 92.00)
 
 MÉTRICAS:
   Posições avaliadas: 10
@@ -86,9 +86,9 @@ MÉTRICAS:
   Time exit: 0
   Trailing stop: 0
   Drawdown guard: 0
-  PnL total saídas: 1200
-  Turnover saídas: 53700
-  Custos estimados: 542
+  PnL total saídas: 1200.00
+  Turnover saídas: 53700.00
+  Custos estimados: 542.00
 "#;
 
 #[test]
@@ -123,7 +123,7 @@ fn golden_exit_compact() {
     let log = make_sample_log();
     let compact = log.to_compact();
 
-    assert_eq!(compact, "[2025-01-10|BR] exits=3 sl=2 tp=1 pnl=1200");
+    assert_eq!(compact, "[2025-01-10|BR] exits=3 sl=2 tp=1 pnl=1200.00");
 }
 
 // =============================================================================

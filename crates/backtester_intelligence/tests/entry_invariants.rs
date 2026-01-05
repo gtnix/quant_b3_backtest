@@ -6,15 +6,14 @@
 //! - A3: Strong determinism (identical outputs)
 //! - A4: Anti-look-ahead (no future data)
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::entry::{
     AssetCandidate, EntryContext, EntryEngine, EntryEngineConfig,
-    GatingConfig, SelectionConfig, WeightingConfig, OrderGeneratorConfig,
+    GatingConfig, SelectionConfig, WeightingConfig,
     ExclusionReason,
 };
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 
 // =============================================================================
@@ -24,8 +23,8 @@ use std::collections::HashMap;
 fn make_test_candidates(n: usize, market: Market) -> Vec<AssetCandidate> {
     (0..n).map(|i| {
         let mut c = AssetCandidate::new(format!("SYM{:04}", i), market);
-        c.price = Some(Decimal::from(20 + (i as i64 % 100)));
-        c.avg_volume = Some(Decimal::from(1_000_000 + (i as i64 * 50_000)));
+        c.price = Some(Price::from_int(20 + (i as i64 % 100)));
+        c.avg_volume = Some(Money::from_int(1_000_000 + (i as i64 * 50_000)));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.has_dividends = true;
@@ -62,16 +61,12 @@ fn invariant_weight_sum_within_bounds() {
             min_weight: 0.02,
             ..Default::default()
         },
-        orders: OrderGeneratorConfig {
-            max_allocation_pct: dec!(0.99),
-            ..Default::default()
-        },
         ..Default::default()
     };
     let engine = EntryEngine::new(config);
 
     let candidates = make_test_candidates(100, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -91,7 +86,7 @@ fn invariant_weight_sum_within_bounds() {
 fn invariant_no_negative_weights() {
     let engine = default_engine();
     let candidates = make_test_candidates(50, Market::BR);
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -125,7 +120,7 @@ fn invariant_weights_respect_bounds() {
     let engine = EntryEngine::new(config);
 
     let candidates = make_test_candidates(30, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -149,11 +144,9 @@ fn invariant_weights_respect_bounds() {
 /// Invariant: Graceful degradation when gating reduces candidates below top-N
 #[test]
 fn invariant_graceful_degradation_below_top_n() {
+    // GatingConfig now uses f64 internally via serde, we create via Default and modify
+    // High volume threshold via deserialization or just use default with high-volume candidates
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            min_avg_volume_brl: Decimal::from(10_000_000), // Very high threshold
-            ..Default::default()
-        },
         selection: SelectionConfig {
             top_n_br: 20, // Want 20, but will get fewer
             top_n_us: 20,
@@ -164,15 +157,15 @@ fn invariant_graceful_degradation_below_top_n() {
     };
     let engine = EntryEngine::new(config);
 
-    // Create candidates with varying volumes
+    // Create candidates with varying volumes - default min is 500k BRL
+    // Only first 5 have high enough volume (above default threshold)
     let candidates: Vec<AssetCandidate> = (0..30).map(|i| {
         let mut c = AssetCandidate::new(format!("SYM{:04}", i), Market::BR);
-        c.price = Some(Decimal::from(50));
-        // Only first 5 have high enough volume
+        c.price = Some(Price::from_int(50));
         c.avg_volume = Some(if i < 5 { 
-            Decimal::from(15_000_000) 
+            Money::from_int(15_000_000) 
         } else { 
-            Decimal::from(1_000_000) 
+            Money::from_int(100_000) // Below default 500k threshold
         });
         c.price_days = 30;
         c.has_fundamentals = true;
@@ -181,7 +174,7 @@ fn invariant_graceful_degradation_below_top_n() {
         c
     }).collect();
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -200,17 +193,22 @@ fn invariant_graceful_degradation_below_top_n() {
 /// Invariant: When all candidates are filtered out, engine handles gracefully
 #[test]
 fn invariant_empty_eligible_no_panic() {
-    let config = EntryEngineConfig {
-        gating: GatingConfig {
-            min_avg_volume_brl: Decimal::from(999_999_999), // Impossible threshold
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let engine = EntryEngine::new(config);
+    // Use default config - candidates will have volume below threshold
+    let engine = default_engine();
 
-    let candidates = make_test_candidates(20, Market::BR);
-    let capital = dec!(500_000);
+    // All candidates have very low volume (below default 500k threshold)
+    let candidates: Vec<AssetCandidate> = (0..20).map(|i| {
+        let mut c = AssetCandidate::new(format!("SYM{:04}", i), Market::BR);
+        c.price = Some(Price::from_int(50));
+        c.avg_volume = Some(Money::from_int(1_000)); // Way below threshold
+        c.price_days = 30;
+        c.has_fundamentals = true;
+        c.volatility = Some(0.20);
+        c.score = Some(0.80);
+        c
+    }).collect();
+
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -231,7 +229,7 @@ fn invariant_empty_eligible_no_panic() {
 fn invariant_br_orders_lot_multiples() {
     let engine = default_engine();
     let candidates = make_test_candidates(30, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -249,27 +247,20 @@ fn invariant_br_orders_lot_multiples() {
 /// Invariant: US orders have at least 1 share
 #[test]
 fn invariant_us_orders_min_one_share() {
-    let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false,
-            require_dividends: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let engine = EntryEngine::new(config);
+    // Use default GatingConfig - require_fundamentals/dividends is false by default
+    let engine = default_engine();
 
     let candidates: Vec<AssetCandidate> = (0..20).map(|i| {
         let mut c = AssetCandidate::new(format!("US{:04}", i), Market::US);
-        c.price = Some(Decimal::from(100 + i as i64 * 10));
-        c.avg_volume = Some(Decimal::from(5_000_000));
+        c.price = Some(Price::from_int(100 + i as i64 * 10));
+        c.avg_volume = Some(Money::from_int(5_000_000));
         c.price_days = 30;
         c.volatility = Some(0.25);
         c.score = Some(0.80);
         c
     }).collect();
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::US);
 
@@ -288,7 +279,7 @@ fn invariant_us_orders_min_one_share() {
 fn invariant_no_zero_share_orders() {
     let engine = default_engine();
     let candidates = make_test_candidates(50, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     
     // Create existing positions
     let mut positions: HashMap<String, i64> = HashMap::new();
@@ -312,7 +303,7 @@ fn invariant_no_zero_share_orders() {
 fn invariant_costs_non_negative() {
     let engine = default_engine();
     let candidates = make_test_candidates(30, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -320,7 +311,7 @@ fn invariant_costs_non_negative() {
 
     for order in &orders {
         assert!(
-            order.estimated_cost >= Decimal::ZERO,
+            !order.estimated_cost.is_negative(),
             "Order {} has negative cost: {}", order.symbol, order.estimated_cost
         );
     }
@@ -345,7 +336,7 @@ fn invariant_determinism_identical_outputs() {
     let engine = EntryEngine::new(config.clone());
 
     let candidates = make_test_candidates(50, Market::BR);
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -386,9 +377,9 @@ fn invariant_determinism_multiple_scenarios() {
     let engine = default_engine();
 
     let scenarios = vec![
-        (10, Market::BR, dec!(100_000)),
-        (50, Market::BR, dec!(500_000)),
-        (100, Market::BR, dec!(1_000_000)),
+        (10, Market::BR, Money::from_int(100_000)),
+        (50, Market::BR, Money::from_int(500_000)),
+        (100, Market::BR, Money::from_int(1_000_000)),
     ];
 
     for (n, market, capital) in scenarios {
@@ -431,8 +422,8 @@ fn invariant_volatility_uses_passed_value() {
     let candidates: Vec<AssetCandidate> = vec![
         {
             let mut c = AssetCandidate::new("LOW_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.10); // Low vol -> should get higher weight
@@ -441,8 +432,8 @@ fn invariant_volatility_uses_passed_value() {
         },
         {
             let mut c = AssetCandidate::new("HIGH_VOL", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.50); // High vol -> should get lower weight
@@ -451,7 +442,7 @@ fn invariant_volatility_uses_passed_value() {
         },
     ];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -477,8 +468,8 @@ fn invariant_future_fundamentals_excluded() {
     let candidates: Vec<AssetCandidate> = vec![
         {
             let mut c = AssetCandidate::new("FUTURE", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -489,8 +480,8 @@ fn invariant_future_fundamentals_excluded() {
         },
         {
             let mut c = AssetCandidate::new("PAST", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -501,7 +492,7 @@ fn invariant_future_fundamentals_excluded() {
         },
     ];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let rebalance_date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(rebalance_date, capital, Market::BR);
@@ -530,21 +521,14 @@ fn invariant_future_fundamentals_excluded() {
 /// Invariant: require_fundamentals=false does not exclude for MissingFundamentals
 #[test]
 fn invariant_require_fundamentals_false_no_exclusion() {
-    let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false,
-            require_dividends: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let engine = EntryEngine::new(config);
+    // Use default GatingConfig - require_fundamentals is false by default
+    let engine = default_engine();
 
     let candidates: Vec<AssetCandidate> = vec![
         {
             let mut c = AssetCandidate::new("NO_FUND", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = false; // No fundamentals
             c.volatility = Some(0.25);
@@ -553,7 +537,7 @@ fn invariant_require_fundamentals_false_no_exclusion() {
         },
     ];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -569,11 +553,9 @@ fn invariant_require_fundamentals_false_no_exclusion() {
 /// Invariant: require_fundamentals=true excludes assets without fundamentals
 #[test]
 fn invariant_require_fundamentals_true_excludes() {
+    let gating: GatingConfig = serde_json::from_str(r#"{"require_fundamentals": true}"#).unwrap();
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: true,
-            ..Default::default()
-        },
+        gating,
         ..Default::default()
     };
     let engine = EntryEngine::new(config);
@@ -581,8 +563,8 @@ fn invariant_require_fundamentals_true_excludes() {
     let candidates: Vec<AssetCandidate> = vec![
         {
             let mut c = AssetCandidate::new("NO_FUND", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = false; // No fundamentals
             c.volatility = Some(0.25);
@@ -591,7 +573,7 @@ fn invariant_require_fundamentals_true_excludes() {
         },
     ];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
@@ -603,4 +585,3 @@ fn invariant_require_fundamentals_true_excludes() {
         "Should exclude for MissingFundamentals when require_fundamentals=true"
     );
 }
-

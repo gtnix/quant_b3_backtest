@@ -406,15 +406,16 @@ impl ExperimentPersistence {
 
         // Write ranking with validation details
         let ranking: Vec<_> = hof.entries().iter().enumerate().map(|(i, e)| {
+            let v = e.validation_ref();
             serde_json::json!({
                 "rank": i + 1,
                 "genome_id": e.genome_id.to_string(),
-                "generation": e.validated_generation,
-                "oos_sharpe": e.validation.oos_sharpe_median,
-                "pbo": e.validation.pbo,
-                "dsr": e.validation.dsr,
-                "degradation_pct": e.validation.degradation_pct,
-                "passed": e.validation.passed,
+                "generation": e.validated_generation(),
+                "oos_sharpe": v.oos_sharpe_median,
+                "pbo": v.pbo,
+                "dsr": v.dsr,
+                "degradation_pct": v.degradation_pct,
+                "passed": v.passed,
                 "score": e.score,
             })
         }).collect();
@@ -442,21 +443,22 @@ impl ExperimentPersistence {
             }
 
             // Validation summary JSON
-            let validation_json = serde_json::to_string_pretty(&entry.validation)?;
+            let v = entry.validation_ref();
+            let validation_json = serde_json::to_string_pretty(v)?;
             fs::write(strategy_dir.join("validation_summary.json"), validation_json)?;
 
             // Generate WFA report from validation summary
             let wfa_result = WfaResult {
                 genome_id: entry.genome_id,
-                is_sharpe_gross: entry.validation.oos_sharpe_mean * 1.1,
-                is_sharpe_net: entry.validation.oos_sharpe_mean,
-                oos_sharpe_gross: entry.validation.oos_sharpe_median * 1.1,
-                oos_sharpe_net: entry.validation.oos_sharpe_median,
-                degradation_pct: entry.validation.degradation_pct,
-                passed: entry.validation.passed,
-                windows_evaluated: entry.validation.splits_evaluated as usize,
-                is_cagr_net: entry.validation.oos_cagr_median * 1.1,
-                oos_cagr_net: entry.validation.oos_cagr_median,
+                is_sharpe_gross: v.oos_sharpe_mean * 1.1,
+                is_sharpe_net: v.oos_sharpe_mean,
+                oos_sharpe_gross: v.oos_sharpe_median * 1.1,
+                oos_sharpe_net: v.oos_sharpe_median,
+                degradation_pct: v.degradation_pct,
+                passed: v.passed,
+                windows_evaluated: v.splits_evaluated as usize,
+                is_cagr_net: v.oos_cagr_median * 1.1,
+                oos_cagr_net: v.oos_cagr_median,
                 cost_report: None,
                 window_details: vec![],
             };
@@ -472,11 +474,11 @@ impl ExperimentPersistence {
             // Generate PBO/DSR report
             let pbo_result = PboDsrResult {
                 genome_id: entry.genome_id,
-                is_sharpe_net: entry.validation.oos_sharpe_mean,
-                pbo: entry.validation.pbo,
-                dsr: entry.validation.dsr,
+                is_sharpe_net: v.oos_sharpe_mean,
+                pbo: v.pbo,
+                dsr: v.dsr,
                 total_trials: 1000,
-                passed: entry.validation.pbo <= 0.15 && entry.validation.dsr >= 0.5,
+                passed: v.pbo <= 0.15 && v.dsr >= 0.5,
             };
             let pbo_thresholds = PboDsrThresholds {
                 max_pbo: 0.15,
@@ -512,15 +514,16 @@ impl ExperimentPersistence {
 
         // Write ranking as compressed OBFS
         let ranking: Vec<_> = hof.entries().iter().enumerate().map(|(i, e)| {
+            let v = e.validation_ref();
             serde_json::json!({
                 "rank": i + 1,
                 "genome_id": e.genome_id.to_string(),
-                "generation": e.validated_generation,
-                "oos_sharpe": e.validation.oos_sharpe_median,
-                "pbo": e.validation.pbo,
-                "dsr": e.validation.dsr,
-                "degradation_pct": e.validation.degradation_pct,
-                "passed": e.validation.passed,
+                "generation": e.validated_generation(),
+                "oos_sharpe": v.oos_sharpe_median,
+                "pbo": v.pbo,
+                "dsr": v.dsr,
+                "degradation_pct": v.degradation_pct,
+                "passed": v.passed,
                 "score": e.score,
             })
         }).collect();
@@ -535,36 +538,38 @@ impl ExperimentPersistence {
             let config_toml = entry.genome.to_toml()
                 .unwrap_or_else(|_| "[error]\nfailed_to_serialize = true".to_string());
 
+            let v = entry.validation_ref();
+            
             // Generate comprehensive validation JSON
             let validation_json = serde_json::to_string(&serde_json::json!({
                 "genome_id": entry.genome_id.to_string(),
                 "genome_hash": format!("{:016x}", entry.genome_hash),
-                "validation": entry.validation,
-                "validated_generation": entry.validated_generation,
+                "validation": v,
+                "validated_generation": entry.validated_generation(),
                 "rank": entry.rank,
                 "score": entry.score,
                 "fitness": entry.genome.fitness,
             }))?;
 
             // Calculate production score
-            let production_score = entry.validation.oos_sharpe_median 
-                * (1.0 - entry.validation.pbo)
-                * (1.0 - entry.validation.degradation_pct / 100.0);
+            let production_score = v.oos_sharpe_median 
+                * (1.0 - v.pbo)
+                * (1.0 - v.degradation_pct / 100.0);
 
             bundle_writer.add(
                 entry.genome_id,
                 entry.genome_hash,
                 (rank + 1) as u32,
-                entry.validated_generation,
+                entry.validated_generation(),
                 production_score,
-                entry.validation.oos_sharpe_median,
-                entry.validation.oos_cagr_median,
-                entry.validation.oos_max_dd_worst,
-                entry.validation.pbo,
-                entry.validation.dsr,
-                entry.validation.degradation_pct,
-                entry.validation.splits_passed as u16,
-                entry.validation.splits_evaluated as u16,
+                v.oos_sharpe_median,
+                v.oos_cagr_median,
+                v.oos_max_dd_worst,
+                v.pbo,
+                v.dsr,
+                v.degradation_pct,
+                v.splits_passed,
+                v.splits_evaluated,
                 &config_toml,
                 &validation_json,
             ).map_err(|e| PersistenceError::Conversion(e.to_string()))?;

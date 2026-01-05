@@ -275,6 +275,7 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
     use backtester_core::Price;
+    use rust_decimal_macros::dec;
 
     fn make_context() -> ExitContext {
         ExitContext {

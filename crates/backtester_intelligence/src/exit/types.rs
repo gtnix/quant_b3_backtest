@@ -509,12 +509,15 @@ mod tests {
 
     #[test]
     fn test_portfolio_drawdown() {
-        let ctx = ExitContext::new(
+        use backtester_core::Money;
+        let mut ctx = ExitContext::new(
             NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(),
             dec!(1_000_000),
             dec!(850_000),
             Market::BR,
         );
+        // Set peak to 1M for 15% drawdown from current 850k
+        ctx.peak_equity = Money::from_int(1_000_000);
         let dd = ctx.portfolio_drawdown();
         assert!((dd - (-0.15)).abs() < 0.001); // -15% drawdown
     }

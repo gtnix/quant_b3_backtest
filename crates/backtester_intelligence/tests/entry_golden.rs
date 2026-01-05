@@ -3,14 +3,13 @@
 //! These tests detect accidental changes to the audit output format.
 //! If the format changes intentionally, update the golden file.
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::entry::{
     AssetCandidate, EntryContext, EntryEngine, EntryEngineConfig,
-    GatingConfig, SelectionConfig, WeightingConfig,
+    SelectionConfig, WeightingConfig,
 };
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 
 /// Golden audit summary - update this if format changes intentionally.
@@ -27,11 +26,11 @@ EXCLUÍDOS GATING (1):
   SMALL: liquidez insuficiente
 
 ORDENS (5):
-  COMPRA PETR4 x 4900 @ 38 (custo: 209.475000)
-  COMPRA VALE3 x 2300 @ 65 (custo: 168.187500)
-  COMPRA ITUB4 x 6600 @ 32 (custo: 237.600000)
-  COMPRA BBDC4 x 9300 @ 18 (custo: 188.325000)
-  COMPRA WEGE3 x 5700 @ 45 (custo: 288.562500)
+  COMPRA PETR4 x 4900 @ 38.000000 (custo: 209.47)
+  COMPRA VALE3 x 2300 @ 65.000000 (custo: 168.19)
+  COMPRA ITUB4 x 6600 @ 32.000000 (custo: 237.60)
+  COMPRA BBDC4 x 9300 @ 18.000000 (custo: 188.32)
+  COMPRA WEGE3 x 5700 @ 45.000000 (custo: 288.56)
 
 MÉTRICAS:
   Candidatos: 6
@@ -40,19 +39,14 @@ MÉTRICAS:
   Selecionados: 5
   Peso total: 100.0%
   Turnover: 97.1%
-  Custos estimados: 1092.150000
-  Cash residual: 9400
+  Custos estimados: 1092.15
+  Cash residual: 9400.00
 "#;
 
 /// Fixed scenario for golden snapshot testing.
 /// This produces deterministic output for comparison.
 fn run_golden_scenario() -> String {
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false,
-            require_dividends: false,
-            ..Default::default()
-        },
         selection: SelectionConfig {
             top_n_br: 5,
             top_n_us: 5,
@@ -72,8 +66,8 @@ fn run_golden_scenario() -> String {
     let candidates: Vec<AssetCandidate> = vec![
         {
             let mut c = AssetCandidate::new("PETR4", Market::BR);
-            c.price = Some(dec!(38));
-            c.avg_volume = Some(dec!(5_000_000));
+            c.price = Some(Price::from_int(38));
+            c.avg_volume = Some(Money::from_int(5_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.25);
@@ -82,8 +76,8 @@ fn run_golden_scenario() -> String {
         },
         {
             let mut c = AssetCandidate::new("VALE3", Market::BR);
-            c.price = Some(dec!(65));
-            c.avg_volume = Some(dec!(8_000_000));
+            c.price = Some(Price::from_int(65));
+            c.avg_volume = Some(Money::from_int(8_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.30);
@@ -92,8 +86,8 @@ fn run_golden_scenario() -> String {
         },
         {
             let mut c = AssetCandidate::new("ITUB4", Market::BR);
-            c.price = Some(dec!(32));
-            c.avg_volume = Some(dec!(4_000_000));
+            c.price = Some(Price::from_int(32));
+            c.avg_volume = Some(Money::from_int(4_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.22);
@@ -102,8 +96,8 @@ fn run_golden_scenario() -> String {
         },
         {
             let mut c = AssetCandidate::new("BBDC4", Market::BR);
-            c.price = Some(dec!(18));
-            c.avg_volume = Some(dec!(3_500_000));
+            c.price = Some(Price::from_int(18));
+            c.avg_volume = Some(Money::from_int(3_500_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.28);
@@ -112,8 +106,8 @@ fn run_golden_scenario() -> String {
         },
         {
             let mut c = AssetCandidate::new("WEGE3", Market::BR);
-            c.price = Some(dec!(45));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(45));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.18);
@@ -123,8 +117,8 @@ fn run_golden_scenario() -> String {
         // Low volume candidate - will be excluded
         {
             let mut c = AssetCandidate::new("SMALL", Market::BR);
-            c.price = Some(dec!(10));
-            c.avg_volume = Some(dec!(100_000)); // Below 500k threshold
+            c.price = Some(Price::from_int(10));
+            c.avg_volume = Some(Money::from_int(100_000)); // Below 500k threshold
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.35);
@@ -133,12 +127,12 @@ fn run_golden_scenario() -> String {
         },
     ];
 
-    let capital = dec!(1_000_000);
+    let capital = Money::from_int(1_000_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (_, _, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, _, audit) = engine.evaluate(&ctx, &candidates, &positions);
     audit.to_summary()
 }
 
@@ -189,10 +183,6 @@ fn generate_golden_output() {
 #[test]
 fn golden_exclusion_counts() {
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false,
-            ..Default::default()
-        },
         selection: SelectionConfig {
             top_n_br: 2, // Only top 2, so others excluded
             top_n_us: 2,
@@ -205,20 +195,20 @@ fn golden_exclusion_counts() {
 
     let candidates: Vec<AssetCandidate> = (0..5).map(|i| {
         let mut c = AssetCandidate::new(format!("SYM{}", i), Market::BR);
-        c.price = Some(dec!(50));
-        c.avg_volume = Some(dec!(2_000_000));
+        c.price = Some(Price::from_int(50));
+        c.avg_volume = Some(Money::from_int(2_000_000));
         c.price_days = 30;
         c.volatility = Some(0.25);
         c.score = Some(0.90 - (i as f64 * 0.05));
         c
     }).collect();
 
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (_, _, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, _, audit) = engine.evaluate(&ctx, &candidates, &positions);
     let counts = audit.exclusion_counts_by_reason();
 
     // Should have 3 excluded for OutOfTopN (5 candidates - 2 selected)
@@ -238,24 +228,24 @@ fn golden_cash_residual() {
 
     let candidates: Vec<AssetCandidate> = vec![{
         let mut c = AssetCandidate::new("TEST", Market::BR);
-        c.price = Some(dec!(100));
-        c.avg_volume = Some(dec!(5_000_000));
+        c.price = Some(Price::from_int(100));
+        c.avg_volume = Some(Money::from_int(5_000_000));
         c.price_days = 30;
         c.volatility = Some(0.25);
         c.score = Some(0.90);
         c
     }];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (result, _, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Cash residual should be >= 0
     assert!(
-        result.diagnostics.cash_residual >= Decimal::ZERO,
+        !result.diagnostics.cash_residual.is_negative(),
         "Cash residual should be non-negative"
     );
 
@@ -274,4 +264,3 @@ fn golden_cash_residual() {
     // The key invariant is that cash_residual >= 0
     println!("Cash residual: {}", result.diagnostics.cash_residual);
 }
-

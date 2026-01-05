@@ -9,12 +9,12 @@
 //! - Mixed eligibility scenarios work correctly
 //! - Universe validation integrates with other gating checks
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::{
     AssetCandidate, EntryEngine, EntryEngineConfig, EntryContext, ExclusionReason,
     DateRange, UniverseRangeProvider, Market, EligibilityProvider,
 };
 use chrono::NaiveDate;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -62,8 +62,8 @@ fn make_test_universe() -> Arc<dyn EligibilityProvider> {
 /// Create valid candidate with all gating requirements met.
 fn make_valid_candidate(symbol: &str, _rebalance_date: NaiveDate) -> AssetCandidate {
     let mut c = AssetCandidate::new(symbol, Market::BR);
-    c.price = Some(dec!(30));
-    c.avg_volume = Some(dec!(5_000_000));
+    c.price = Some(Price::from_int(30));
+    c.avg_volume = Some(Money::from_int(5_000_000));
     c.price_days = 100;
     c.has_fundamentals = true;
     c.has_dividends = true;
@@ -94,7 +94,7 @@ fn test_mixed_eligibility_mid_2021() {
     let engine = EntryEngine::new(config);
     
     let rebalance_date = date(2021, 9, 1);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     
     let candidates = vec![
         make_valid_candidate("PETR4", rebalance_date),
@@ -104,7 +104,7 @@ fn test_mixed_eligibility_mid_2021() {
         make_valid_candidate("MGLU3", rebalance_date),
     ];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     // Should exclude only OIBR3
     let excluded_symbols: Vec<&str> = result.exclusions.iter()
@@ -143,7 +143,7 @@ fn test_mixed_eligibility_early_2021() {
     let engine = EntryEngine::new(config);
     
     let rebalance_date = date(2021, 1, 15);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     
     let candidates = vec![
         make_valid_candidate("PETR4", rebalance_date),
@@ -153,7 +153,7 @@ fn test_mixed_eligibility_early_2021() {
         make_valid_candidate("MGLU3", rebalance_date),
     ];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     // Should exclude RAIZ4 and OIBR3
     let excluded_universe: Vec<&str> = result.exclusions.iter()
@@ -193,10 +193,10 @@ fn test_no_resurrection_after_delisting() {
     ];
     
     for rebalance_date in test_dates {
-        let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+        let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
         let candidates = vec![make_valid_candidate("OIBR3", rebalance_date)];
         
-        let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
         
         assert!(result.targets.is_empty(),
             "OIBR3 should not be selected on {}", rebalance_date);
@@ -227,10 +227,10 @@ fn test_no_resurrection_before_ipo() {
     ];
     
     for rebalance_date in test_dates {
-        let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+        let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
         let candidates = vec![make_valid_candidate("RAIZ4", rebalance_date)];
         
-        let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
         
         assert!(result.targets.is_empty(),
             "RAIZ4 should not be selected on {}", rebalance_date);
@@ -256,10 +256,10 @@ fn test_eligible_at_exact_min_date() {
     
     // RAIZ4 IPO'd exactly on 2021-08-05
     let rebalance_date = date(2021, 8, 5);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     let candidates = vec![make_valid_candidate("RAIZ4", rebalance_date)];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     // Should be eligible on exact IPO date
     let universe_exclusions: Vec<_> = result.exclusions.iter()
@@ -283,10 +283,10 @@ fn test_eligible_at_exact_max_date() {
     
     // OIBR3 last day is 2020-12-31
     let rebalance_date = date(2020, 12, 31);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     let candidates = vec![make_valid_candidate("OIBR3", rebalance_date)];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     // Should be eligible on exact last day
     let universe_exclusions: Vec<_> = result.exclusions.iter()
@@ -313,10 +313,10 @@ fn test_unknown_symbol_excluded() {
     let engine = EntryEngine::new(config);
     
     let rebalance_date = date(2021, 6, 15);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     let candidates = vec![make_valid_candidate("FAKE99", rebalance_date)];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     assert!(result.targets.is_empty(),
         "Unknown symbol should not be selected");
@@ -349,7 +349,7 @@ fn test_invariant_selected_within_range() {
     ];
     
     for rebalance_date in test_dates {
-        let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+        let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
         let candidates = vec![
             make_valid_candidate("PETR4", rebalance_date),
             make_valid_candidate("VALE3", rebalance_date),
@@ -358,7 +358,7 @@ fn test_invariant_selected_within_range() {
             make_valid_candidate("MGLU3", rebalance_date),
         ];
         
-        let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
         
         // Verify invariant for all selected targets
         for target in &result.targets {
@@ -406,11 +406,11 @@ fn test_invariant_eligible_count_decreases_over_time() {
         .map(|s| make_valid_candidate(s, after_date))
         .collect();
     
-    let ctx_before = EntryContext::new(before_date, dec!(100_000), Market::BR);
-    let ctx_after = EntryContext::new(after_date, dec!(100_000), Market::BR);
+    let ctx_before = EntryContext::new(before_date, Money::from_int(100_000), Market::BR);
+    let ctx_after = EntryContext::new(after_date, Money::from_int(100_000), Market::BR);
     
-    let (result_before, _, _) = engine.evaluate(&ctx_before, candidates_before, &HashMap::new());
-    let (result_after, _, _) = engine.evaluate(&ctx_after, candidates_after, &HashMap::new());
+    let (result_before, _, _) = engine.evaluate(&ctx_before, &candidates_before, &HashMap::new());
+    let (result_after, _, _) = engine.evaluate(&ctx_after, &candidates_after, &HashMap::new());
     
     // Count universe-eligible candidates (not excluded for date range)
     let eligible_before = result_before.diagnostics.total_candidates 
@@ -440,10 +440,10 @@ fn test_without_universe_provider_no_filtering() {
     
     // Even with invalid date (before any reasonable IPO), should pass
     let rebalance_date = date(2010, 1, 1);
-    let ctx = EntryContext::new(rebalance_date, dec!(100_000), Market::BR);
+    let ctx = EntryContext::new(rebalance_date, Money::from_int(100_000), Market::BR);
     let candidates = vec![make_valid_candidate("PETR4", rebalance_date)];
     
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
     
     // Should not have any universe-related exclusions
     let universe_exclusions: Vec<_> = result.exclusions.iter()
@@ -474,4 +474,3 @@ fn test_has_universe_provider_flag() {
     assert!(!engine_without.has_universe_provider(),
         "Engine without provider should report has_universe_provider = false");
 }
-

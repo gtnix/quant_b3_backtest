@@ -133,31 +133,41 @@ impl MmapStream {
     }
 
     /// Parse a line into a MarketEvent.
-    fn parse_line(&mut self, line: &[u8]) -> Option<MarketEvent> {
+    /// 
+    /// # Performance
+    /// Uses split iterator instead of collecting to Vec, avoiding allocation.
+    /// Returns parsed data tuple to decouple from mmap borrow.
+    fn parse_line_data(line: &[u8]) -> Option<(i64, String, f64, f64, f64, f64, f64)> {
         let line_str = std::str::from_utf8(line).ok()?;
         if line_str.trim().is_empty() {
             return None;
         }
 
-        let fields: Vec<&str> = line_str.split(',').collect();
-        if fields.len() < 7 {
-            return None;
-        }
-
-        let timestamp = parse_timestamp_fast(fields[0].trim())?;
-        let ticker = fields[1].trim();
-        let open = fields[2].trim().parse::<f64>().ok()?;
-        let high = fields[3].trim().parse::<f64>().ok()?;
-        let low = fields[4].trim().parse::<f64>().ok()?;
-        let close = fields[5].trim().parse::<f64>().ok()?;
-        let volume = fields[6].trim().parse::<f64>().ok()?;
+        // Zero-alloc: use split iterator with nth() instead of collect
+        let mut fields = line_str.split(',');
+        
+        let timestamp = parse_timestamp_fast(fields.next()?.trim())?;
+        let ticker = fields.next()?.trim().to_string(); // Copy ticker to avoid borrow
+        let open = fields.next()?.trim().parse::<f64>().ok()?;
+        let high = fields.next()?.trim().parse::<f64>().ok()?;
+        let low = fields.next()?.trim().parse::<f64>().ok()?;
+        let close = fields.next()?.trim().parse::<f64>().ok()?;
+        let volume = fields.next()?.trim().parse::<f64>().ok()?;
 
         // Validate OHLC
         if high < low || open < 0.0 || close < 0.0 {
             return None;
         }
 
-        let asset_id = self.normalizer.register_ticker(ticker.to_string());
+        Some((timestamp, ticker, open, high, low, close, volume))
+    }
+    
+    /// Parse line at given index without advancing iterator.
+    fn parse_line_at(&mut self, line_idx: usize) -> Option<MarketEvent> {
+        let line = self.reader.get_line(line_idx)?;
+        let (timestamp, ticker, open, high, low, close, volume) = Self::parse_line_data(line)?;
+        
+        let asset_id = self.normalizer.register_ticker(ticker);
 
         Some(MarketEvent {
             asset_id,
@@ -218,11 +228,11 @@ impl Iterator for MmapStream {
                 return None;
             }
 
-            // Copy line bytes to avoid borrow issues
-            let line_bytes = self.reader.get_line(self.current_line)?.to_vec();
+            let line_idx = self.current_line;
             self.current_line += 1;
 
-            if let Some(event) = self.parse_line(&line_bytes) {
+            // Zero-copy: parse directly from mmap without to_vec()
+            if let Some(event) = self.parse_line_at(line_idx) {
                 return Some(event);
             }
             // Skip invalid lines

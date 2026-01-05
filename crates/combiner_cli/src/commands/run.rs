@@ -511,27 +511,28 @@ fn print_ultra_summary(result: &UltraEvolutionResult) {
     let hof_summary = result.validated_hall_of_fame.summary();
     if result.validated_hall_of_fame.len() > 0 {
         println!("║ Avg OOS Sharpe: {:>7.2}                                     ║", 
-                 hof_summary.avg_oos_sharpe);
+                 hof_summary.avg_oos_sharpe.unwrap_or(0.0));
         println!("║ Avg PBO:        {:>7.2}                                     ║", 
-                 hof_summary.avg_pbo);
+                 hof_summary.avg_pbo.unwrap_or(1.0));
         println!("║ Best OOS Sharpe: {:>6.2}                                     ║", 
                  hof_summary.best_oos_sharpe);
     }
     
     if let Some(best) = result.validated_hall_of_fame.best() {
+        let v = best.validation_ref();
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║                      TOP CANDIDATE                           ║");
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║ ID: {}...                                      ║", 
                  &best.genome_id.to_string()[..8]);
         println!("║ OOS Sharpe: {:>6.2}  │  PBO: {:>5.2}  │  Score: {:>6.2}      ║", 
-                 best.validation.oos_sharpe_median, 
-                 best.validation.pbo,
+                 v.oos_sharpe_median, 
+                 v.pbo,
                  best.score);
         println!("║ Splits: {}/{}  │  Degradation: {:>5.1}%                     ║", 
-                 best.validation.splits_passed, 
-                 best.validation.splits_evaluated,
-                 best.validation.degradation_pct);
+                 v.splits_passed, 
+                 v.splits_evaluated,
+                 v.degradation_pct);
     }
     
     println!("╠══════════════════════════════════════════════════════════════╣");

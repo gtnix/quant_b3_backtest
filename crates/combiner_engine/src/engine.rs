@@ -84,7 +84,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             param_ranges: ParamRanges::new(),
             fitness_config: FitnessConfig::default(),
             validator: GenomeValidator::new(),
-            hall_of_fame: HallOfFame::new(config.hall_of_fame_size),
+            hall_of_fame: HallOfFame::with_capacity(config.hall_of_fame_size),
             config,
             executor,
             rng,
@@ -472,7 +472,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         );
 
         // Initialize validated hall of fame
-        let mut validated_hof = ValidatedHallOfFame::new(self.config.hall_of_fame_size);
+        let mut validated_hof = ValidatedHallOfFame::with_capacity(self.config.hall_of_fame_size);
 
         // Create split plan for Stage B validation
         let split_config = SplitPlanConfig::default();
@@ -655,7 +655,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                                 early_exit: false,
                                 discard_reason: None,
                             };
-                            validated_hof.try_add(*genome, &result, gen);
+                            validated_hof.try_add_validated(genome, &result, gen);
                             snapshot.genomes_validated += 1;
                         }
                         continue;
@@ -753,7 +753,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                         snapshot.splits_evaluated += split_plan.num_splits();
                         
                         if passes {
-                            validated_hof.try_add(*genome, &result, gen);
+                            validated_hof.try_add_validated(genome, &result, gen);
                             snapshot.genomes_validated += 1;
                         }
                     }

@@ -367,6 +367,8 @@ pub struct UnifiedEngineConfig {
     pub performance_config: PerformanceConfig,
     /// Transaction cost in basis points
     pub cost_bps: Decimal,
+    /// Enable trace recording (disable for SCG to avoid allocations)
+    pub trace_enabled: bool,
 }
 
 impl Default for UnifiedEngineConfig {
@@ -380,6 +382,7 @@ impl Default for UnifiedEngineConfig {
             exit_config: ExitEngineConfig::default(),
             performance_config: PerformanceConfig::default(),
             cost_bps: dec!(10), // 10 bps
+            trace_enabled: false, // Disabled by default for SCG performance
         }
     }
 }
@@ -661,13 +664,15 @@ impl UnifiedEngine {
         let orders_applied = self.apply_orders(date, &rebalance_result);
 
         // Step 6: Record trace (convert Money to Decimal for output)
-        self.trace.push(TraceEvent::DayProcessed {
-            date,
-            equity: self.portfolio.equity.to_decimal(),
-            cash: self.portfolio.cash.to_decimal(),
-            positions: self.portfolio.positions.len(),
-            dividend_cashflow: day_dividend_cashflow.to_decimal(),
-        });
+        if self.config.trace_enabled {
+            self.trace.push(TraceEvent::DayProcessed {
+                date,
+                equity: self.portfolio.equity.to_decimal(),
+                cash: self.portfolio.cash.to_decimal(),
+                positions: self.portfolio.positions.len(),
+                dividend_cashflow: day_dividend_cashflow.to_decimal(),
+            });
+        }
 
         DayResult {
             date,
@@ -715,13 +720,15 @@ impl UnifiedEngine {
                     self.portfolio.add_cash_fast(cashflow);
                     
                     // Record trace (convert to Decimal for output)
-                    self.trace.push(TraceEvent::DividendCredited {
-                        date,
-                        symbol: div.symbol.clone(),
-                        rate: div.rate.to_decimal(),
-                        shares,
-                        cashflow: cashflow.to_decimal(),
-                    });
+                    if self.config.trace_enabled {
+                        self.trace.push(TraceEvent::DividendCredited {
+                            date,
+                            symbol: div.symbol.clone(),
+                            rate: div.rate.to_decimal(),
+                            shares,
+                            cashflow: cashflow.to_decimal(),
+                        });
+                    }
 
                     applications.push(DividendApplication {
                         symbol: div.symbol.clone(),
@@ -771,14 +778,16 @@ impl UnifiedEngine {
             };
 
             if order_result.is_ok() {
-                self.trace.push(TraceEvent::OrderExecuted {
-                    date,
-                    symbol: order.symbol.clone(),
-                    side: format!("{:?}", order.side),
-                    shares: order.shares,
-                    price: order.price.to_decimal(),
-                    cost: order.estimated_cost.to_decimal(),
-                });
+                if self.config.trace_enabled {
+                    self.trace.push(TraceEvent::OrderExecuted {
+                        date,
+                        symbol: order.symbol.clone(),
+                        side: format!("{:?}", order.side),
+                        shares: order.shares,
+                        price: order.price.to_decimal(),
+                        cost: order.estimated_cost.to_decimal(),
+                    });
+                }
                 applied.push(order.clone());
             }
         }

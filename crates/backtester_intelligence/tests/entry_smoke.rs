@@ -2,14 +2,13 @@
 //!
 //! Tests the full entry flow with realistic data for BR and US markets.
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::entry::{
     AssetCandidate, EntryContext, EntryEngine, EntryEngineConfig,
     GatingConfig, SelectionConfig, WeightingConfig, OrderGeneratorConfig,
 };
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use std::collections::HashMap;
 
 /// Generate synthetic BR candidates for testing.
@@ -24,8 +23,8 @@ fn make_br_candidates(count: usize) -> Vec<AssetCandidate> {
 
     symbols.iter().take(count).enumerate().map(|(i, sym)| {
         let mut c = AssetCandidate::new(*sym, Market::BR);
-        c.price = Some(Decimal::from(20 + (i as i64 * 5))); // R$ 20 to R$ 265
-        c.avg_volume = Some(Decimal::from(1_000_000 + (i as i64 * 100_000)));
+        c.price = Some(Price::from_int(20 + (i as i64 * 5))); // R$ 20 to R$ 265
+        c.avg_volume = Some(Money::from_int(1_000_000 + (i as i64 * 100_000)));
         c.price_days = 30;
         c.has_fundamentals = i % 5 != 0; // 80% have fundamentals
         c.has_dividends = i % 4 != 0;    // 75% have dividends
@@ -47,8 +46,8 @@ fn make_us_candidates(count: usize) -> Vec<AssetCandidate> {
 
     symbols.iter().take(count).enumerate().map(|(i, sym)| {
         let mut c = AssetCandidate::new(*sym, Market::US);
-        c.price = Some(Decimal::from(50 + (i as i64 * 10))); // $50 to $540
-        c.avg_volume = Some(Decimal::from(5_000_000 + (i as i64 * 200_000)));
+        c.price = Some(Price::from_int(50 + (i as i64 * 10))); // $50 to $540
+        c.avg_volume = Some(Money::from_int(5_000_000 + (i as i64 * 200_000)));
         c.price_days = 30;
         c.has_fundamentals = false; // US has no fundamentals (known limitation)
         c.has_dividends = false;    // US has no dividends
@@ -60,13 +59,8 @@ fn make_us_candidates(count: usize) -> Vec<AssetCandidate> {
 
 #[test]
 fn smoke_test_br_multiple_rebalances() {
-    // Configuration
+    // Configuration - use default gating (require_fundamentals is false)
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false, // Don't require for smoke test
-            require_dividends: false,
-            ..Default::default()
-        },
         selection: SelectionConfig {
             top_n_br: 10,
             top_n_us: 10,
@@ -76,11 +70,12 @@ fn smoke_test_br_multiple_rebalances() {
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
         eligibility_provider: None,
+        ..Default::default()
     };
     let engine = EntryEngine::new(config);
 
     let candidates = make_br_candidates(50);
-    let capital = dec!(1_000_000); // R$ 1M
+    let capital = Money::from_int(1_000_000); // R$ 1M
     let mut positions: HashMap<String, i64> = HashMap::new();
 
     // Simulate 4 weekly rebalances
@@ -137,11 +132,6 @@ fn smoke_test_br_multiple_rebalances() {
 fn smoke_test_us_without_fundamentals() {
     // US market without fundamentals should still work with price-based techniques
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false, // Don't require - would exclude all US
-            require_dividends: false,
-            ..Default::default()
-        },
         selection: SelectionConfig {
             top_n_br: 10,
             top_n_us: 10,
@@ -151,11 +141,12 @@ fn smoke_test_us_without_fundamentals() {
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
         eligibility_provider: None,
+        ..Default::default()
     };
     let engine = EntryEngine::new(config);
 
     let candidates = make_us_candidates(50);
-    let capital = dec!(500_000); // $500k
+    let capital = Money::from_int(500_000); // $500k
     let positions: HashMap<String, i64> = HashMap::new();
 
     // Single rebalance
@@ -186,12 +177,9 @@ fn smoke_test_us_without_fundamentals() {
 #[test]
 fn smoke_test_fundamentals_required_drops_us() {
     // When fundamentals are required, all US assets should be excluded
+    let gating: GatingConfig = serde_json::from_str(r#"{"require_fundamentals": true}"#).unwrap();
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: true, // REQUIRE fundamentals
-            require_dividends: false,
-            ..Default::default()
-        },
+        gating,
         selection: SelectionConfig::default(),
         weighting: WeightingConfig::default(),
         orders: OrderGeneratorConfig::default(),
@@ -200,7 +188,7 @@ fn smoke_test_fundamentals_required_drops_us() {
     let engine = EntryEngine::new(config);
 
     let candidates = make_us_candidates(20);
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
 
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
@@ -225,7 +213,7 @@ fn smoke_test_determinism() {
     let engine = EntryEngine::new(config);
 
     let candidates = make_br_candidates(30);
-    let capital = dec!(500_000);
+    let capital = Money::from_int(500_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
@@ -278,8 +266,8 @@ fn test_volatility_anti_lookahead() {
     let candidates1 = vec![
         {
             let mut c = AssetCandidate::new("A", Market::BR);
-            c.price = Some(dec!(50));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(50));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.20); // Low vol -> high weight
@@ -288,8 +276,8 @@ fn test_volatility_anti_lookahead() {
         },
         {
             let mut c = AssetCandidate::new("B", Market::BR);
-            c.price = Some(dec!(60));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(60));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.30); // Medium vol
@@ -298,8 +286,8 @@ fn test_volatility_anti_lookahead() {
         },
         {
             let mut c = AssetCandidate::new("C", Market::BR);
-            c.price = Some(dec!(70));
-            c.avg_volume = Some(dec!(2_000_000));
+            c.price = Some(Price::from_int(70));
+            c.avg_volume = Some(Money::from_int(2_000_000));
             c.price_days = 30;
             c.has_fundamentals = true;
             c.volatility = Some(0.40); // High vol -> low weight
@@ -312,7 +300,7 @@ fn test_volatility_anti_lookahead() {
     // Even if "future" volatility would be different, Entry doesn't see it
     let candidates2 = candidates1.clone();
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
@@ -435,8 +423,8 @@ fn test_future_fundamentals_excluded() {
     // Create a candidate with fundamentals from the future
     let candidates = vec![{
         let mut c = AssetCandidate::new("FUTURE_DATA", Market::BR);
-        c.price = Some(dec!(50));
-        c.avg_volume = Some(dec!(2_000_000));
+        c.price = Some(Price::from_int(50));
+        c.avg_volume = Some(Money::from_int(2_000_000));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.25);
@@ -446,7 +434,7 @@ fn test_future_fundamentals_excluded() {
         c
     }];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
@@ -479,8 +467,8 @@ fn test_past_fundamentals_allowed() {
 
     let candidates = vec![{
         let mut c = AssetCandidate::new("PAST_DATA", Market::BR);
-        c.price = Some(dec!(50));
-        c.avg_volume = Some(dec!(2_000_000));
+        c.price = Some(Price::from_int(50));
+        c.avg_volume = Some(Money::from_int(2_000_000));
         c.price_days = 30;
         c.has_fundamentals = true;
         c.volatility = Some(0.25);
@@ -490,7 +478,7 @@ fn test_past_fundamentals_allowed() {
         c
     }];
 
-    let capital = dec!(100_000);
+    let capital = Money::from_int(100_000);
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
@@ -501,4 +489,3 @@ fn test_past_fundamentals_allowed() {
     assert_eq!(result.targets.len(), 1, "Past data asset should be selected");
     assert_eq!(result.targets[0].symbol, "PAST_DATA");
 }
-
