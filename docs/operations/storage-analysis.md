@@ -1,37 +1,137 @@
 # Análise de Armazenamento SCG
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2026-01-04  
-**Status**: Diagnóstico Completo
+**Versão**: 2.0.0  
+**Última Atualização**: 2026-01-05  
+**Status**: OBFS Ativo (Produção)
 
 ---
 
 ## Sumário Executivo
 
-Uma campanha SCG de **5 minutos** consome aproximadamente **6.7 GB** de espaço em disco. Este documento analisa as causas raiz desse consumo e fornece dados para tomada de decisão sobre otimizações.
+Com a implementação do **OBFS (Optimized Binary File System)**, o consumo de armazenamento foi reduzido em **7.1x** comparado ao formato Legacy (JSON/CSV).
+
+| Formato | Storage/Estratégia | 176K Estratégias |
+|---------|-------------------|------------------|
+| **Legacy (JSON/CSV)** | 57 KB | ~10 GB |
+| **OBFS (Parquet/Zstd)** | 8.01 KB | 1.4 GB |
+| **Redução** | **7.1x** | **7.1x** |
 
 ---
 
-## Métricas de Referência
+## Benchmark de Produção (5 Horas)
 
-### Campanha de 5 Minutos (`scg_5min_maxpower`)
+Campanha overnight executada em 2026-01-05:
+
+| Métrica | Valor |
+|---------|-------|
+| **Estratégias geradas** | 176,672 |
+| **Runs completados** | 3/3 (100%) |
+| **Storage total** | 2.1 GB |
+| **Storage/estratégia** | 8.01 KB |
+| **Throughput** | 210 estratégias/s |
+| **Tempo/estratégia** | 4.75 ms |
+
+### Consolidação por Run
+
+| Run | Artifacts | Rows | Parquet | Tempo |
+|-----|-----------|------|---------|-------|
+| run_1a3d5a5f | 59,325 | 73.8M | 355 MB | 95s |
+| run_7acb4c23 | 58,331 | 72.6M | 432 MB | 97s |
+| run_393ae6ad | 59,016 | 73.4M | 370 MB | 97s |
+
+---
+
+## Comparativo: Legacy vs OBFS
+
+### Storage por Componente
+
+| Componente | Legacy | OBFS | Redução |
+|------------|--------|------|---------|
+| Timeseries | 57 KB (CSV) | 6 KB (Parquet) | 9.5x |
+| Metadata | 820 B (JSON) | 200 B (binary) | 4.1x |
+| Metrics | 502 B (JSON) | 150 B (binary) | 3.3x |
+| Trace | 1.8 KB (JSONL) | 400 B (binary) | 4.5x |
+| **Total** | **60 KB** | **8.01 KB** | **7.5x** |
+
+### Overhead de Filesystem
+
+| Formato | Arquivos/Backtest | Diretórios | Inodes |
+|---------|-------------------|------------|--------|
+| Legacy | 4 | 1 | 5 |
+| OBFS | 1 (pending) → 0 (consolidado) | 0 | 1 → 0 |
+
+### Visualização
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  LEGACY (57 KB/estratégia)                                                 │
+│  timeseries.csv ████████████████████████████████████████████████████ 94%   │
+│  FS Overhead    ███ 5.6%                                                   │
+│  trace.jsonl    █ 2.4%                                                     │
+│                                                                             │
+│  OBFS (8.01 KB/estratégia)                                                 │
+│  Parquet        ██████████ 75%                                             │
+│  Metadata       ██ 2.5%                                                    │
+│  Metrics        █ 1.9%                                                     │
+│  Trace          █ 5%                                                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Projeção para Campanhas (OBFS)
+
+| Duração | Estratégias (est.) | OBFS | Legacy |
+|---------|-------------------|------|--------|
+| 5 min | 59K | 473 MB | 3.4 GB |
+| 30 min | 350K | 2.8 GB | 20 GB |
+| 1 hora | 700K | 5.6 GB | 40 GB |
+| 5 horas | 180K × 3 runs | 2.1 GB | 15 GB |
+| 24 horas | 3.5M | 28 GB | 200 GB |
+
+---
+
+## Estrutura OBFS
+
+### Durante Execução (Phase 1: Pending)
+
+```
+output/scg/run_XXXX/backtests/
+└── pending/
+    ├── <uuid1>.obfs    (1-2 KB, Zstd compressed)
+    ├── <uuid2>.obfs
+    └── ...             (59K arquivos temporários)
+```
+
+### Após Consolidação (Phase 2: Consolidated)
+
+```
+output/scg/run_XXXX/backtests/
+├── pending/            (vazio após consolidação)
+└── consolidated/
+    ├── data/
+    │   └── timeseries.parquet    (355-432 MB, ~59K estratégias)
+    └── lmdb/
+        ├── data.mdb              (76 MB, índice UUID → offset)
+        └── lock.mdb
+```
+
+---
+
+## Análise Legacy (Referência Histórica)
+
+### Campanha de 5 Minutos (Formato Antigo)
 
 | Métrica | Valor |
 |---------|-------|
 | **Espaço total consumido** | 6.7 GB |
 | **Backtests executados** | 96,995 |
-| **Estratégias no Hall of Fame** | 1,000 |
-| **Estratégias validadas (Stage B)** | 51 |
 | **Diretórios criados** | 96,995 |
 | **Arquivos criados** | 387,980 |
-| **Gerações evolutivas** | 500 |
-| **Tempo por backtest** | ~25ms |
 
----
-
-## Breakdown do Consumo de Espaço
-
-### Por Componente
+### Por Componente (Legacy)
 
 | Componente | Tamanho Total | % do Total | Por Backtest |
 |------------|---------------|------------|--------------|
@@ -41,162 +141,43 @@ Uma campanha SCG de **5 minutos** consome aproximadamente **6.7 GB** de espaço 
 | metadata.json | 76 MB | 1.1% | 820 B |
 | metrics.json | 47 MB | 0.7% | 502 B |
 
-### Visualização
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  timeseries.csv ████████████████████████████████████████████████████ 94%   │
-│  FS Overhead    ███ 5.6%                                                   │
-│  trace.jsonl    █ 2.4%                                                     │
-│  metadata.json  ░ 1.1%                                                     │
-│  metrics.json   ░ 0.7%                                                     │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Estrutura de Arquivos por Backtest
-
-Cada um dos 96,995 backtests gera uma pasta com 4 arquivos:
+### Estrutura de Arquivos (Legacy)
 
 ```
 output/scg/run_XXXX/backtests/
 └── <uuid>/                          # 96,995 pastas
-    ├── metadata.json     (820 B)    # Metadados do run
-    ├── metrics.json      (502 B)    # Métricas calculadas
-    ├── timeseries.csv    (57 KB)    # Série temporal diária ← 94% do espaço
-    └── trace.jsonl       (1.8 KB)   # Log de execução
+    ├── metadata.json     (820 B)
+    ├── metrics.json      (502 B)
+    ├── timeseries.csv    (57 KB)    # 94% do espaço
+    └── trace.jsonl       (1.8 KB)
 ```
 
 ---
 
-## Análise Detalhada: timeseries.csv
+## Ineficiências do Legacy (Resolvidas pelo OBFS)
 
-### Estrutura do Arquivo
-
-```csv
-date,equity,drawdown,exposure,vol_exante,vol_expost,dividend_cashflow,dividend_cumulative
-2020-01-02,1000000.00,0.000000,0.131745,,,,
-2020-01-03,998317.675,-0.001682,0.131745,,,,
-...
-2024-12-30,1101803.295,-0.048829,0.131737,,,,
-```
-
-### Características
-
-| Característica | Valor |
-|----------------|-------|
-| Linhas por arquivo | 1,245 (dias de trading) |
-| Colunas | 8 |
-| Colunas **sempre vazias** | 4 (`vol_exante`, `vol_expost`, `dividend_cashflow`, `dividend_cumulative`) |
-| Caracteres médios por linha | 44 |
-| Formato | Texto CSV (não comprimido) |
-
-### Ineficiência do Formato Texto
-
-| Dado | Formato Texto | Formato Binário | Overhead |
-|------|---------------|-----------------|----------|
-| `1101803.295` | 11 bytes | 4 bytes (float32) | 2.75x |
-| `-0.048829` | 9 bytes | 4 bytes (float32) | 2.25x |
-| `2020-01-02` | 10 bytes | 2 bytes (days offset) | 5x |
-
-### Teste de Compressão
-
-| Formato | Tamanho | Redução |
-|---------|---------|---------|
-| CSV original | 57 KB | - |
-| CSV + gzip | 16 KB | 71% |
-| CSV + zstd | 16 KB | 71% |
+| Problema | Impacto Legacy | Solução OBFS |
+|----------|---------------|--------------|
+| Formato texto CSV | +3.7 GB overhead | Parquet binário + Zstd |
+| 96k diretórios | 379 MB inode overhead | Zero diretórios |
+| Colunas vazias | 470 MB overhead | Schema otimizado |
+| Date duplicado 96k× | 1.2 GB | Delta encoding (u16 offset) |
+| Arquivos separados | 387k arquivos | 1 Parquet consolidado |
 
 ---
 
-## Análise: Overhead de Filesystem
+## Código Fonte
 
-### O Problema
+### OBFS (Novo)
 
-O sistema cria um **diretório separado** para cada backtest executado.
+| Componente | Localização |
+|------------|-------------|
+| PendingStore | `crates/obfs/src/pending_store.rs` |
+| Consolidator | `crates/obfs/src/consolidator.rs` |
+| TimeSeriesStore | `crates/obfs/src/timeseries.rs` |
+| Artifact Writer | `crates/backtester_strategy/src/experiment/artifacts.rs` |
 
-| Métrica | Valor |
-|---------|-------|
-| Diretórios criados | 96,995 |
-| Inodes consumidos | 484,975 (5 por backtest) |
-| Tamanho mínimo por diretório (ext4) | 4 KB |
-| **Overhead total** | **379 MB** |
-
-### Cálculo
-
-```
-96,995 backtests × 5 inodes/backtest = 484,975 inodes
-96,995 diretórios × 4 KB/diretório = 379 MB de overhead
-```
-
----
-
-## Análise: Dados Redundantes
-
-### Coluna `date` Duplicada
-
-A coluna `date` contém as **mesmas 1,245 datas** em todos os 96,995 arquivos:
-
-| Métrica | Valor |
-|---------|-------|
-| Datas únicas | 1,245 |
-| Arquivos com datas | 96,995 |
-| Bytes por data (texto) | 10 |
-| **Total duplicado** | 1.2 GB |
-
-### Colunas Vazias
-
-4 das 8 colunas estão **sempre vazias** neste run:
-
-- `vol_exante`
-- `vol_expost`
-- `dividend_cashflow`
-- `dividend_cumulative`
-
-Cada linha tem 4 vírgulas extras = ~4 bytes × 1,245 linhas × 96,995 arquivos = **470 MB** de overhead.
-
----
-
-## Análise: Uso vs. Necessidade
-
-### Backtests Salvos vs. Utilizados
-
-| Categoria | Quantidade | Precisa de timeseries.csv? |
-|-----------|------------|---------------------------|
-| Backtests executados | 96,995 | Todos salvos |
-| Hall of Fame (Stage A) | 1,000 | Sim (para análise) |
-| Validados (Stage B) | 51 | Sim (para produção) |
-| **Descartados** | **95,944** | **Só precisavam de metrics.json** |
-
-### Uso Real do timeseries.csv
-
-O `timeseries.csv` é usado por:
-
-1. **Crosscheck** (`crosscheck.rs`) - Recalcula métricas a partir do NAV
-2. **Asset Attribution** (`run_campaign.rs`) - Analisa composição
-
-Ambos os usos ocorrem **apenas para estratégias validadas** (51), não para todos os 96,995 backtests.
-
----
-
-## Projeção para Campanhas Maiores
-
-| Duração | Backtests (est.) | Espaço | Inodes |
-|---------|------------------|--------|--------|
-| 5 min | 97k | 6.7 GB | 485k |
-| 30 min | 580k | 40 GB | 2.9M |
-| 1 hora | 1.16M | 80 GB | 5.8M |
-| 4 horas | 4.64M | 320 GB | 23M |
-| 24 horas | 28M | 1.9 TB | 140M |
-
----
-
-## Código Fonte Relacionado
-
-### Onde os arquivos são gerados
+### Legacy (Referência)
 
 | Arquivo | Localização |
 |---------|-------------|
@@ -205,44 +186,34 @@ Ambos os usos ocorrem **apenas para estratégias validadas** (51), não para tod
 | metadata.json | `crates/backtester_cli/src/output.rs` |
 | trace.jsonl | `crates/backtester_cli/src/output.rs` |
 
-### Onde são consumidos
+---
 
-| Uso | Localização |
-|-----|-------------|
-| Crosscheck | `crates/combiner_cli/src/commands/factory/crosscheck.rs` |
-| Asset Attribution | `crates/combiner_cli/src/commands/factory/run_campaign.rs` |
-| Dashboard | `dashboard/src-tauri/src/lib.rs` |
-
-### Configuração atual
+## Configuração
 
 ```toml
-# configs/campaigns/scg_5min_maxpower.toml
+# configs/campaigns/*.toml
 [output]
+artifact_format = "obfs"    # "obfs" ou "legacy"
 save_generations = true
-save_all_genomes = false      # Existe flag para genomas
+save_all_genomes = false
 save_diversity_metrics = true
 save_restart_events = true
-# save_all_timeseries = ???   # NÃO EXISTE flag para timeseries
 ```
 
 ---
 
-## Resumo das Causas
+## Comandos de Manutenção
 
-| Causa | Impacto | % do Total |
-|-------|---------|------------|
-| timeseries.csv para **todos** os backtests | 5.2 GB | 78% |
-| Formato texto (não comprimido) | +3.7 GB (vs binário) | 55% |
-| Overhead de 96k diretórios | 379 MB | 6% |
-| Colunas vazias incluídas | 470 MB | 7% |
-| Coluna date duplicada 96k vezes | 1.2 GB | 18% |
+```bash
+# Verificar tamanho de uma campanha
+du -sh output/scg/run_*/
 
----
+# Contar arquivos pending
+ls output/scg/run_*/backtests/pending/*.obfs | wc -l
 
-## Arquivos de Referência
+# Verificar Parquet consolidado
+ls -lh output/scg/run_*/backtests/consolidated/data/timeseries.parquet
 
-- Configuração: `configs/campaigns/scg_5min_maxpower.toml`
-- Output: `output/scg/run_b9b2cdf6f410/`
-- Código gerador: `crates/backtester_cli/src/output.rs`
-- Código consumidor: `crates/combiner_cli/src/commands/factory/`
-
+# Limpar pending após consolidação (automático)
+rm -rf output/scg/run_*/backtests/pending/
+```

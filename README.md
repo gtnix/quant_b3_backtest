@@ -29,6 +29,7 @@ Sistema de backtesting institucional de alta performance para os mercados B3 (Br
 - **Precisão**: Cálculos financeiros com `rust_decimal`
 - **Auditabilidade**: Rastreabilidade total de decisões e artefatos
 - **SCG**: Sistema Combinador Generativo com algoritmos genéticos
+- **OBFS**: Armazenamento binário otimizado (7.1x compressão, 8 KB/estratégia)
 - **Dashboard**: Visualização terminal-style (Tauri + React)
 
 ---
@@ -78,6 +79,7 @@ npm run tauri dev
 | [Mapa de Crates](docs/architecture/crate-map.md) | Responsabilidades de cada crate |
 | [SCG Overview](docs/scg/overview.md) | Sistema Combinador Generativo |
 | [Strategy Factory](docs/strategy_factory.md) | Orquestração de campanhas |
+| [OBFS Integration](crates/obfs/INTEGRATION.md) | Sistema de armazenamento binário |
 | [CLI Reference](docs/operations/cli-reference.md) | Comandos backtester |
 | [Combiner CLI](docs/scg/cli-reference.md) | Comandos combiner |
 | [Artefatos](docs/operations/artifacts.md) | Estrutura de output |
@@ -95,6 +97,7 @@ npm run tauri dev
 | **SCG** | `combiner_core` | Genome, Fitness, SIMD metrics |
 | **SCG** | `combiner_engine` | Evolution, Pareto, Hall of Fame |
 | **SCG** | `combiner_cli` | CLI + Strategy Factory |
+| **Storage** | `obfs` | Binary storage (Parquet + Zstd + LMDB) |
 | **Data** | `market_data` | Calendars, FX, Universe |
 | **Frontend** | `dashboard/` | Tauri + React dashboard |
 

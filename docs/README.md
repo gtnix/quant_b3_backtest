@@ -1,8 +1,8 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.4.0  
-**Última Atualização**: 2026-01-04  
-**Status**: Produção (VPS + Neon)
+**Versão**: 3.5.0  
+**Última Atualização**: 2026-01-05  
+**Status**: Produção (VPS + Neon + OBFS)
 
 ---
 
@@ -22,6 +22,7 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 | **Precisão** | Cálculos financeiros com `rust_decimal` |
 | **Auditabilidade** | Rastreabilidade total de decisões e artefatos |
 | **Rigor Anti-Overfitting** | Walk-Forward, PBO, DSR integrados |
+| **OBFS Storage** | Compressão 7.1x via Parquet + Zstd (8 KB/estratégia) |
 
 ---
 
@@ -103,6 +104,7 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 1. [Benchmarks](validation/benchmarks.md)
 2. [Fluxo de Dados](architecture/data-flow.md)
 3. [Decisões de Design](architecture/design-decisions.md)
+4. **[OBFS Integration](../crates/obfs/INTEGRATION.md)** - Sistema de armazenamento binário (7.1x compressão)
 
 ### Para Risk/Compliance
 

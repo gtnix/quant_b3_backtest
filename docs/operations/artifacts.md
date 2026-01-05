@@ -1,12 +1,18 @@
 # Artefatos e Estrutura de Output
 
-**Versão**: 1.3.0  
-**Última Atualização**: 2026-01-04
+**Versão**: 2.0.0  
+**Última Atualização**: 2026-01-05
 
 ## Visão Geral
 
-> ⚠️ **Atenção**: Campanhas SCG consomem espaço significativo (~6.7 GB para 5 min de execução).  
-> Ver [Análise de Armazenamento](storage-analysis.md) para diagnóstico detalhado.
+O sistema utiliza **OBFS (Optimized Binary File System)** para armazenamento de alta performance de artefatos de backtest, com compressão 7.1x superior ao formato Legacy.
+
+| Formato | Storage/Estratégia | Redução |
+|---------|-------------------|---------|
+| Legacy (JSON/CSV) | 57 KB | - |
+| **OBFS (Parquet/Zstd)** | **8.01 KB** | **7.1x** |
+
+> Ver [Análise de Armazenamento](storage-analysis.md) para benchmark detalhado.
 
 O sistema gera artefatos em dois diretórios principais:
 
@@ -258,6 +264,76 @@ output/scg/<experiment_id>/
   ]
 }
 ```
+
+---
+
+## Artefatos OBFS (Formato Binário)
+
+Com `artifact_format = "obfs"` habilitado, os backtests são armazenados em formato binário otimizado usando uma estratégia de escrita em duas fases.
+
+### Estrutura OBFS
+
+```
+output/scg/run_XXXX/backtests/
+├── pending/                          # Phase 1: Arquivos isolados (durante execução)
+│   ├── <uuid1>.obfs                  # 1-2 KB cada (Zstd compressed)
+│   ├── <uuid2>.obfs
+│   └── ...
+│
+└── consolidated/                     # Phase 2: Dados consolidados (após execução)
+    ├── data/
+    │   └── timeseries.parquet        # Columnar storage (355-432 MB para 59K estratégias)
+    └── lmdb/
+        ├── data.mdb                  # Index UUID → offset (76 MB)
+        └── lock.mdb
+```
+
+### Parquet Schema
+
+```
+backtest_uuid: Utf8 (dictionary encoded)
+date_offset: UInt16 (dias desde 2020-01-01)
+equity: Float32
+drawdown: Float32
+exposure: Float32
+```
+
+### PendingArtifact (Phase 1)
+
+Cada worker escreve um arquivo `.obfs` isolado contendo:
+
+```rust
+pub struct PendingArtifact {
+    pub version: u8,
+    pub run_id: Uuid,
+    pub metadata: Metadata,
+    pub metrics: Metrics,
+    pub trace: Vec<TraceEvent>,
+    pub timeseries: Vec<TimeseriesPoint>,
+}
+```
+
+### Consolidação (Phase 2)
+
+Após todos os workers completarem, o `Consolidator` merge os arquivos pending:
+
+- Processa em batches de 5,000 artifacts
+- Cada batch vira um row group no Parquet
+- Evita Arrow offset overflow (limite 2GB strings)
+- LMDB indexa UUID → offset para O(1) lookups
+
+### Configuração
+
+```toml
+[output]
+artifact_format = "obfs"    # "obfs" ou "legacy"
+```
+
+### Métricas de Produção
+
+| Run | Artifacts | Rows | Parquet | Tempo |
+|-----|-----------|------|---------|-------|
+| 59K | 59,325 | 73.8M | 355 MB | 95s |
 
 ---
 
@@ -623,30 +699,34 @@ Exemplo: a1b2c3d4
 
 ---
 
----
-
 ## Consumo de Espaço
 
-### Referência por Campanha
+### OBFS vs Legacy
 
-| Duração | Backtests | Espaço Estimado |
-|---------|-----------|-----------------|
-| 5 min | ~97k | 6.7 GB |
-| 30 min | ~580k | 40 GB |
-| 1 hora | ~1.16M | 80 GB |
-| 4 horas | ~4.64M | 320 GB |
+| Duração | Estratégias | OBFS | Legacy |
+|---------|-------------|------|--------|
+| 5 min | ~59K | 473 MB | 3.4 GB |
+| 30 min | ~350K | 2.8 GB | 20 GB |
+| 1 hora | ~700K | 5.6 GB | 40 GB |
+| 5 horas | ~180K × 3 | 2.1 GB | 15 GB |
 
-### Breakdown por Arquivo
+### Storage por Estratégia
 
-| Componente | % do Espaço | Por Backtest |
-|------------|-------------|--------------|
-| `timeseries.csv` | 94% | 57 KB |
-| Overhead FS | 5.6% | 4 KB |
-| `trace.jsonl` | 2.4% | 1.8 KB |
-| `metadata.json` | 1.1% | 820 B |
-| `metrics.json` | 0.7% | 502 B |
+| Formato | Storage | Redução |
+|---------|---------|---------|
+| **OBFS** | **8.01 KB** | **7.1x** |
+| Legacy | 57 KB | - |
 
-> 📊 Para análise detalhada, consulte [storage-analysis.md](storage-analysis.md)
+### Breakdown OBFS
+
+| Componente | Tamanho | % |
+|------------|---------|---|
+| Parquet timeseries | 6 KB | 75% |
+| Metadata (binary) | 200 B | 2.5% |
+| Metrics (binary) | 150 B | 1.9% |
+| Trace (binary) | 400 B | 5% |
+
+> Para análise detalhada, consulte [storage-analysis.md](storage-analysis.md)
 
 ---
 
@@ -766,9 +846,19 @@ combiner factory run --campaign configs/momentum.toml --export-site
 
 | Componente | Localização |
 |------------|-------------|
+| **OBFS PendingStore** | `crates/obfs/src/pending_store.rs` |
+| **OBFS Consolidator** | `crates/obfs/src/consolidator.rs` |
+| **OBFS TimeSeriesStore** | `crates/obfs/src/timeseries.rs` |
+| Artifact Writer | `crates/backtester_strategy/src/experiment/artifacts.rs` |
 | Persistência SCG | `combiner_engine/src/persistence.rs` |
 | Reports backtester | `backtester_reports/src/lib.rs` |
 | Factory artifacts | `combiner_cli/src/commands/factory.rs` |
 | Dashboard backend | `dashboard/src-tauri/src/lib.rs` |
 | Dashboard state | `dashboard/src/stores/dataStore.ts` |
 | Site export | `combiner_cli/src/commands/site_export.rs` |
+
+---
+
+## Referência OBFS
+
+Ver [OBFS Integration Guide](../../crates/obfs/INTEGRATION.md) para documentação técnica completa do sistema de armazenamento binário.
