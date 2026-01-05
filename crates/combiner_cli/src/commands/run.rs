@@ -150,6 +150,12 @@ pub fn execute(
         executor = executor.with_risk_profile(profile);
     }
 
+    // Enable OBFS if configured (90% storage reduction)
+    if config.output.artifact_format == "obfs" {
+        info!("OBFS artifact format enabled for backtests");
+        executor = executor.with_obfs(true);
+    }
+
     // Track start time
     let start_time = std::time::Instant::now();
 
