@@ -5,8 +5,12 @@
 //! Responsibilities:
 //! - Calculate performance metrics (Sharpe, Sortino, Calmar, etc.)
 //! - Track NAV history and drawdowns
-//! - Generate output files (CSV, JSON)
+//! - Generate output files (CSV, JSON, OBFS)
 //! - Create run manifests for audit trail
+//!
+//! Supports two output formats:
+//! - Legacy: JSON files (backwards compatible)
+//! - OBFS: Ultra-compressed binary bundle (~8x compression)
 //!
 //! Note: This module runs AFTER the simulation loop and is NOT in the hot path.
 //! Performance: Uses SIMD-optimized calculations from `backtester_core::simd`.
@@ -17,13 +21,19 @@
 
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use zstd::stream::{Decoder, Encoder};
 
 use backtester_core::simd;
 pub use backtester_portfolio::{Portfolio, Trade};
+
+/// Ultra compression level (Zstd max with LDM).
+const ULTRA_COMPRESSION_LEVEL: i32 = 19;
 
 // =============================================================================
 // BACKTEST RESULT (Complete)
@@ -336,6 +346,30 @@ impl BacktestResult {
     #[must_use]
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
+    }
+
+    /// Convert to OBFS bytes (ultra-compressed).
+    #[must_use]
+    pub fn to_obfs(&self) -> Vec<u8> {
+        let json = serde_json::to_vec(self).unwrap_or_default();
+        ultra_compress(&json).unwrap_or(json)
+    }
+
+    /// Read from OBFS bytes.
+    pub fn from_obfs(data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        let decompressed = ultra_decompress(data)?;
+        Ok(serde_json::from_slice(&decompressed)?)
+    }
+
+    /// Save to OBFS file.
+    pub fn save_obfs(&self, path: &Path) -> std::io::Result<()> {
+        fs::write(path, self.to_obfs())
+    }
+
+    /// Load from OBFS file.
+    pub fn load_obfs(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let data = fs::read(path)?;
+        Self::from_obfs(&data)
     }
 
     /// Calculate deterministic hash for verification.
@@ -699,17 +733,32 @@ impl RunManifest {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Save to file.
+    /// Save to file (JSON format).
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(path, json)
     }
 
-    /// Load from file.
+    /// Save to OBFS file (ultra-compressed).
+    pub fn save_obfs(&self, path: &Path) -> Result<(), std::io::Error> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let compressed = ultra_compress(&json)?;
+        fs::write(path, compressed)
+    }
+
+    /// Load from file (JSON format).
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let json = fs::read_to_string(path)?;
         Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Load from OBFS file.
+    pub fn load_obfs(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        Ok(serde_json::from_slice(&decompressed)?)
     }
 }
 
@@ -739,6 +788,213 @@ impl ResultsCalculator {
             fills_executed,
             risk_free_rate,
         )
+    }
+}
+
+// =============================================================================
+// OBFS COMPRESSION HELPERS
+// =============================================================================
+
+/// Ultra-compress data using Zstd level 19 with LDM and checksum.
+fn ultra_compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+    encoder.include_checksum(true)?;
+    encoder.long_distance_matching(true)?;
+    encoder.write_all(data)?;
+    encoder.finish()
+}
+
+/// Decompress ultra-compressed data.
+fn ultra_decompress(compressed: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut decoder = Decoder::new(compressed)?;
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
+}
+
+// =============================================================================
+// RESULT BUNDLE (OBFS Native)
+// =============================================================================
+
+/// rkyv-compatible metrics entry for ultra-fast serialization.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone)]
+#[rkyv(derive(Debug))]
+pub struct MetricsEntry {
+    /// Sharpe ratio * 1000 (fixed-point for space efficiency)
+    pub sharpe_x1000: i32,
+    /// CAGR * 10000
+    pub cagr_x10000: i32,
+    /// Max drawdown * 10000
+    pub max_dd_x10000: i32,
+    /// Volatility * 10000
+    pub vol_x10000: i32,
+    /// Total trades
+    pub num_trades: u32,
+    /// Win rate * 100
+    pub win_rate_x100: u16,
+    /// Is valid
+    pub is_valid: bool,
+}
+
+impl MetricsEntry {
+    /// Create from BacktestResult.
+    #[must_use]
+    pub fn from_result(result: &BacktestResult) -> Self {
+        Self {
+            sharpe_x1000: (result.sharpe_ratio * 1000.0) as i32,
+            cagr_x10000: (result.annual_return * 10000.0) as i32,
+            max_dd_x10000: (result.max_drawdown * 10000.0) as i32,
+            vol_x10000: (result.annual_volatility * 10000.0) as i32,
+            num_trades: result.num_trades,
+            win_rate_x100: (result.win_rate * 100.0) as u16,
+            is_valid: result.is_valid,
+        }
+    }
+
+    /// Convert back to floating-point values.
+    #[must_use]
+    pub fn sharpe(&self) -> f64 {
+        self.sharpe_x1000 as f64 / 1000.0
+    }
+
+    /// Get CAGR.
+    #[must_use]
+    pub fn cagr(&self) -> f64 {
+        self.cagr_x10000 as f64 / 10000.0
+    }
+
+    /// Get max drawdown.
+    #[must_use]
+    pub fn max_drawdown(&self) -> f64 {
+        self.max_dd_x10000 as f64 / 10000.0
+    }
+}
+
+/// Consolidated result bundle for OBFS storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResultBundle {
+    /// Run manifest
+    pub manifest: RunManifest,
+    /// Backtest result
+    pub result: BacktestResult,
+    /// NAV history (optional, can be large)
+    pub nav_history: Option<NavHistory>,
+    /// Bundle timestamp
+    pub created_at: DateTime<Utc>,
+}
+
+impl ResultBundle {
+    /// Create a new result bundle.
+    #[must_use]
+    pub fn new(manifest: RunManifest, result: BacktestResult) -> Self {
+        Self {
+            manifest,
+            result,
+            nav_history: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Add NAV history.
+    #[must_use]
+    pub fn with_nav_history(mut self, nav: NavHistory) -> Self {
+        self.nav_history = Some(nav);
+        self
+    }
+
+    /// Save to OBFS file (single ultra-compressed file).
+    pub fn save_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let compressed = ultra_compress(&json)?;
+        fs::write(path, compressed)
+    }
+
+    /// Load from OBFS file.
+    pub fn load_obfs(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        Ok(serde_json::from_slice(&decompressed)?)
+    }
+
+    /// Save to JSON file (legacy format).
+    pub fn save_json(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(path, json)
+    }
+}
+
+/// Writer for multiple result bundles.
+pub struct ResultBundleWriter {
+    root_path: PathBuf,
+    written: u64,
+}
+
+impl ResultBundleWriter {
+    /// Create a new bundle writer.
+    pub fn new(root_path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root_path = root_path.into();
+        fs::create_dir_all(&root_path)?;
+        Ok(Self {
+            root_path,
+            written: 0,
+        })
+    }
+
+    /// Add a result bundle.
+    pub fn add(&mut self, bundle: &ResultBundle) -> std::io::Result<()> {
+        let filename = format!("{}.obfs", bundle.manifest.run_id);
+        let path = self.root_path.join(filename);
+        bundle.save_obfs(&path)?;
+        self.written += 1;
+        Ok(())
+    }
+
+    /// Get count of written bundles.
+    #[must_use]
+    pub fn count(&self) -> u64 {
+        self.written
+    }
+}
+
+/// Reader for result bundles.
+pub struct ResultBundleReader {
+    root_path: PathBuf,
+}
+
+impl ResultBundleReader {
+    /// Open a bundle directory.
+    #[must_use]
+    pub fn new(root_path: impl Into<PathBuf>) -> Self {
+        Self {
+            root_path: root_path.into(),
+        }
+    }
+
+    /// List all bundle IDs.
+    pub fn list(&self) -> std::io::Result<Vec<String>> {
+        let mut ids = Vec::new();
+        if !self.root_path.exists() {
+            return Ok(ids);
+        }
+        for entry in fs::read_dir(&self.root_path)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.ends_with(".obfs") {
+                if let Some(id) = name_str.strip_suffix(".obfs") {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    /// Load a bundle by run ID.
+    pub fn load(&self, run_id: &str) -> Result<ResultBundle, Box<dyn std::error::Error>> {
+        let path = self.root_path.join(format!("{}.obfs", run_id));
+        ResultBundle::load_obfs(&path)
     }
 }
 

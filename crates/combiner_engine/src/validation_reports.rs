@@ -1,23 +1,27 @@
 //! Validation Report Export
 //!
-//! Standardized JSON export for anti-overfitting validation results.
-//! Generates three files for each validated candidate:
-//! - `wfa_report.json` - Walk-Forward Analysis results
-//! - `pbo_dsr.json` - Probability of Backtest Overfitting / Deflated Sharpe
-//! - `stress_report.json` - Execution stress test results
+//! Standardized export for anti-overfitting validation results.
+//! Supports two output formats:
+//! - Legacy JSON: Individual files (wfa_report.json, pbo_dsr.json, stress_report.json)
+//! - OBFS: Consolidated ultra-compressed binary bundle (~10x compression)
 //!
 //! These files provide evidence for Marco 3 (Validation) and Marco 4 (Promotion Gates).
 
-use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zstd::stream::{Decoder, Encoder};
 
 use crate::validation::{WfaResult, CpcvResult, PboDsrResult};
 use backtester_execution::StressSuiteResult;
+
+/// Ultra compression level (Zstd max with LDM)
+const ULTRA_COMPRESSION_LEVEL: i32 = 19;
 
 // =============================================================================
 // WFA REPORT
@@ -133,6 +137,22 @@ impl WfaReport {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let mut file = fs::File::create(path)?;
         file.write_all(json.as_bytes())
+    }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        fs::write(path, compressed)
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
 
@@ -276,6 +296,22 @@ impl PboDsrReport {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let mut file = fs::File::create(path)?;
         file.write_all(json.as_bytes())
+    }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        fs::write(path, compressed)
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
 
@@ -438,6 +474,22 @@ impl StressReport {
         let mut file = fs::File::create(path)?;
         file.write_all(json.as_bytes())
     }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        fs::write(path, compressed)
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
 }
 
 // =============================================================================
@@ -585,7 +637,7 @@ impl ValidationBundle {
         }
     }
 
-    /// Write all reports to a directory.
+    /// Write all reports to a directory (Legacy JSON format).
     pub fn write_to_dir(&self, dir: &Path) -> std::io::Result<()> {
         fs::create_dir_all(dir)?;
 
@@ -609,6 +661,308 @@ impl ValidationBundle {
 
         Ok(())
     }
+
+    /// Write all reports as single consolidated OBFS bundle (~10x compression).
+    /// Creates: validation.obfs (single file containing all reports)
+    pub fn write_obfs_bundle(&self, dir: &Path) -> std::io::Result<()> {
+        fs::create_dir_all(dir)?;
+
+        // Serialize entire bundle to JSON
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Ultra-compress with Zstd level 19 + LDM
+        let compressed = ultra_compress(&json)?;
+
+        // Write single file
+        let path = dir.join("validation.obfs");
+        fs::write(&path, &compressed)?;
+
+        tracing::debug!(
+            "Validation bundle written: {} bytes -> {} bytes ({:.1}x)",
+            json.len(),
+            compressed.len(),
+            json.len() as f64 / compressed.len() as f64
+        );
+
+        Ok(())
+    }
+
+    /// Read from OBFS bundle.
+    pub fn read_obfs_bundle(path: &Path) -> std::io::Result<Self> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+}
+
+// =============================================================================
+// OBFS COMPRESSION HELPERS
+// =============================================================================
+
+/// Ultra-compress data using Zstd level 19 with LDM and checksum.
+fn ultra_compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+    encoder.include_checksum(true)?;
+    encoder.long_distance_matching(true)?;
+    encoder.write_all(data)?;
+    encoder.finish()
+}
+
+/// Decompress ultra-compressed data.
+fn ultra_decompress(compressed: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut decoder = Decoder::new(compressed)?;
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
+}
+
+// =============================================================================
+// VALIDATION REPORT BUNDLE (OBFS Native)
+// =============================================================================
+
+/// rkyv-compatible entry for consolidated validation storage.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone)]
+#[rkyv(derive(Debug))]
+pub struct ValidationReportEntry {
+    /// UUID as bytes
+    pub uuid_bytes: [u8; 16],
+    /// WFA passed
+    pub wfa_passed: bool,
+    /// OOS Sharpe (net)
+    pub oos_sharpe_net: f64,
+    /// Degradation percentage
+    pub degradation_pct: f64,
+    /// PBO value
+    pub pbo: f64,
+    /// DSR value
+    pub dsr: f64,
+    /// Stress pass rate
+    pub stress_pass_rate: f64,
+    /// Overall verdict (0=Fail, 1=Pass, 2=Warn)
+    pub verdict: u8,
+}
+
+impl ValidationReportEntry {
+    pub fn uuid(&self) -> Uuid {
+        Uuid::from_bytes(self.uuid_bytes)
+    }
+
+    pub fn from_bundle(bundle: &ValidationBundle) -> Option<Self> {
+        let uuid = Uuid::parse_str(&bundle.genome_id).ok()?;
+        Some(Self {
+            uuid_bytes: *uuid.as_bytes(),
+            wfa_passed: bundle.summary.wfa_verdict == Some(ValidationVerdict::Pass),
+            oos_sharpe_net: bundle.summary.oos_sharpe_net.unwrap_or(0.0),
+            degradation_pct: bundle.wfa.as_ref().map(|w| w.summary.degradation_pct).unwrap_or(0.0),
+            pbo: bundle.summary.pbo.unwrap_or(1.0),
+            dsr: bundle.summary.dsr.unwrap_or(0.0),
+            stress_pass_rate: bundle.summary.stress_pass_rate.unwrap_or(0.0),
+            verdict: match bundle.overall_verdict {
+                ValidationVerdict::Fail => 0,
+                ValidationVerdict::Pass => 1,
+                ValidationVerdict::Warn => 2,
+            },
+        })
+    }
+}
+
+/// Location of data within the bundle file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleLocation {
+    pub offset: u64,
+    pub compressed_size: u32,
+    pub original_size: u32,
+}
+
+/// Writer for consolidated validation report bundles.
+pub struct ValidationBundleWriter {
+    root_path: PathBuf,
+    data_file: Option<File>,
+    entries: Vec<(Uuid, BundleLocation)>,
+    written_count: u64,
+}
+
+impl ValidationBundleWriter {
+    /// Create a new bundle writer.
+    pub fn new(root_path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root_path = root_path.into();
+        fs::create_dir_all(&root_path)?;
+
+        Ok(Self {
+            root_path,
+            data_file: None,
+            entries: Vec::new(),
+            written_count: 0,
+        })
+    }
+
+    fn data_file_path(&self) -> PathBuf {
+        self.root_path.join("validations.obfs")
+    }
+
+    fn ensure_data_file(&mut self) -> std::io::Result<&mut File> {
+        if self.data_file.is_none() {
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .append(true)
+                .open(self.data_file_path())?;
+            self.data_file = Some(file);
+        }
+        Ok(self.data_file.as_mut().unwrap())
+    }
+
+    /// Add a validation bundle.
+    pub fn add(&mut self, bundle: &ValidationBundle) -> std::io::Result<()> {
+        let uuid = Uuid::parse_str(&bundle.genome_id)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        // Serialize bundle to JSON
+        let json = serde_json::to_vec(bundle)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Ultra-compress
+        let compressed = ultra_compress(&json)?;
+
+        // Write to data file
+        let file = self.ensure_data_file()?;
+        let offset = file.seek(SeekFrom::End(0))?;
+
+        // Write length prefix + compressed data
+        let len_bytes = (compressed.len() as u32).to_le_bytes();
+        file.write_all(&len_bytes)?;
+        file.write_all(&compressed)?;
+
+        // Track location
+        self.entries.push((
+            uuid,
+            BundleLocation {
+                offset,
+                compressed_size: compressed.len() as u32,
+                original_size: json.len() as u32,
+            },
+        ));
+        self.written_count += 1;
+
+        Ok(())
+    }
+
+    /// Finish writing and return stats.
+    pub fn finish(mut self) -> std::io::Result<ValidationBundleStats> {
+        // Sync data file
+        if let Some(ref mut file) = self.data_file {
+            file.sync_all()?;
+        }
+
+        // Write index
+        let index_path = self.root_path.join("index.json");
+        let index: std::collections::HashMap<String, BundleLocation> = self
+            .entries
+            .iter()
+            .map(|(uuid, loc)| (uuid.to_string(), loc.clone()))
+            .collect();
+        let index_json = serde_json::to_string_pretty(&index)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        fs::write(index_path, index_json)?;
+
+        // Get data file size
+        let data_size = if self.data_file_path().exists() {
+            fs::metadata(self.data_file_path())?.len()
+        } else {
+            0
+        };
+
+        Ok(ValidationBundleStats {
+            bundle_count: self.written_count,
+            data_file_size: data_size,
+            compression_level: ULTRA_COMPRESSION_LEVEL,
+        })
+    }
+
+    pub fn count(&self) -> u64 {
+        self.written_count
+    }
+}
+
+/// Reader for consolidated validation report bundles.
+pub struct ValidationBundleReader {
+    root_path: PathBuf,
+    index: std::collections::HashMap<String, BundleLocation>,
+}
+
+impl ValidationBundleReader {
+    /// Open an existing bundle.
+    pub fn open(root_path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root_path = root_path.into();
+        let index_path = root_path.join("index.json");
+
+        let index: std::collections::HashMap<String, BundleLocation> = if index_path.exists() {
+            let content = fs::read_to_string(&index_path)?;
+            serde_json::from_str(&content)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        Ok(Self { root_path, index })
+    }
+
+    fn data_file_path(&self) -> PathBuf {
+        self.root_path.join("validations.obfs")
+    }
+
+    /// Get a validation bundle by UUID.
+    pub fn get(&self, uuid: Uuid) -> std::io::Result<Option<ValidationBundle>> {
+        let key = uuid.to_string();
+        let loc = match self.index.get(&key) {
+            Some(l) => l,
+            None => return Ok(None),
+        };
+
+        let mut file = File::open(self.data_file_path())?;
+        file.seek(SeekFrom::Start(loc.offset))?;
+
+        // Read length prefix
+        let mut len_bytes = [0u8; 4];
+        file.read_exact(&mut len_bytes)?;
+        let compressed_len = u32::from_le_bytes(len_bytes) as usize;
+
+        // Read compressed data
+        let mut compressed = vec![0u8; compressed_len];
+        file.read_exact(&mut compressed)?;
+
+        // Decompress
+        let decompressed = ultra_decompress(&compressed)?;
+
+        // Deserialize
+        let bundle: ValidationBundle = serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        Ok(Some(bundle))
+    }
+
+    /// List all UUIDs in the bundle.
+    pub fn list(&self) -> Vec<Uuid> {
+        self.index
+            .keys()
+            .filter_map(|s| Uuid::parse_str(s).ok())
+            .collect()
+    }
+
+    /// Get bundle count.
+    pub fn count(&self) -> usize {
+        self.index.len()
+    }
+}
+
+/// Statistics for validation bundle.
+#[derive(Debug, Clone)]
+pub struct ValidationBundleStats {
+    pub bundle_count: u64,
+    pub data_file_size: u64,
+    pub compression_level: i32,
 }
 
 #[cfg(test)]

@@ -203,6 +203,8 @@ pub struct CliExecutor {
     data_source: Option<String>,
     /// Risk profile name (e.g., "arrojado")
     risk_profile: Option<String>,
+    /// Use OBFS binary format for artifacts (90% storage reduction)
+    use_obfs: bool,
 }
 
 impl CliExecutor {
@@ -225,6 +227,7 @@ impl CliExecutor {
             market_data_path: None,
             data_source: None,
             risk_profile: None,
+            use_obfs: false,
         }
     }
     
@@ -300,6 +303,16 @@ impl CliExecutor {
         self
     }
     
+    /// Enable OBFS binary format for artifacts.
+    /// Passes --obfs flag to the CLI for ~90% storage reduction.
+    pub fn with_obfs(mut self, enabled: bool) -> Self {
+        self.use_obfs = enabled;
+        if enabled {
+            info!("OBFS artifact format enabled");
+        }
+        self
+    }
+    
     /// Validate backtester exists and is executable.
     pub fn validate(&self) -> Result<String, ExecutionError> {
         if !self.cli_path.exists() {
@@ -340,24 +353,31 @@ impl CliExecutor {
         &self.cli_path
     }
 
-    /// Write config to a temporary TOML file.
+    /// Write config to a temporary TOML file in the output directory.
     fn write_temp_toml(&self, config: &StrategyConfig) -> Result<PathBuf, ExecutionError> {
-        let temp_dir = tempfile::tempdir()?;
-        let toml_path = temp_dir.path().join(format!("{}.toml", config.strategy.id));
-
+        // Use output_dir/.tmp instead of system /tmp to avoid disk space issues
+        let temp_base = self.output_dir.join(".tmp");
+        std::fs::create_dir_all(&temp_base)?;
+        
+        let toml_path = temp_base.join(format!("{}.toml", config.strategy.id));
         let toml_content = toml::to_string_pretty(config)?;
         std::fs::write(&toml_path, toml_content)?;
-
-        // Keep the temp directory alive by leaking it
-        let _ = temp_dir.keep();
 
         Ok(toml_path)
     }
 
     /// Parse metrics from the output directory.
+    /// Supports both Legacy (metrics.json) and OBFS (pending/*.obfs) formats.
     fn parse_metrics(&self, output_dir: &PathBuf) -> Result<BacktestMetrics, ExecutionError> {
+        // Try OBFS format first if enabled
+        if self.use_obfs {
+            if let Ok(metrics) = self.parse_metrics_obfs(output_dir) {
+                return Ok(metrics);
+            }
+        }
+        
+        // Fall back to Legacy format
         let metrics_path = output_dir.join("metrics.json");
-
         if !metrics_path.exists() {
             return Err(ExecutionError::Parse(format!(
                 "metrics.json not found at {:?}",
@@ -368,6 +388,55 @@ impl CliExecutor {
         let content = std::fs::read_to_string(&metrics_path)?;
         serde_json::from_str(&content)
             .map_err(|e| ExecutionError::Parse(format!("Failed to parse metrics.json: {}", e)))
+    }
+    
+    /// Parse metrics from OBFS pending store.
+    /// 
+    /// OBFS mode stores pending artifacts at the parent level (not per-run):
+    /// - output_dir = `backtests/{run_id}` (expected by legacy)
+    /// - pending_dir = `backtests/pending/{run_id}.obfs` (actual OBFS location)
+    fn parse_metrics_obfs(&self, output_dir: &PathBuf) -> Result<BacktestMetrics, ExecutionError> {
+        // Extract run_id from the path (last component)
+        let run_id_str = output_dir.file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| ExecutionError::Parse("Invalid output dir path".into()))?;
+        
+        // Pending dir is at the parent level: backtests/pending/
+        let parent_dir = output_dir.parent()
+            .ok_or_else(|| ExecutionError::Parse("No parent directory".into()))?;
+        let pending_dir = parent_dir.join("pending");
+        
+        if !pending_dir.exists() {
+            return Err(ExecutionError::Parse(format!(
+                "pending directory not found at {:?}", pending_dir
+            )));
+        }
+        
+        // Read the specific run's obfs file
+        let uuid = uuid::Uuid::parse_str(run_id_str)
+            .map_err(|e| ExecutionError::Parse(format!("Invalid UUID in run_id: {}", e)))?;
+        
+        let pending_store = obfs::PendingStore::new(&pending_dir)
+            .map_err(|e| ExecutionError::Parse(format!("Failed to open pending store: {}", e)))?;
+        
+        let artifact = pending_store.read_pending(uuid)
+            .map_err(|e| ExecutionError::Parse(format!("Failed to read pending artifact {}: {}", uuid, e)))?;
+        
+        // Convert obfs::Metrics to BacktestMetrics
+        Ok(BacktestMetrics {
+            cagr: artifact.metrics.cagr,
+            volatility: Some(artifact.metrics.volatility),
+            sharpe_ratio: artifact.metrics.sharpe_ratio,
+            sortino_ratio: Some(artifact.metrics.sortino_ratio),
+            max_drawdown: artifact.metrics.max_drawdown,
+            max_drawdown_duration_days: Some(artifact.metrics.max_drawdown_duration_days as u32),
+            hit_rate: Some(artifact.metrics.hit_rate),
+            profit_factor: Some(artifact.metrics.profit_factor),
+            turnover_annual: Some(artifact.metrics.turnover_annual),
+            total_trades: artifact.metrics.total_trades as u32,
+            is_valid: true,
+            ..Default::default()
+        })
     }
     
     /// Classify error type from stderr/stdout for metrics.
@@ -430,6 +499,12 @@ impl BacktestExecutor for CliExecutor {
             args.push("--risk-profile".to_string());
             args.push(profile.clone());
             debug!("Using risk profile: {}", profile);
+        }
+        
+        // Add OBFS flag if enabled
+        if self.use_obfs {
+            args.push("--obfs".to_string());
+            debug!("Using OBFS artifact format");
         }
 
         // Execute CLI

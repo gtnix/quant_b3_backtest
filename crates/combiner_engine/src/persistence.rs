@@ -378,14 +378,20 @@ impl ExperimentPersistence {
     /// Write Validated Hall of Fame with validation reports.
     ///
     /// For each validated entry, generates:
-    /// - genome.json
-    /// - config.toml
-    /// - metrics.json
-    /// - wfa_report.json (Walk-Forward Analysis)
-    /// - pbo_dsr.json (PBO/DSR)
-    /// - stress_report.json (if stress results available)
-    /// - validation_bundle.json (combined summary)
+    /// - Legacy: Individual genome.json, config.toml, metrics.json, wfa_report.json, etc.
+    /// - OBFS: Consolidated hall_of_fame.obfs bundle
     pub fn write_validated_hall_of_fame(
+        &self,
+        hof: &crate::hall_of_fame_validated::ValidatedHallOfFame,
+    ) -> Result<(), PersistenceError> {
+        match self.format {
+            ArtifactFormat::Legacy => self.write_validated_hall_of_fame_legacy(hof),
+            ArtifactFormat::Obfs => self.write_validated_hall_of_fame_obfs(hof),
+        }
+    }
+
+    /// Write Validated Hall of Fame in Legacy format (individual files)
+    fn write_validated_hall_of_fame_legacy(
         &self,
         hof: &crate::hall_of_fame_validated::ValidatedHallOfFame,
     ) -> Result<(), PersistenceError> {
@@ -442,7 +448,7 @@ impl ExperimentPersistence {
             // Generate WFA report from validation summary
             let wfa_result = WfaResult {
                 genome_id: entry.genome_id,
-                is_sharpe_gross: entry.validation.oos_sharpe_mean * 1.1, // Approximate IS
+                is_sharpe_gross: entry.validation.oos_sharpe_mean * 1.1,
                 is_sharpe_net: entry.validation.oos_sharpe_mean,
                 oos_sharpe_gross: entry.validation.oos_sharpe_median * 1.1,
                 oos_sharpe_net: entry.validation.oos_sharpe_median,
@@ -469,7 +475,7 @@ impl ExperimentPersistence {
                 is_sharpe_net: entry.validation.oos_sharpe_mean,
                 pbo: entry.validation.pbo,
                 dsr: entry.validation.dsr,
-                total_trials: 1000, // Default
+                total_trials: 1000,
                 passed: entry.validation.pbo <= 0.15 && entry.validation.dsr >= 0.5,
             };
             let pbo_thresholds = PboDsrThresholds {
@@ -488,6 +494,91 @@ impl ExperimentPersistence {
         }
 
         info!("Wrote {} validated strategies to {:?}", hof.len(), hof_dir);
+        Ok(())
+    }
+
+    /// Write Validated Hall of Fame in OBFS format (consolidated bundle)
+    fn write_validated_hall_of_fame_obfs(
+        &self,
+        hof: &crate::hall_of_fame_validated::ValidatedHallOfFame,
+    ) -> Result<(), PersistenceError> {
+        let hof_dir = self.experiment_dir().join("hall_of_fame");
+        let bundle_dir = hof_dir.join("obfs");
+        fs::create_dir_all(&bundle_dir)?;
+
+        // Create OBFS bundle writer
+        let mut bundle_writer = obfs::ReportBundleWriter::new(&bundle_dir)
+            .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+
+        // Write ranking as compressed OBFS
+        let ranking: Vec<_> = hof.entries().iter().enumerate().map(|(i, e)| {
+            serde_json::json!({
+                "rank": i + 1,
+                "genome_id": e.genome_id.to_string(),
+                "generation": e.validated_generation,
+                "oos_sharpe": e.validation.oos_sharpe_median,
+                "pbo": e.validation.pbo,
+                "dsr": e.validation.dsr,
+                "degradation_pct": e.validation.degradation_pct,
+                "passed": e.validation.passed,
+                "score": e.score,
+            })
+        }).collect();
+        let ranking_json = serde_json::to_vec(&ranking)?;
+        let ranking_compressed = obfs::UltraCompressor::compress(&ranking_json)
+            .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+        fs::write(hof_dir.join("ranking.obfs"), ranking_compressed)?;
+
+        // Write each strategy to bundle
+        for (rank, entry) in hof.entries().iter().enumerate() {
+            // Generate config TOML
+            let config_toml = entry.genome.to_toml()
+                .unwrap_or_else(|_| "[error]\nfailed_to_serialize = true".to_string());
+
+            // Generate comprehensive validation JSON
+            let validation_json = serde_json::to_string(&serde_json::json!({
+                "genome_id": entry.genome_id.to_string(),
+                "genome_hash": format!("{:016x}", entry.genome_hash),
+                "validation": entry.validation,
+                "validated_generation": entry.validated_generation,
+                "rank": entry.rank,
+                "score": entry.score,
+                "fitness": entry.genome.fitness,
+            }))?;
+
+            // Calculate production score
+            let production_score = entry.validation.oos_sharpe_median 
+                * (1.0 - entry.validation.pbo)
+                * (1.0 - entry.validation.degradation_pct / 100.0);
+
+            bundle_writer.add(
+                entry.genome_id,
+                entry.genome_hash,
+                (rank + 1) as u32,
+                entry.validated_generation,
+                production_score,
+                entry.validation.oos_sharpe_median,
+                entry.validation.oos_cagr_median,
+                entry.validation.oos_max_dd_worst,
+                entry.validation.pbo,
+                entry.validation.dsr,
+                entry.validation.degradation_pct,
+                entry.validation.splits_passed as u16,
+                entry.validation.splits_evaluated as u16,
+                &config_toml,
+                &validation_json,
+            ).map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+        }
+
+        let stats = bundle_writer.finish()
+            .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
+
+        info!(
+            "Wrote {} validated strategies to OBFS bundle: {} bytes (level {})",
+            stats.candidate_count,
+            stats.data_file_size,
+            stats.compression_level
+        );
         Ok(())
     }
 }

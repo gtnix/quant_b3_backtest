@@ -211,3 +211,4 @@ class BrapiProvider(FxProvider):
         logger.info(f"Fetched {len(records)} rates from Brapi")
         return records
 
+

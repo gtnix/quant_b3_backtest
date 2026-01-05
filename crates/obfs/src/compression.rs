@@ -15,6 +15,9 @@ use crate::types::CompressionStats;
 /// Default compression level for Zstandard
 pub const DEFAULT_COMPRESSION_LEVEL: i32 = 3;
 
+/// Ultra compression level for maximum compression ratio (Zstd max)
+pub const ULTRA_COMPRESSION_LEVEL: i32 = 19;
+
 /// Compression strategy for different data types
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompressionStrategy {
@@ -101,6 +104,64 @@ impl CompressionPipeline {
     /// Get the current strategy
     pub fn strategy(&self) -> CompressionStrategy {
         self.strategy
+    }
+
+    /// Get the compression level
+    pub fn level(&self) -> i32 {
+        self.compression_level
+    }
+}
+
+// ============================================================================
+// Ultra Compression (Level 19 + LDM)
+// ============================================================================
+
+/// Ultra compressor using Zstd level 19 with long-distance matching.
+/// Achieves maximum compression at the cost of slower compression speed.
+/// Decompression remains fast.
+#[derive(Debug, Clone)]
+pub struct UltraCompressor;
+
+impl UltraCompressor {
+    /// Compress data with maximum compression (level 19 + LDM + checksum)
+    pub fn compress(data: &[u8]) -> Result<Vec<u8>> {
+        let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+        encoder.include_checksum(true)?;
+        encoder.long_distance_matching(true)?;
+        encoder.write_all(data)?;
+        Ok(encoder.finish()?)
+    }
+
+    /// Decompress ultra-compressed data
+    pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
+        let mut decoder = Decoder::new(compressed)?;
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed)?;
+        Ok(decompressed)
+    }
+
+    /// Compress with stats
+    pub fn compress_with_stats(data: &[u8]) -> Result<(Vec<u8>, CompressionStats)> {
+        let start = std::time::Instant::now();
+        let compressed = Self::compress(data)?;
+        let compression_time_ms = start.elapsed().as_millis() as u64;
+
+        let mut stats = CompressionStats::new(data.len() as u64, compressed.len() as u64);
+        stats.compression_time_ms = compression_time_ms;
+
+        Ok((compressed, stats))
+    }
+
+    /// Decompress with stats
+    pub fn decompress_with_stats(compressed: &[u8]) -> Result<(Vec<u8>, CompressionStats)> {
+        let start = std::time::Instant::now();
+        let decompressed = Self::decompress(compressed)?;
+        let decompression_time_ms = start.elapsed().as_millis() as u64;
+
+        let mut stats = CompressionStats::new(decompressed.len() as u64, compressed.len() as u64);
+        stats.decompression_time_ms = decompression_time_ms;
+
+        Ok((decompressed, stats))
     }
 }
 
@@ -428,6 +489,57 @@ mod tests {
 
         assert_eq!(standard.strategy(), CompressionStrategy::Standard);
         assert_eq!(delta.strategy(), CompressionStrategy::DeltaTimeSeries);
+    }
+
+    #[test]
+    fn test_ultra_compression() {
+        // Typical SCG report data (repetitive JSON/TOML)
+        let data = r#"
+        {
+            "genome_id": "06cd3b8a-24c7-4fec-a0ae-1a67d3a35188",
+            "oos_sharpe": 0.75,
+            "oos_cagr": 0.12,
+            "max_drawdown": -0.15,
+            "pbo": 0.10,
+            "dsr": 0.65,
+            "passed": true
+        }
+        "#.repeat(50);
+
+        let (compressed, stats) = UltraCompressor::compress_with_stats(data.as_bytes()).unwrap();
+        
+        println!("Ultra compression stats:");
+        println!("  Original: {} bytes", stats.original_size);
+        println!("  Compressed: {} bytes", stats.compressed_size);
+        println!("  Ratio: {:.2}x", stats.compression_ratio);
+        println!("  Time: {} ms", stats.compression_time_ms);
+
+        // Ultra should achieve significant compression on repetitive data
+        assert!(stats.compression_ratio > 5.0, "Should achieve at least 5x on repetitive JSON");
+
+        // Verify roundtrip
+        let decompressed = UltraCompressor::decompress(&compressed).unwrap();
+        assert_eq!(data.as_bytes(), decompressed.as_slice());
+    }
+
+    #[test]
+    fn test_ultra_vs_standard_compression() {
+        // Use larger data to see the benefit of ultra compression
+        // Small data may have larger overhead due to LDM framing
+        let data = b"Test data for comparing compression levels. ".repeat(10000);
+
+        let standard = CompressionPipeline::with_level(3).compress(&data).unwrap();
+        let ultra = UltraCompressor::compress(&data).unwrap();
+
+        println!("Standard (level 3): {} bytes", standard.len());
+        println!("Ultra (level 19): {} bytes", ultra.len());
+
+        // Both should decompress correctly
+        let standard_decompressed = CompressionPipeline::with_level(3).decompress(&standard).unwrap();
+        let ultra_decompressed = UltraCompressor::decompress(&ultra).unwrap();
+        
+        assert_eq!(data.as_slice(), standard_decompressed.as_slice());
+        assert_eq!(data.as_slice(), ultra_decompressed.as_slice());
     }
 }
 

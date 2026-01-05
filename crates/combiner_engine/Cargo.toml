@@ -31,6 +31,8 @@ dashmap = "6.0"
 parking_lot = "0.12"
 bumpalo = { version = "3.14", features = ["collections"] }
 thread_local = "1.1"
+zstd = "0.13"
+rkyv = "0.8"
 
 [dev-dependencies]
 backtester_strategy = { path = "../backtester_strategy" }

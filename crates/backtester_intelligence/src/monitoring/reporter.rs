@@ -3,14 +3,20 @@
 //! Generates:
 //! - JSON report (AI-consumable)
 //! - Markdown summary (human-readable)
+//! - OBFS (ultra-compressed binary, ~12x compression)
 //! - GitHub Actions summary (GITHUB_STEP_SUMMARY)
 
 use std::fmt::Write;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
 
+use zstd::stream::{Decoder, Encoder};
+
 use super::types::{CheckCategory, CheckResult, MonitoringReport, Severity};
+
+/// Ultra compression level (Zstd max with LDM).
+const ULTRA_COMPRESSION_LEVEL: i32 = 19;
 
 /// Output format for reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +25,12 @@ pub enum ReportFormat {
     Json,
     /// Markdown format (human-readable)
     Markdown,
-    /// Both formats
+    /// OBFS format (ultra-compressed binary)
+    Obfs,
+    /// Both JSON and Markdown
     Both,
+    /// All formats (JSON, Markdown, OBFS)
+    All,
 }
 
 /// Reporter for generating monitoring outputs.
@@ -46,6 +56,20 @@ impl MonitoringReporter {
     /// Generate JSON report.
     pub fn to_json(&self, report: &MonitoringReport) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(report)
+    }
+
+    /// Generate OBFS (ultra-compressed) report.
+    pub fn to_obfs(&self, report: &MonitoringReport) -> io::Result<Vec<u8>> {
+        let json = serde_json::to_vec(report)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ultra_compress(&json)
+    }
+
+    /// Read from OBFS file.
+    pub fn from_obfs(data: &[u8]) -> io::Result<MonitoringReport> {
+        let decompressed = ultra_decompress(data)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
     /// Generate Markdown summary.
@@ -176,7 +200,7 @@ impl MonitoringReporter {
         // Ensure output directory exists
         fs::create_dir_all(&self.output_dir)?;
 
-        if matches!(format, ReportFormat::Json | ReportFormat::Both) {
+        if matches!(format, ReportFormat::Json | ReportFormat::Both | ReportFormat::All) {
             let json_path = Path::new(&self.output_dir).join(&self.json_filename);
             let json = self.to_json(report)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -184,11 +208,18 @@ impl MonitoringReporter {
             files_written.push(json_path.to_string_lossy().to_string());
         }
 
-        if matches!(format, ReportFormat::Markdown | ReportFormat::Both) {
+        if matches!(format, ReportFormat::Markdown | ReportFormat::Both | ReportFormat::All) {
             let md_path = Path::new(&self.output_dir).join(&self.md_filename);
             let md = self.to_markdown(report);
             fs::write(&md_path, md)?;
             files_written.push(md_path.to_string_lossy().to_string());
+        }
+
+        if matches!(format, ReportFormat::Obfs | ReportFormat::All) {
+            let obfs_path = Path::new(&self.output_dir).join("monitoring_report.obfs");
+            let obfs = self.to_obfs(report)?;
+            fs::write(&obfs_path, obfs)?;
+            files_written.push(obfs_path.to_string_lossy().to_string());
         }
 
         Ok(files_written)
@@ -221,6 +252,23 @@ fn truncate_message(msg: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &msg[..max_len.saturating_sub(3)])
     }
+}
+
+/// Ultra-compress data using Zstd level 19 with LDM and checksum.
+fn ultra_compress(data: &[u8]) -> io::Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+    encoder.include_checksum(true)?;
+    encoder.long_distance_matching(true)?;
+    io::Write::write_all(&mut encoder, data)?;
+    encoder.finish()
+}
+
+/// Decompress ultra-compressed data.
+fn ultra_decompress(compressed: &[u8]) -> io::Result<Vec<u8>> {
+    let mut decoder = Decoder::new(compressed)?;
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
 }
 
 use std::io::Write as IoWrite;

@@ -1,14 +1,34 @@
 //! Report generation for stress ingestion pipeline.
 //!
 //! Generates coverage, freshness, and cost estimate reports.
+//! Supports two output formats:
+//! - Legacy: Markdown/CSV/JSON files
+//! - OBFS: Ultra-compressed binary (~15x compression)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::Path;
 use tracing::info;
+use zstd::stream::{Decoder, Encoder};
 
 use crate::db::{Database, DbError};
+
+/// Ultra compression level (Zstd max with LDM).
+const ULTRA_COMPRESSION_LEVEL: i32 = 19;
+
+/// Output format for reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReportOutputFormat {
+    /// Legacy format (Markdown/CSV/JSON)
+    #[default]
+    Legacy,
+    /// OBFS format (ultra-compressed)
+    Obfs,
+    /// Both formats
+    Both,
+}
 
 // ============================================================================
 // Coverage Report
@@ -112,6 +132,24 @@ impl CoverageReport {
         std::fs::write(path, md)?;
         info!("Coverage report written to {}", path.display());
         Ok(())
+    }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        std::fs::write(path, compressed)?;
+        info!("Coverage report (OBFS) written to {}", path.display());
+        Ok(())
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = std::fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
 
@@ -248,6 +286,24 @@ impl FreshnessReport {
         info!("Freshness report written to {}", path.display());
         Ok(())
     }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        std::fs::write(path, compressed)?;
+        info!("Freshness report (OBFS) written to {}", path.display());
+        Ok(())
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = std::fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
 }
 
 // ============================================================================
@@ -289,6 +345,45 @@ impl CostEstimate {
         info!("Cost estimate written to {}", path.display());
         Ok(())
     }
+
+    /// Write to OBFS file (ultra-compressed).
+    pub fn write_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        std::fs::write(path, compressed)?;
+        info!("Cost estimate (OBFS) written to {}", path.display());
+        Ok(())
+    }
+
+    /// Read from OBFS file.
+    pub fn read_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = std::fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+}
+
+// ============================================================================
+// OBFS Compression Helpers
+// ============================================================================
+
+/// Ultra-compress data using Zstd level 19 with LDM and checksum.
+fn ultra_compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+    encoder.include_checksum(true)?;
+    encoder.long_distance_matching(true)?;
+    encoder.write_all(data)?;
+    encoder.finish()
+}
+
+/// Decompress ultra-compressed data.
+fn ultra_decompress(compressed: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut decoder = Decoder::new(compressed)?;
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
 }
 
 // ============================================================================
@@ -298,6 +393,7 @@ impl CostEstimate {
 pub struct ReportGenerator<'a> {
     db: &'a Database,
     output_dir: std::path::PathBuf,
+    format: ReportOutputFormat,
 }
 
 impl<'a> ReportGenerator<'a> {
@@ -305,7 +401,14 @@ impl<'a> ReportGenerator<'a> {
         Self {
             db,
             output_dir: output_dir.as_ref().to_path_buf(),
+            format: ReportOutputFormat::Legacy,
         }
+    }
+
+    /// Set output format.
+    pub fn with_format(mut self, format: ReportOutputFormat) -> Self {
+        self.format = format;
+        self
     }
 
     pub async fn generate_all(&self) -> Result<(), DbError> {
@@ -314,17 +417,31 @@ impl<'a> ReportGenerator<'a> {
 
         // Coverage report
         let coverage = CoverageReport::generate(self.db).await?;
-        coverage
-            .write_to_file(&self.output_dir.join("coverage_report.md"))
-            .map_err(|e| DbError::Connection(e.to_string()))?;
+        if matches!(self.format, ReportOutputFormat::Legacy | ReportOutputFormat::Both) {
+            coverage
+                .write_to_file(&self.output_dir.join("coverage_report.md"))
+                .map_err(|e| DbError::Connection(e.to_string()))?;
+        }
+        if matches!(self.format, ReportOutputFormat::Obfs | ReportOutputFormat::Both) {
+            coverage
+                .write_obfs(&self.output_dir.join("coverage.obfs"))
+                .map_err(|e| DbError::Connection(e.to_string()))?;
+        }
 
         // Freshness report
         let freshness = FreshnessReport::generate(self.db).await?;
-        freshness
-            .write_to_file(&self.output_dir.join("freshness_report.csv"))
-            .map_err(|e| DbError::Connection(e.to_string()))?;
+        if matches!(self.format, ReportOutputFormat::Legacy | ReportOutputFormat::Both) {
+            freshness
+                .write_to_file(&self.output_dir.join("freshness_report.csv"))
+                .map_err(|e| DbError::Connection(e.to_string()))?;
+        }
+        if matches!(self.format, ReportOutputFormat::Obfs | ReportOutputFormat::Both) {
+            freshness
+                .write_obfs(&self.output_dir.join("freshness.obfs"))
+                .map_err(|e| DbError::Connection(e.to_string()))?;
+        }
 
-        info!("All reports generated in {}", self.output_dir.display());
+        info!("All reports generated in {} (format: {:?})", self.output_dir.display(), self.format);
         Ok(())
     }
 }

@@ -43,7 +43,6 @@ pub struct TraceHeader {
 pub struct ArtifactWriter {
     base_path: PathBuf,
     format: ArtifactFormat,
-    obfs: Option<obfs::Obfs>,
 }
 
 impl ArtifactWriter {
@@ -52,7 +51,6 @@ impl ArtifactWriter {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
             format: ArtifactFormat::Legacy,
-            obfs: None,
         }
     }
 
@@ -64,27 +62,9 @@ impl ArtifactWriter {
     /// Set the artifact format (builder pattern).
     pub fn with_format(mut self, format: ArtifactFormat) -> Self {
         self.format = format;
-        if format == ArtifactFormat::Obfs {
-            self.init_obfs();
-        }
+        // NOTE: OBFS now uses PendingStore for isolated concurrent-safe writes.
+        // No shared storage initialization needed - each run writes its own file.
         self
-    }
-
-    /// Initialize OBFS storage.
-    fn init_obfs(&mut self) {
-        let obfs_path = self.base_path.join("obfs");
-        let config = obfs::ObfsConfig {
-            root_path: obfs_path.to_string_lossy().to_string(),
-            compression_level: 3,
-            enable_blake3: true,
-            enable_xxh3: true,
-            max_file_size: 1024 * 1024 * 1024, // 1 GB
-        };
-        let obfs_instance = obfs::Obfs::with_config(config);
-        if let Err(e) = obfs_instance.initialize() {
-            tracing::warn!("Failed to initialize OBFS: {}", e);
-        }
-        self.obfs = Some(obfs_instance);
     }
 
     /// Get the current artifact format.
@@ -128,7 +108,11 @@ impl ArtifactWriter {
         Ok(run_dir)
     }
 
-    /// Write artifacts in OBFS format (rkyv + Zstd + Parquet).
+    /// Write artifacts in OBFS format using isolated pending files.
+    /// 
+    /// Uses PendingStore for concurrent-safe isolated file writes.
+    /// Each backtest writes its own `{run_id}.obfs` file, avoiding Parquet
+    /// concurrent write corruption. Files are consolidated later.
     fn write_all_obfs(
         &mut self,
         run_id: &str,
@@ -137,14 +121,15 @@ impl ArtifactWriter {
         metrics: &RunMetrics,
         timeseries: &[EquityPoint],
     ) -> Result<PathBuf, ArtifactError> {
-        let obfs = self.obfs.as_mut().ok_or_else(|| {
-            ArtifactError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "OBFS not initialized",
-            ))
-        })?;
-
         let uuid = Uuid::parse_str(run_id).unwrap_or_else(|_| Uuid::new_v4());
+
+        // Create pending store in output directory
+        let pending_dir = self.base_path.join("pending");
+        let pending_store = obfs::PendingStore::new(&pending_dir)
+            .map_err(|e| ArtifactError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Failed to create pending store: {}", e)
+            )))?;
 
         // Convert metadata
         let obfs_metadata = obfs::Metadata {
@@ -183,12 +168,11 @@ impl ArtifactWriter {
             })
             .collect();
 
-        // Convert timeseries to TimeSeriesPoints
+        // Convert timeseries to pending format
         let epoch = chrono::NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-        let ts_points: Vec<obfs::TimeSeriesPoint> = timeseries
+        let pending_ts: Vec<obfs::PendingTimeseriesPoint> = timeseries
             .iter()
-            .map(|p| obfs::TimeSeriesPoint {
-                backtest_uuid: uuid,
+            .map(|p| obfs::PendingTimeseriesPoint {
                 date_offset: (p.date - epoch).num_days().max(0) as u16,
                 equity: p.equity.to_string().parse::<f32>().unwrap_or(0.0),
                 drawdown: p.drawdown as f32,
@@ -196,47 +180,20 @@ impl ArtifactWriter {
             })
             .collect();
 
-        // Write timeseries to Parquet
-        let ts_ref = if !ts_points.is_empty() {
-            obfs.timeseries_store_mut()
-                .write_timeseries(uuid, &ts_points)
-                .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
-        } else {
-            obfs::TimeSeriesRef {
-                parquet_file: String::new(),
-                row_group: 0,
-                start_row: 0,
-                num_rows: 0,
-            }
-        };
+        // Build pending artifact (isolated, concurrent-safe)
+        let pending_artifact = obfs::PendingArtifact::new(uuid, obfs_metadata, obfs_metrics)
+            .with_trace(obfs_trace)
+            .with_timeseries(pending_ts);
 
-        // Build artifact
-        let artifact = obfs::BacktestArtifact {
-            uuid_bytes: *uuid.as_bytes(),
-            metadata: obfs_metadata,
-            metrics: obfs_metrics,
-            timeseries_ref: obfs::TimeseriesReference {
-                parquet_file: ts_ref.parquet_file,
-                row_group: ts_ref.row_group,
-                start_row: ts_ref.start_row,
-                num_rows: ts_ref.num_rows,
-            },
-            trace: obfs_trace,
-            integrity: obfs::IntegritySeal::default(),
-        };
+        // Write isolated pending file (NO shared Parquet = NO corruption)
+        let pending_path = pending_store.write_pending(&pending_artifact)
+            .map_err(|e| ArtifactError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Failed to write pending artifact: {}", e)
+            )))?;
 
-        // Write to OBFS
-        let mut writer = obfs.writer();
-        writer.write_artifact(&artifact)
-            .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-
-        // Sync to disk
-        obfs.sync()
-            .map_err(|e| ArtifactError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-
-        let obfs_path = self.base_path.join("obfs");
-        tracing::info!("OBFS artifacts written to: {} (UUID: {})", obfs_path.display(), uuid);
-        Ok(obfs_path)
+        tracing::debug!("OBFS pending artifact written: {} (UUID: {})", pending_path.display(), uuid);
+        Ok(pending_dir)
     }
 
     /// Write metadata.json

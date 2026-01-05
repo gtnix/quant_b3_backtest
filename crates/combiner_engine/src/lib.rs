@@ -59,7 +59,7 @@ pub use evaluation::{
 pub use pareto_simd::{compute_pareto_ranks_simd, compute_crowding_distance_simd};
 pub use hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry, InstitutionalCriteria};
 pub use performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot, IntegrityStatus};
-pub use report::{FinalReportGenerator, FinalReport};
+pub use report::{FinalReportGenerator, FinalReport, ReportReader, ReportFormat, ReportError};
 pub use institutional_thresholds::InstitutionalThresholds;
 pub use validation_reports::{
     WfaReport, PboDsrReport, StressReport, ValidationBundle,

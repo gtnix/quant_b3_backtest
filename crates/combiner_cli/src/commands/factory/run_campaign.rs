@@ -474,6 +474,12 @@ async fn execute_single_run(
         info!("Using risk profile: {}", profile);
         executor = executor.with_risk_profile(profile);
     }
+    
+    // Enable OBFS format for backtests (uses isolated pending files, consolidated after evolution)
+    if config.output.artifact_format_enum() == ArtifactFormat::Obfs {
+        info!("OBFS artifact format enabled for backtests (isolated pending files)");
+        executor = executor.with_obfs(true);
+    }
 
     // Create validation cache
     let validation_cache = Arc::new(ValidationCache::new());
@@ -485,6 +491,28 @@ async fn execute_single_run(
 
     // Run ultra mode
     let result = engine.evolve_ultra(validation_cache, config.budget.top_k)?;
+
+    // Consolidate pending OBFS artifacts into Parquet (single-thread, concurrent-safe)
+    if config.output.artifact_format_enum() == ArtifactFormat::Obfs {
+        let pending_dir = format!("{}/backtests/pending", output_dir);
+        let consolidated_dir = format!("{}/backtests/consolidated", output_dir);
+        
+        match obfs::consolidate(&pending_dir, &consolidated_dir) {
+            Ok(stats) => {
+                info!(
+                    run_id,
+                    "Consolidated {} backtests: {} rows, {:.1} MB, {:.1}x compression",
+                    stats.artifacts_processed,
+                    stats.timeseries_rows,
+                    stats.parquet_size_bytes as f64 / 1_000_000.0,
+                    stats.compression_ratio
+                );
+            }
+            Err(e) => {
+                tracing::warn!(run_id, "Consolidation failed (non-fatal): {}", e);
+            }
+        }
+    }
 
     // Collect Stage B validated candidates
     let mut candidates = Vec::new();

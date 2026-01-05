@@ -32,6 +32,27 @@ pub struct ScgConfig {
     /// Output settings.
     #[serde(default)]
     pub output: OutputConfig,
+
+    /// Dataset configuration.
+    #[serde(default)]
+    pub dataset: DatasetConfig,
+}
+
+/// Dataset configuration for market data and source.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DatasetConfig {
+    /// Path to market data CSV for backtesting.
+    #[serde(default)]
+    pub market_data_path: Option<String>,
+    /// Data source: "database" or "csv".
+    #[serde(default)]
+    pub data_source: Option<String>,
+    /// Risk profile name.
+    #[serde(default)]
+    pub risk_profile: Option<String>,
+    /// Market identifier (BR, US).
+    #[serde(default)]
+    pub market: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -70,6 +91,7 @@ impl Default for ScgConfig {
         Self {
             evolution: EvolutionConfig::default(),
             output: OutputConfig::default(),
+            dataset: DatasetConfig::default(),
         }
     }
 }
@@ -109,10 +131,24 @@ pub fn execute(
     fs::create_dir_all(output_path)?;
 
     // Create executor with validation (fail-fast if backtester not found)
-    let executor = CliExecutor::try_new()
+    let mut executor = CliExecutor::try_new()
         .map_err(|e| anyhow::anyhow!("Failed to initialize backtester: {}. \
             Build with `cargo build --release --bin backtest` or set BACKTEST_CLI_PATH.", e))?
         .with_output_dir(output_path.join("backtests"));
+
+    // Configure executor with dataset settings
+    if let Some(ref path) = config.dataset.market_data_path {
+        info!("Using market data from: {}", path);
+        executor = executor.with_market_data(path);
+    }
+    if let Some(ref source) = config.dataset.data_source {
+        info!("Using data source: {}", source);
+        executor = executor.with_data_source(source);
+    }
+    if let Some(ref profile) = config.dataset.risk_profile {
+        info!("Using risk profile: {}", profile);
+        executor = executor.with_risk_profile(profile);
+    }
 
     // Track start time
     let start_time = std::time::Instant::now();

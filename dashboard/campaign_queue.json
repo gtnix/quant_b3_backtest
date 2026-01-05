@@ -1,17 +1,28 @@
 {
   "version": "1.0",
-  "updated_at": "2026-01-04T16:59:00.000Z",
+  "updated_at": "2026-01-04T20:35:00.000Z",
   "campaigns": [
     {
-      "id": "camp_5min_maxpower_001",
-      "name": "SCG 5min MaxPower",
+      "id": "camp_5min_br_001",
+      "name": "SCG 5min BR MaxPower",
       "config_path": "configs/campaigns/scg_5min_maxpower.toml",
       "market": "br",
       "priority": 1,
       "enabled": true,
       "repeat": false,
       "tags": ["ibov", "arrojado", "5min"],
-      "created_at": "2026-01-04T16:59:00.000Z"
+      "created_at": "2026-01-04T20:35:00.000Z"
+    },
+    {
+      "id": "camp_5min_us_001",
+      "name": "SCG 5min US S&P500",
+      "config_path": "configs/campaigns/scg_5min_us.toml",
+      "market": "us",
+      "priority": 2,
+      "enabled": true,
+      "repeat": false,
+      "tags": ["sp500", "arrojado", "5min"],
+      "created_at": "2026-01-04T20:35:00.000Z"
     }
   ]
 }

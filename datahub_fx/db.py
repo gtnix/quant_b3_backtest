@@ -100,3 +100,4 @@ def get_stats(conn) -> dict:
             for row in rows
         }
 
+

@@ -3,12 +3,29 @@
 //! This crate provides a high-performance storage system for backtest artifacts with:
 //! - Zero-copy serialization using rkyv
 //! - Dual-hashing integrity (XXH3 + BLAKE3)
-//! - Zstd compression (2.5-3.0x ratio)
-//! - LMDB-based metadata store for fast lookups
+//! - Zstd compression (2.5-3.0x ratio for standard, ~10-15x for UltraCompressor)
+//! - LMDB-based metadata store for fast O(1) lookups
+//!
+//! ## Bundle Types (using OBFS infrastructure)
+//!
+//! The following bundle types leverage OBFS compression across the codebase:
+//!
+//! | Bundle | Location | Compression | Use Case |
+//! |--------|----------|-------------|----------|
+//! | `ReportBundle` | obfs | ~10x | SCG candidates/configs |
+//! | `ValidationBundle` | combiner_engine | ~10x | WFA/PBO/Stress reports |
+//! | `ResultBundle` | backtester_reports | ~8x | Backtest results + NAV |
+//! | `IntegrityBundle` | backtester_intelligence | ~15x | Data integrity audits |
+//! | Market data reports | market_data | ~15x | Coverage/Freshness |
+//!
+//! All bundles use UltraCompressor (Zstd level 19 + LDM + checksum).
 
 pub mod compression;
+pub mod consolidator;
 pub mod integrity;
+pub mod pending_store;
 pub mod reader;
+pub mod report_bundle;
 pub mod store;
 pub mod timeseries;
 pub mod types;
@@ -17,10 +34,17 @@ pub mod adapters;
 
 pub use compression::{
     CompressionPipeline, CompressionStrategy, DeltaEncoder, TimeSeriesCompressor, ColumnarCompressor,
+    UltraCompressor, ULTRA_COMPRESSION_LEVEL as COMPRESSION_LEVEL_ULTRA,
 };
+pub use consolidator::{Consolidator, ConsolidationStats, consolidate};
 pub use integrity::IntegrityEngine;
 pub use reader::ArtifactReader;
+pub use report_bundle::{
+    ReportBundle, ReportBundleReader, ReportBundleWriter, BundleStats, CandidateEntry,
+    ULTRA_COMPRESSION_LEVEL,
+};
 pub use store::MetadataStore;
+pub use pending_store::{PendingArtifact, PendingStore, TimeseriesPoint as PendingTimeseriesPoint};
 pub use timeseries::{TimeSeriesStore, TimeSeriesPoint, TimeSeriesRef, ParquetStats};
 pub use types::*;
 pub use writer::ArtifactWriter;

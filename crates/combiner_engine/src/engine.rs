@@ -179,6 +179,9 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
     /// Evaluate all genomes in the population.
     fn evaluate_population(&mut self) -> Result<(), EngineError> {
         let mut evaluated = 0;
+        let mut validation_errors = 0;
+        let mut config_errors = 0;
+        let mut execution_errors = 0;
 
         // Collect indices to evaluate
         let to_evaluate: Vec<usize> = self.population.genomes
@@ -193,6 +196,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 
             // Validate genome
             if let Err(e) = self.validator.validate(genome) {
+                if validation_errors < 3 {
+                    tracing::debug!("Genome {} validation failed: {}", idx, e);
+                }
+                validation_errors += 1;
                 self.population.genomes[idx].fitness = 
                     Some(MultiObjectiveFitness::invalid(e.to_string()));
                 continue;
@@ -209,12 +216,20 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                             evaluated += 1;
                         }
                         Err(e) => {
+                            if execution_errors < 3 {
+                                tracing::debug!("Genome {} execution failed: {}", idx, e);
+                            }
+                            execution_errors += 1;
                             self.population.genomes[idx].fitness = 
                                 Some(MultiObjectiveFitness::invalid(e.to_string()));
                         }
                     }
                 }
                 Err(e) => {
+                    if config_errors < 3 {
+                        tracing::debug!("Genome {} config conversion failed: {}", idx, e);
+                    }
+                    config_errors += 1;
                     self.population.genomes[idx].fitness = 
                         Some(MultiObjectiveFitness::invalid(e.to_string()));
                 }
@@ -222,6 +237,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         }
 
         if evaluated == 0 && self.population.evaluated().is_empty() {
+            tracing::error!(
+                "No valid genomes: validation_errors={}, config_errors={}, execution_errors={}",
+                validation_errors, config_errors, execution_errors
+            );
             return Err(EngineError::NoValidGenomes);
         }
 

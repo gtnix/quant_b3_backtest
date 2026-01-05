@@ -83,7 +83,7 @@ pub struct TimeseriesReference {
 }
 
 /// A single trace event in the backtest execution
-#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, SerdeSerialize, SerdeDeserialize)]
 #[rkyv(derive(Debug))]
 pub struct TraceEvent {
     pub timestamp: i64,

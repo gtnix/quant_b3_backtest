@@ -5,6 +5,10 @@
 //! - Performance metrics and timing breakdown
 //! - Evolution history and convergence analysis
 //! - Overfitting risk assessment
+//!
+//! Supports two output formats:
+//! - Legacy: Individual JSON/TOML files (backwards compatible)
+//! - OBFS: Consolidated ultra-compressed binary bundle (~10x space reduction)
 
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -15,6 +19,16 @@ use combiner_core::{GenomeConverter, ConversionError};
 use crate::config::EvolutionConfig;
 use crate::hall_of_fame_validated::{ValidatedHallOfFame, ValidatedHofEntry};
 use crate::performance_metrics::{PerformanceMetrics, PerformanceMetricsSummary, GenerationSnapshot};
+
+/// Output format for reports
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReportFormat {
+    /// Legacy JSON/TOML files (backwards compatible)
+    #[default]
+    Legacy,
+    /// OBFS consolidated bundle (ultra-compressed)
+    Obfs,
+}
 
 /// Final report structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,10 +167,11 @@ pub struct FinalReportGenerator {
     experiment_id: String,
     config: EvolutionConfig,
     converter: GenomeConverter,
+    format: ReportFormat,
 }
 
 impl FinalReportGenerator {
-    /// Create a new report generator
+    /// Create a new report generator (legacy format by default)
     pub fn new(
         output_dir: impl Into<PathBuf>,
         experiment_id: impl Into<String>,
@@ -167,7 +182,14 @@ impl FinalReportGenerator {
             experiment_id: experiment_id.into(),
             config,
             converter: GenomeConverter::new(),
+            format: ReportFormat::Legacy,
         }
+    }
+
+    /// Set the output format (builder pattern)
+    pub fn with_format(mut self, format: ReportFormat) -> Self {
+        self.format = format;
+        self
     }
 
     /// Generate the final report
@@ -221,9 +243,21 @@ impl FinalReportGenerator {
         metrics: &PerformanceMetrics,
         snapshots: &[GenerationSnapshot],
     ) -> Result<PathBuf, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => self.generate_and_save_legacy(hof, metrics, snapshots),
+            ReportFormat::Obfs => self.generate_and_save_obfs(hof, metrics, snapshots),
+        }
+    }
+
+    /// Generate and save in Legacy format (individual files)
+    fn generate_and_save_legacy(
+        &self,
+        hof: &ValidatedHallOfFame,
+        metrics: &PerformanceMetrics,
+        snapshots: &[GenerationSnapshot],
+    ) -> Result<PathBuf, ReportError> {
         let report = self.generate(hof, metrics, snapshots)?;
         
-        // Create output directory
         let report_dir = self.output_dir.join("report");
         fs::create_dir_all(&report_dir)?;
         
@@ -235,16 +269,98 @@ impl FinalReportGenerator {
         // Save production candidate TOMLs
         for candidate in &report.production_candidates {
             if let Some(entry) = hof.entries().iter().find(|e| e.genome_id.to_string() == candidate.genome_id) {
-                self.save_production_candidate(&report_dir, &entry)?;
+                self.save_production_candidate(&report_dir, entry)?;
             }
         }
         
-        // Save snapshots for time-series analysis
+        // Save snapshots
         let snapshots_path = report_dir.join("generation_snapshots.json");
         let snapshots_json = serde_json::to_string_pretty(snapshots)?;
         fs::write(snapshots_path, snapshots_json)?;
         
         Ok(report_path)
+    }
+
+    /// Generate and save in OBFS format (consolidated bundle)
+    fn generate_and_save_obfs(
+        &self,
+        hof: &ValidatedHallOfFame,
+        metrics: &PerformanceMetrics,
+        snapshots: &[GenerationSnapshot],
+    ) -> Result<PathBuf, ReportError> {
+        let report = self.generate(hof, metrics, snapshots)?;
+        
+        let report_dir = self.output_dir.join("report");
+        let bundle_dir = report_dir.join("obfs");
+        fs::create_dir_all(&bundle_dir)?;
+
+        // Write candidates to OBFS bundle
+        let mut bundle_writer = obfs::ReportBundleWriter::new(&bundle_dir)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+        for (rank, entry) in hof.entries().iter().enumerate() {
+            // Generate TOML config
+            let strategy_config = self.converter.to_strategy_config(&entry.genome)?;
+            let toml_content = toml::to_string_pretty(&strategy_config)?;
+
+            // Generate validation JSON
+            let evidence = ValidationEvidence {
+                genome_id: entry.genome_id.to_string(),
+                genome_hash: format!("{:016x}", entry.genome_hash),
+                validation: entry.validation.clone(),
+                validated_generation: entry.validated_generation,
+                rank: entry.rank,
+                score: entry.score,
+            };
+            let validation_json = serde_json::to_string(&evidence)?;
+
+            // Calculate production score
+            let production_score = entry.validation.oos_sharpe_median 
+                * (1.0 - entry.validation.pbo)
+                * (1.0 - entry.validation.degradation_pct / 100.0);
+
+            bundle_writer.add(
+                entry.genome_id,
+                entry.genome_hash,
+                (rank + 1) as u32,
+                entry.validated_generation,
+                production_score,
+                entry.validation.oos_sharpe_median,
+                entry.validation.oos_cagr_median,
+                entry.validation.oos_max_dd_worst,
+                entry.validation.pbo,
+                entry.validation.dsr,
+                entry.validation.degradation_pct,
+                entry.validation.splits_passed as u16,
+                entry.validation.splits_evaluated as u16,
+                &toml_content,
+                &validation_json,
+            ).map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        }
+
+        let stats = bundle_writer.finish()
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+        tracing::info!(
+            "OBFS bundle written: {} candidates, {} bytes (level {})",
+            stats.candidate_count,
+            stats.data_file_size,
+            stats.compression_level
+        );
+
+        // Also save main report as compressed OBFS
+        let report_json = serde_json::to_vec(&report)?;
+        let compressed_report = obfs::UltraCompressor::compress(&report_json)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        fs::write(report_dir.join("final_report.obfs"), compressed_report)?;
+
+        // Save snapshots as compressed OBFS
+        let snapshots_json = serde_json::to_vec(snapshots)?;
+        let compressed_snapshots = obfs::UltraCompressor::compress(&snapshots_json)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        fs::write(report_dir.join("generation_snapshots.obfs"), compressed_snapshots)?;
+
+        Ok(report_dir.join("final_report.obfs"))
     }
 
     fn build_config_summary(&self) -> ConfigSummary {
@@ -578,6 +694,175 @@ pub enum ReportError {
     
     #[error("Genome conversion error: {0}")]
     Conversion(#[from] ConversionError),
+    
+    #[error("OBFS error: {0}")]
+    Obfs(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+}
+
+// ============================================================================
+// Report Reader (On-demand decompression)
+// ============================================================================
+
+/// Reader for loading reports from disk (supports both Legacy and OBFS formats)
+pub struct ReportReader {
+    report_dir: PathBuf,
+    format: ReportFormat,
+    bundle_reader: Option<obfs::ReportBundleReader>,
+}
+
+impl ReportReader {
+    /// Open a report directory (auto-detects format)
+    pub fn open(report_dir: impl Into<PathBuf>) -> Result<Self, ReportError> {
+        let report_dir = report_dir.into();
+        
+        // Check if OBFS bundle exists
+        let obfs_bundle_dir = report_dir.join("obfs");
+        let has_obfs = obfs_bundle_dir.exists() && obfs_bundle_dir.join("candidates.obfs").exists();
+        
+        let (format, bundle_reader) = if has_obfs {
+            let reader = obfs::ReportBundleReader::open(&obfs_bundle_dir)
+                .map_err(|e| ReportError::Obfs(e.to_string()))?;
+            (ReportFormat::Obfs, Some(reader))
+        } else {
+            (ReportFormat::Legacy, None)
+        };
+
+        Ok(Self {
+            report_dir,
+            format,
+            bundle_reader,
+        })
+    }
+
+    /// Get the detected format
+    pub fn format(&self) -> ReportFormat {
+        self.format
+    }
+
+    /// Load the final report
+    pub fn load_final_report(&self) -> Result<FinalReport, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => {
+                let path = self.report_dir.join("final_report.json");
+                let content = fs::read_to_string(&path)?;
+                Ok(serde_json::from_str(&content)?)
+            }
+            ReportFormat::Obfs => {
+                let path = self.report_dir.join("final_report.obfs");
+                let compressed = fs::read(&path)?;
+                let decompressed = obfs::UltraCompressor::decompress(&compressed)
+                    .map_err(|e| ReportError::Obfs(e.to_string()))?;
+                Ok(serde_json::from_slice(&decompressed)?)
+            }
+        }
+    }
+
+    /// Load generation snapshots
+    pub fn load_snapshots(&self) -> Result<Vec<GenerationSnapshot>, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => {
+                let path = self.report_dir.join("generation_snapshots.json");
+                let content = fs::read_to_string(&path)?;
+                Ok(serde_json::from_str(&content)?)
+            }
+            ReportFormat::Obfs => {
+                let path = self.report_dir.join("generation_snapshots.obfs");
+                let compressed = fs::read(&path)?;
+                let decompressed = obfs::UltraCompressor::decompress(&compressed)
+                    .map_err(|e| ReportError::Obfs(e.to_string()))?;
+                Ok(serde_json::from_slice(&decompressed)?)
+            }
+        }
+    }
+
+    /// Get config TOML for a candidate by UUID
+    pub fn get_candidate_config(&self, uuid: uuid::Uuid) -> Result<String, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => {
+                let path = self.report_dir.join("candidates").join(format!("{}.toml", uuid));
+                if path.exists() {
+                    Ok(fs::read_to_string(&path)?)
+                } else {
+                    Err(ReportError::NotFound(format!("Candidate config: {}", uuid)))
+                }
+            }
+            ReportFormat::Obfs => {
+                if let Some(ref reader) = self.bundle_reader {
+                    reader.get_config(uuid)
+                        .map_err(|e| ReportError::Obfs(e.to_string()))?
+                        .ok_or_else(|| ReportError::NotFound(format!("Candidate config: {}", uuid)))
+                } else {
+                    Err(ReportError::Obfs("Bundle reader not initialized".to_string()))
+                }
+            }
+        }
+    }
+
+    /// Get validation JSON for a candidate by UUID
+    pub fn get_candidate_validation(&self, uuid: uuid::Uuid) -> Result<String, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => {
+                let path = self.report_dir.join("candidates").join(format!("{}_validation.json", uuid));
+                if path.exists() {
+                    Ok(fs::read_to_string(&path)?)
+                } else {
+                    Err(ReportError::NotFound(format!("Candidate validation: {}", uuid)))
+                }
+            }
+            ReportFormat::Obfs => {
+                if let Some(ref reader) = self.bundle_reader {
+                    reader.get_validation(uuid)
+                        .map_err(|e| ReportError::Obfs(e.to_string()))?
+                        .ok_or_else(|| ReportError::NotFound(format!("Candidate validation: {}", uuid)))
+                } else {
+                    Err(ReportError::Obfs("Bundle reader not initialized".to_string()))
+                }
+            }
+        }
+    }
+
+    /// List all candidate UUIDs
+    pub fn list_candidates(&self) -> Result<Vec<uuid::Uuid>, ReportError> {
+        match self.format {
+            ReportFormat::Legacy => {
+                let candidates_dir = self.report_dir.join("candidates");
+                if !candidates_dir.exists() {
+                    return Ok(Vec::new());
+                }
+                
+                let mut uuids = Vec::new();
+                for entry in fs::read_dir(&candidates_dir)? {
+                    let entry = entry?;
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.ends_with(".toml") {
+                        if let Some(uuid_str) = name_str.strip_suffix(".toml") {
+                            if let Ok(uuid) = uuid::Uuid::parse_str(uuid_str) {
+                                uuids.push(uuid);
+                            }
+                        }
+                    }
+                }
+                Ok(uuids)
+            }
+            ReportFormat::Obfs => {
+                if let Some(ref reader) = self.bundle_reader {
+                    reader.list()
+                        .map_err(|e| ReportError::Obfs(e.to_string()))
+                } else {
+                    Err(ReportError::Obfs("Bundle reader not initialized".to_string()))
+                }
+            }
+        }
+    }
+
+    /// Get bundle statistics (OBFS only)
+    pub fn bundle_stats(&self) -> Option<obfs::BundleStats> {
+        self.bundle_reader.as_ref().and_then(|r| r.stats().ok())
+    }
 }
 
 #[cfg(test)]

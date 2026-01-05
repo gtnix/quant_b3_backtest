@@ -2,11 +2,18 @@
 //!
 //! Provides a unified gate that runs all data integrity checks and produces
 //! a PASS/FAIL verdict used by factory run/resume/promote commands.
+//!
+//! Supports two output formats:
+//! - Legacy: Individual JSON files per campaign
+//! - OBFS: Consolidated ultra-compressed bundle (~15x compression)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use zstd::stream::{Decoder, Encoder};
 
 use crate::filters::Market;
 use super::config::DataHealthConfig;
@@ -15,6 +22,9 @@ use super::data_health::{
     TemporalIntegrityCheck, LookaheadPolicyCheck, CorpActionCheck, SurvivorshipCheck,
 };
 use super::types::{CheckCategory, CheckResult, Severity};
+
+/// Ultra compression level (Zstd max with LDM).
+const ULTRA_COMPRESSION_LEVEL: i32 = 19;
 
 // =============================================================================
 // DATA INTEGRITY REPORT
@@ -169,6 +179,26 @@ impl DataIntegrityReport {
         serde_json::from_str(&json)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
+
+    /// Save report to OBFS file (ultra-compressed).
+    pub fn save_obfs(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let compressed = ultra_compress(&json)?;
+        
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, compressed)
+    }
+
+    /// Load report from OBFS file.
+    pub fn load_obfs(path: &Path) -> std::io::Result<Self> {
+        let compressed = fs::read(path)?;
+        let decompressed = ultra_decompress(&compressed)?;
+        serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
 }
 
 // =============================================================================
@@ -305,6 +335,246 @@ impl DataIntegrityGate {
     pub fn market(&self) -> Market {
         self.market
     }
+}
+
+// =============================================================================
+// OBFS COMPRESSION HELPERS
+// =============================================================================
+
+/// Ultra-compress data using Zstd level 19 with LDM and checksum.
+fn ultra_compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new(), ULTRA_COMPRESSION_LEVEL)?;
+    encoder.include_checksum(true)?;
+    encoder.long_distance_matching(true)?;
+    encoder.write_all(data)?;
+    encoder.finish()
+}
+
+/// Decompress ultra-compressed data.
+fn ultra_decompress(compressed: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut decoder = Decoder::new(compressed)?;
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
+}
+
+// =============================================================================
+// INTEGRITY BUNDLE (OBFS Native)
+// =============================================================================
+
+/// Location of a report within the bundle file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrityLocation {
+    pub offset: u64,
+    pub compressed_size: u32,
+    pub original_size: u32,
+}
+
+/// Writer for consolidated integrity report bundles.
+/// Consolidates 79+ individual JSON files into a single OBFS bundle.
+pub struct IntegrityBundleWriter {
+    root_path: PathBuf,
+    data_file: Option<File>,
+    entries: HashMap<String, IntegrityLocation>,
+    written_count: u64,
+}
+
+impl IntegrityBundleWriter {
+    /// Create a new bundle writer.
+    pub fn new(root_path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root_path = root_path.into();
+        fs::create_dir_all(&root_path)?;
+
+        Ok(Self {
+            root_path,
+            data_file: None,
+            entries: HashMap::new(),
+            written_count: 0,
+        })
+    }
+
+    fn data_file_path(&self) -> PathBuf {
+        self.root_path.join("integrity.obfs")
+    }
+
+    fn ensure_data_file(&mut self) -> std::io::Result<&mut File> {
+        if self.data_file.is_none() {
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .append(true)
+                .open(self.data_file_path())?;
+            self.data_file = Some(file);
+        }
+        Ok(self.data_file.as_mut().unwrap())
+    }
+
+    /// Add a report with campaign ID.
+    pub fn add(&mut self, campaign_id: &str, report: &DataIntegrityReport) -> std::io::Result<()> {
+        // Serialize report to JSON
+        let json = serde_json::to_vec(report)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Ultra-compress
+        let compressed = ultra_compress(&json)?;
+
+        // Write to data file
+        let file = self.ensure_data_file()?;
+        let offset = file.seek(SeekFrom::End(0))?;
+
+        // Write length prefix + compressed data
+        let len_bytes = (compressed.len() as u32).to_le_bytes();
+        file.write_all(&len_bytes)?;
+        file.write_all(&compressed)?;
+
+        // Track location
+        self.entries.insert(
+            campaign_id.to_string(),
+            IntegrityLocation {
+                offset,
+                compressed_size: compressed.len() as u32,
+                original_size: json.len() as u32,
+            },
+        );
+        self.written_count += 1;
+
+        Ok(())
+    }
+
+    /// Scan a directory and add all existing reports.
+    pub fn add_from_directory(&mut self, dir: &Path) -> std::io::Result<u64> {
+        let mut added = 0u64;
+        
+        if !dir.exists() {
+            return Ok(0);
+        }
+
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if path.is_dir() {
+                let name = path.file_name().unwrap().to_string_lossy();
+                if name.starts_with("camp_") {
+                    let report_path = path.join("report.json");
+                    if report_path.exists() {
+                        if let Ok(report) = DataIntegrityReport::load(&report_path) {
+                            self.add(&name, &report)?;
+                            added += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(added)
+    }
+
+    /// Finish writing and return stats.
+    pub fn finish(mut self) -> std::io::Result<IntegrityBundleStats> {
+        // Sync data file
+        if let Some(ref mut file) = self.data_file {
+            file.sync_all()?;
+        }
+
+        // Write index
+        let index_path = self.root_path.join("index.json");
+        let index_json = serde_json::to_string_pretty(&self.entries)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        fs::write(index_path, index_json)?;
+
+        // Get data file size
+        let data_size = if self.data_file_path().exists() {
+            fs::metadata(self.data_file_path())?.len()
+        } else {
+            0
+        };
+
+        Ok(IntegrityBundleStats {
+            report_count: self.written_count,
+            data_file_size: data_size,
+            compression_level: ULTRA_COMPRESSION_LEVEL,
+        })
+    }
+
+    pub fn count(&self) -> u64 {
+        self.written_count
+    }
+}
+
+/// Reader for consolidated integrity report bundles.
+pub struct IntegrityBundleReader {
+    root_path: PathBuf,
+    index: HashMap<String, IntegrityLocation>,
+}
+
+impl IntegrityBundleReader {
+    /// Open an existing bundle.
+    pub fn open(root_path: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root_path = root_path.into();
+        let index_path = root_path.join("index.json");
+
+        let index: HashMap<String, IntegrityLocation> = if index_path.exists() {
+            let content = fs::read_to_string(&index_path)?;
+            serde_json::from_str(&content)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        } else {
+            HashMap::new()
+        };
+
+        Ok(Self { root_path, index })
+    }
+
+    fn data_file_path(&self) -> PathBuf {
+        self.root_path.join("integrity.obfs")
+    }
+
+    /// Get a report by campaign ID.
+    pub fn get(&self, campaign_id: &str) -> std::io::Result<Option<DataIntegrityReport>> {
+        let loc = match self.index.get(campaign_id) {
+            Some(l) => l,
+            None => return Ok(None),
+        };
+
+        let mut file = File::open(self.data_file_path())?;
+        file.seek(SeekFrom::Start(loc.offset))?;
+
+        // Read length prefix
+        let mut len_bytes = [0u8; 4];
+        file.read_exact(&mut len_bytes)?;
+        let compressed_len = u32::from_le_bytes(len_bytes) as usize;
+
+        // Read compressed data
+        let mut compressed = vec![0u8; compressed_len];
+        file.read_exact(&mut compressed)?;
+
+        // Decompress
+        let decompressed = ultra_decompress(&compressed)?;
+
+        // Deserialize
+        let report: DataIntegrityReport = serde_json::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        Ok(Some(report))
+    }
+
+    /// List all campaign IDs.
+    pub fn list(&self) -> Vec<String> {
+        self.index.keys().cloned().collect()
+    }
+
+    /// Get report count.
+    pub fn count(&self) -> usize {
+        self.index.len()
+    }
+}
+
+/// Statistics for integrity bundle.
+#[derive(Debug, Clone)]
+pub struct IntegrityBundleStats {
+    pub report_count: u64,
+    pub data_file_size: u64,
+    pub compression_level: i32,
 }
 
 // =============================================================================
