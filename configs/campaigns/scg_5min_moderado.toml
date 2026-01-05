@@ -1,12 +1,12 @@
 # =============================================================================
-# SCG 5-Minute Test Campaign
+# SCG 5-Minute Test Campaign - Moderado Profile
 # =============================================================================
-# Quick test to verify Hall of Fame auto-promotion in Rust
+# Variant with conservative risk limits aligned to institutional standards
 # =============================================================================
 
 [campaign]
-name = "scg_5min_test"
-description = "5-minute test with Rust-native Hall of Fame promotion"
+name = "scg_5min_moderado"
+description = "5-minute test with Moderado risk profile for conservative deployment"
 version = "1.0.0"
 
 [dataset]
@@ -14,7 +14,7 @@ market = "BR"
 market_data_path = "data/market_data_ibov.csv"
 
 [risk_profile]
-name = "arrojado"
+name = "moderado"
 
 [evolution]
 population_size = 150
@@ -24,7 +24,7 @@ crossover_rate = 0.85
 elitism_rate = 0.10
 mutation_rate = 0.08
 convergence_generations = 15
-max_runtime_seconds = 300
+max_runtime_seconds = 7200
 workers = 0
 hall_of_fame_size = 25
 
@@ -78,9 +78,9 @@ gates_required = true
 min_oos_sharpe_net = 0.50
 max_pbo = 0.15
 min_stress_passed = 4
-max_degradation = 0.40
+max_degradation = 0.35
 min_oos_trades = 30
-max_drawdown = -0.25
+max_drawdown = -0.20
 
 [data_integrity]
 enabled = true
@@ -91,16 +91,16 @@ survivorship_bias_check = true
 objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
 sharpe_weight = 1.5
 cagr_weight = 1.0
-drawdown_weight = 2.5
-calmar_weight = 1.0
+drawdown_weight = 3.0
+calmar_weight = 1.2
 sortino_weight = 0.5
 low_trades_penalty = true
 min_trades = 30
 extreme_turnover_penalty = true
-max_turnover_annual = 500.0
+max_turnover_annual = 400.0
 high_volatility_penalty = true
-max_volatility = 0.40
-drawdown_penalty_threshold = -0.20
+max_volatility = 0.35
+drawdown_penalty_threshold = -0.15
 
 [output]
 artifact_format = "obfs"
@@ -108,5 +108,4 @@ save_generations = true
 save_all_genomes = false
 save_diversity_metrics = true
 save_restart_events = true
-
 

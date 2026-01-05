@@ -471,8 +471,11 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             self.config.max_generations, self.config.population_size, top_k_stage_b
         );
 
-        // Initialize validated hall of fame
-        let mut validated_hof = ValidatedHallOfFame::with_capacity(self.config.hall_of_fame_size);
+        // Initialize validated hall of fame with gates from config
+        let mut institutional_criteria = crate::hall_of_fame_unified::InstitutionalCriteria::research();
+        institutional_criteria.max_oos_drawdown = self.config.gates.max_drawdown;
+        let institutional_strategy = crate::hall_of_fame_unified::InstitutionalStrategy::new(institutional_criteria);
+        let mut validated_hof = ValidatedHallOfFame::new(self.config.hall_of_fame_size, institutional_strategy);
 
         // Create split plan for Stage B validation
         let split_config = SplitPlanConfig::default();

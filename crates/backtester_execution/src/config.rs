@@ -608,6 +608,14 @@ pub struct InstitutionalGatesConfig {
     /// Maximum average slippage in bps (warning threshold).
     #[serde(default = "default_max_avg_slippage")]
     pub max_avg_slippage_bps: f64,
+
+    /// Maximum OOS drawdown (negative value, e.g. -0.25 for 25% max DD).
+    #[serde(default = "default_max_drawdown")]
+    pub max_drawdown: f64,
+}
+
+fn default_max_drawdown() -> f64 {
+    -0.30 // 30% max drawdown by default
 }
 
 fn default_max_turnover() -> f64 {
@@ -633,6 +641,7 @@ impl Default for InstitutionalGatesConfig {
             max_slippage_pct_of_pnl: 30.0,
             min_capacity_usd: 5_000_000.0,
             max_avg_slippage_bps: 25.0,
+            max_drawdown: default_max_drawdown(),
         }
     }
 }

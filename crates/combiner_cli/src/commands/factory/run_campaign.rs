@@ -302,7 +302,8 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
 
                     // Auto-promote to Hall of Fame (Rust-native, no Node dependency)
                     let market = &config.dataset.market;
-                    match auto_promote_to_hall_of_fame(&registry, &run_id, market).await {
+                    let criteria = super::promote::HallOfFameCriteria::from_promotion_config(&config.promotion);
+                    match auto_promote_to_hall_of_fame(&registry, &run_id, market, Some(criteria)).await {
                         Ok(promoted) if promoted > 0 => {
                             info!(run_id, promoted, "Auto-promoted {} candidates to Hall of Fame", promoted);
                         }

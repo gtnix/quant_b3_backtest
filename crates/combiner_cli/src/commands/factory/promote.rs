@@ -207,16 +207,31 @@ impl Default for HallOfFameCriteria {
     }
 }
 
+impl HallOfFameCriteria {
+    /// Create criteria from PromotionConfig (reads max_drawdown from TOML).
+    pub fn from_promotion_config(config: &super::config::PromotionConfig) -> Self {
+        Self {
+            min_oos_sharpe_net: config.min_oos_sharpe_net as f32,
+            max_pbo: config.max_pbo as f32,
+            min_dsr: config.min_dsr.unwrap_or(0.4) as f32,
+            // Convert negative drawdown to positive for comparison (e.g. -0.25 -> 0.25)
+            max_drawdown_net: config.max_drawdown.abs() as f32,
+            gates_required: config.gates_required,
+        }
+    }
+}
+
 /// Auto-promote candidates to Hall of Fame after a run completes.
 /// Called automatically at the end of `factory run`.
 pub async fn auto_promote_to_hall_of_fame(
     registry: &Registry,
     run_id: &str,
     market: &str,
+    criteria: Option<HallOfFameCriteria>,
 ) -> Result<usize> {
     use tracing::info;
     
-    let criteria = HallOfFameCriteria::default();
+    let criteria = criteria.unwrap_or_default();
     let candidates = registry.get_top_candidates(run_id, 100).await?;
     
     let mut promoted = 0;

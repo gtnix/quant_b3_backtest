@@ -30,8 +30,8 @@ pub struct CampaignConfig {
     /// Budget constraints.
     #[serde(default)]
     pub budget: BudgetConfig,
-    /// Promotion thresholds.
-    #[serde(default)]
+    /// Promotion thresholds (also accepts `[gates]` section in TOML).
+    #[serde(default, alias = "gates")]
     pub promotion: PromotionConfig,
     /// Data integrity configuration.
     #[serde(default)]
@@ -241,6 +241,13 @@ pub struct PromotionConfig {
     /// Minimum DSR (optional).
     #[serde(default)]
     pub min_dsr: Option<f64>,
+    /// Maximum drawdown (negative value, e.g. -0.25 for 25%).
+    #[serde(default = "default_max_drawdown")]
+    pub max_drawdown: f64,
+}
+
+fn default_max_drawdown() -> f64 {
+    -0.30 // 30% max drawdown by default
 }
 
 fn default_min_sharpe() -> f64 {
@@ -267,6 +274,7 @@ impl Default for PromotionConfig {
             min_stress_passed: default_min_stress(),
             gates_required: default_gates_required(),
             min_dsr: None,
+            max_drawdown: default_max_drawdown(),
         }
     }
 }

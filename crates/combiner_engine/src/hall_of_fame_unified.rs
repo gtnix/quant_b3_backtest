@@ -179,6 +179,9 @@ impl ValidatedHofStrategy for InstitutionalStrategy {
         if result.dsr < self.criteria.min_dsr { return false; }
         if result.degradation_pct > self.criteria.max_degradation_pct { return false; }
         
+        // Check max drawdown (oos_max_dd_worst is negative, max_oos_drawdown is negative)
+        if result.oos_max_dd_worst < self.criteria.max_oos_drawdown { return false; }
+        
         let pass_rate = result.splits_passed as f64 / result.splits_evaluated.max(1) as f64;
         if pass_rate < self.criteria.min_split_pass_rate { return false; }
         
