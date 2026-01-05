@@ -1,0 +1,63 @@
+{
+  "marco": "data_integrity",
+  "marco_index": 1,
+  "marco_name": "Data Integrity Gate",
+  "checks": [
+    {
+      "name": "data_integrity_config",
+      "description": "Data integrity settings are configured",
+      "verdict": "PASS",
+      "message": "Mode: fast, Max gap: 5 days",
+      "evidence": {
+        "mode": "fast",
+        "jump_threshold_pct": 30.0,
+        "universe_type": "unknown",
+        "max_gap_days": 5
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "lookahead_policy",
+      "description": "Lookahead bias prevention is configured",
+      "verdict": "PASS",
+      "message": "delay_bars = 1 (>= 1 required)",
+      "evidence": {
+        "delay_bars": 1
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "universe_type",
+      "description": "Universe type prevents survivorship bias",
+      "verdict": "WARN",
+      "message": "Unknown universe type - cannot verify survivorship bias prevention",
+      "evidence": {
+        "universe_type": "unknown"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "price_adjustment",
+      "description": "Price adjustment policy is configured",
+      "verdict": "PASS",
+      "message": "Using: adjusted",
+      "evidence": {
+        "price_adjustment": "adjusted"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "dataset_hash",
+      "description": "Dataset has integrity hash",
+      "verdict": "WARN",
+      "message": "No dataset hash configured - cannot verify data integrity across runs",
+      "evidence": {},
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "WARN",
+  "summary": "5 checks: 3 passed, 2 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884463649Z",
+  "completed_at": "2026-01-05T10:38:51.884474467Z",
+  "duration_ms": 0
+}

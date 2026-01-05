@@ -40,7 +40,7 @@ impl ExitAuditLog {
                 symbol: e.symbol.clone(),
                 shares: e.shares_to_sell,
                 reason: e.reason,
-                pnl: e.unrealized_pnl,
+                pnl: e.unrealized_pnl.to_decimal(),
                 return_pct: e.unrealized_return,
             })
             .collect();
@@ -171,7 +171,7 @@ impl ExitAuditLog {
 
     /// Get total PnL from all exits.
     pub fn total_pnl(&self) -> Decimal {
-        self.diagnostics.total_exit_pnl
+        self.diagnostics.total_exit_pnl.to_decimal()
     }
 
     /// Check if there are any risk violations.
@@ -184,6 +184,7 @@ impl ExitAuditLog {
 mod tests {
     use super::*;
     use crate::entry::OrderSide;
+    use backtester_core::Money;
     use rust_decimal_macros::dec;
 
     fn make_sample_log() -> ExitAuditLog {
@@ -215,9 +216,9 @@ mod tests {
                 positions_exited: 2,
                 stop_loss_count: 1,
                 take_profit_count: 1,
-                total_exit_pnl: dec!(2000),
-                exit_turnover: dec!(45000),
-                estimated_costs: dec!(450),
+                total_exit_pnl: Money::from(dec!(2000)),
+                exit_turnover: Money::from(dec!(45000)),
+                estimated_costs: Money::from(dec!(450)),
                 ..Default::default()
             },
         }

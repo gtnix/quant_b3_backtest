@@ -1,19 +1,28 @@
 //! Entry module types and structures.
+//!
+//! # Performance (Milestone 6)
+//!
+//! All monetary types use fixed-point (`Price`/`Money`) for fast i64 arithmetic.
+//! Decimal is only used at API boundaries for compatibility.
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use backtester_core::{Money, Price};
 use crate::filters::Market;
 
 /// Context for entry policy evaluation.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Money` for capital to avoid Decimal conversions.
 #[derive(Debug, Clone)]
 pub struct EntryContext {
     /// Current simulation date
     pub date: NaiveDate,
-    /// Available capital for this market
-    pub capital: Decimal,
+    /// Available capital for this market (fixed-point)
+    pub capital: Money,
     /// Market being evaluated (BR or US)
     pub market: Market,
     /// Maximum weight per asset (e.g., 0.20 for 20%)
@@ -25,7 +34,8 @@ pub struct EntryContext {
 }
 
 impl EntryContext {
-    pub fn new(date: NaiveDate, capital: Decimal, market: Market) -> Self {
+    /// Create new context with fixed-point Money.
+    pub fn new(date: NaiveDate, capital: Money, market: Market) -> Self {
         Self {
             date,
             capital,
@@ -55,6 +65,10 @@ impl fmt::Display for SelectionReason {
 }
 
 /// A target position after entry evaluation.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Price` for fast arithmetic.
 #[derive(Debug, Clone)]
 pub struct EntryTarget {
     /// Asset symbol
@@ -63,8 +77,8 @@ pub struct EntryTarget {
     pub target_weight: f64,
     /// Target number of shares
     pub target_shares: i64,
-    /// Current price used for calculation
-    pub price: Decimal,
+    /// Current price used for calculation (fixed-point)
+    pub price: Price,
     /// Reason for selection
     pub reason: SelectionReason,
 }
@@ -215,6 +229,10 @@ impl fmt::Display for EntryWarning {
 }
 
 /// Diagnostics from entry evaluation.
+///
+/// # Performance (Milestone 6)
+///
+/// Monetary fields use fixed-point `Money`.
 #[derive(Debug, Clone, Default)]
 pub struct EntryDiagnostics {
     /// Total candidates evaluated
@@ -227,12 +245,12 @@ pub struct EntryDiagnostics {
     pub final_selected: usize,
     /// Portfolio turnover (0.0 to 1.0)
     pub turnover: f64,
-    /// Estimated transaction costs
-    pub estimated_costs: Decimal,
+    /// Estimated transaction costs (fixed-point)
+    pub estimated_costs: Money,
     /// Sum of weights (should be ~1.0)
     pub total_weight: f64,
-    /// Cash residual after allocation (capital - sum(shares * price))
-    pub cash_residual: Decimal,
+    /// Cash residual after allocation (fixed-point)
+    pub cash_residual: Money,
     /// Warnings generated during evaluation
     pub warnings: Vec<EntryWarning>,
 }
@@ -281,6 +299,10 @@ impl fmt::Display for OrderSide {
 }
 
 /// A simulated order.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Price` and `Money` for all monetary fields.
 #[derive(Debug, Clone)]
 pub struct Order {
     /// Asset symbol
@@ -289,17 +311,18 @@ pub struct Order {
     pub side: OrderSide,
     /// Number of shares
     pub shares: i64,
-    /// Execution price
-    pub price: Decimal,
-    /// Estimated cost (fees + slippage)
-    pub estimated_cost: Decimal,
-    /// Notional value
-    pub notional: Decimal,
+    /// Execution price (fixed-point)
+    pub price: Price,
+    /// Estimated cost (fees + slippage) (fixed-point)
+    pub estimated_cost: Money,
+    /// Notional value (fixed-point)
+    pub notional: Money,
 }
 
 impl Order {
-    pub fn new(symbol: String, side: OrderSide, shares: i64, price: Decimal, cost: Decimal) -> Self {
-        let notional = price * Decimal::from(shares);
+    /// Create new order with fixed-point types.
+    pub fn new(symbol: String, side: OrderSide, shares: i64, price: Price, cost: Money) -> Self {
+        let notional = price.mul_shares(shares);
         Self {
             symbol,
             side,
@@ -329,7 +352,7 @@ mod tests {
     fn test_entry_context_creation() {
         let ctx = EntryContext::new(
             NaiveDate::from_ymd_opt(2025, 1, 3).unwrap(),
-            Decimal::from(100_000),
+            Money::from_int(100_000),
             Market::BR,
         );
         assert_eq!(ctx.top_n, 10);
@@ -346,14 +369,16 @@ mod tests {
 
     #[test]
     fn test_order_creation() {
+        // Price = 38.00, Cost = 23.80
         let order = Order::new(
             "PETR4".to_string(),
             OrderSide::Buy,
             100,
-            Decimal::from(38),
-            Decimal::new(2380, 2), // R$ 23.80
+            Price::from_int(38),
+            Money::from_f64(23.80),
         );
-        assert_eq!(order.notional, Decimal::from(3800));
+        // Notional = 38 * 100 = 3800
+        assert_eq!(order.notional.to_f64(), 3800.0);
         assert!(order.to_string().contains("BUY PETR4"));
     }
 }

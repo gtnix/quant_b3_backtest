@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::policy::ExitPolicy;
 use super::types::{ExitContext, ExitReason, ExitTarget, Position};
+use backtester_core::Price;
 
 /// Trailing stop configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,12 +57,12 @@ impl TrailingStopPolicy {
     /// Check if trailing stop is activated (position has reached min gain).
     fn is_activated(&self, position: &Position) -> bool {
         // Calculate max return from cost basis to high-water mark
-        if position.cost_basis == rust_decimal::Decimal::ZERO {
+        if position.cost_basis.is_zero() {
             return false;
         }
-        let max_return = (position.high_water_mark - position.cost_basis) / position.cost_basis;
-        let max_return_f64: f64 = max_return.try_into().unwrap_or(0.0);
-        max_return_f64 >= self.config.activation_gain_pct
+        let max_return = (position.high_water_mark.to_f64() - position.cost_basis.to_f64()) 
+            / position.cost_basis.to_f64();
+        max_return >= self.config.activation_gain_pct
     }
 }
 
@@ -126,7 +127,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             dec!(105),
         );
-        pos.high_water_mark = dec!(120); // Set high-water mark
+        pos.high_water_mark = Price::from(dec!(120)); // Set high-water mark
 
         let result = policy.evaluate(&pos, &ctx);
         assert!(result.is_some());
@@ -147,7 +148,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             dec!(110),
         );
-        pos.high_water_mark = dec!(120);
+        pos.high_water_mark = Price::from(dec!(120));
 
         let result = policy.evaluate(&pos, &ctx);
         assert!(result.is_none()); // 8.3% < 15% trail
@@ -168,7 +169,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             dec!(95),
         );
-        pos.high_water_mark = dec!(110);
+        pos.high_water_mark = Price::from(dec!(110));
 
         let result = policy.evaluate(&pos, &ctx);
         assert!(result.is_none()); // Not activated (only 10% gain, needs 20%)
@@ -188,7 +189,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             dec!(110),
         );
-        pos.high_water_mark = dec!(125);
+        pos.high_water_mark = Price::from(dec!(125));
 
         let result = policy.evaluate(&pos, &ctx);
         assert!(result.is_some()); // Activated (25% > 15%) and triggered (12% > 10%)
@@ -210,7 +211,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             dec!(50), // 50% drop
         );
-        pos.high_water_mark = dec!(200);
+        pos.high_water_mark = Price::from(dec!(200));
 
         let result = policy.evaluate(&pos, &ctx);
         assert!(result.is_none()); // Disabled

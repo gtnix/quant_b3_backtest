@@ -1,10 +1,14 @@
 //! Entry Engine - orchestrates the full entry flow.
+//!
+//! # Performance (Milestone 6)
+//!
+//! All monetary types use fixed-point (`Price`/`Money`) for fast i64 arithmetic.
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use backtester_core::{Money, Price};
 use crate::filters::Market;
 use crate::scorer::ScoredAsset;
 
@@ -67,12 +71,18 @@ impl Default for EntryEngineConfig {
 }
 
 /// Asset candidate with all required data.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Price` and `Money` for monetary fields.
 #[derive(Debug, Clone)]
 pub struct AssetCandidate {
     pub symbol: String,
     pub market: Market,
-    pub price: Option<Decimal>,
-    pub avg_volume: Option<Decimal>,
+    /// Current price (fixed-point)
+    pub price: Option<Price>,
+    /// Average daily volume in currency (fixed-point)
+    pub avg_volume: Option<Money>,
     pub price_days: usize,
     pub has_fundamentals: bool,
     pub has_dividends: bool,
@@ -181,16 +191,21 @@ impl EntryEngine {
     }
 
     /// Evaluate entry for a specific market.
+    ///
+    /// # Performance (Milestone 5)
+    ///
+    /// Takes candidates by slice to avoid cloning at call site.
     pub fn evaluate(
         &self,
         ctx: &EntryContext,
-        candidates: Vec<AssetCandidate>,
+        candidates: &[AssetCandidate],
         current_positions: &HashMap<String, i64>,
     ) -> (EntryResult, Vec<Order>, RebalanceAuditLog) {
         let mut result = EntryResult::new(ctx.date, ctx.market);
         result.diagnostics.total_candidates = candidates.len();
 
         // Step 1: Gating
+        // Performance (Milestone 5): Build gating candidates without cloning the input slice
         let gating_candidates: Vec<GatingCandidate> = candidates
             .iter()
             .filter(|c| c.market == ctx.market)
@@ -208,12 +223,13 @@ impl EntryEngine {
             })
             .collect();
 
-        let (eligible, gating_excluded) = self.gating.apply(gating_candidates.clone());
+        // Save count before moving into apply() (Milestone 5: no clone)
+        let gating_candidates_count = gating_candidates.len();
+        let (eligible, gating_excluded) = self.gating.apply(gating_candidates);
         result.diagnostics.gating_excluded = gating_excluded.len();
-        result.exclusions.extend(gating_excluded.clone());
 
         // GUARDRAIL: Check for empty universe after gating
-        if eligible.is_empty() && !gating_candidates.is_empty() {
+        if eligible.is_empty() && gating_candidates_count > 0 {
             // Count exclusion reasons
             let mut reason_counts: HashMap<String, usize> = HashMap::new();
             for excl in &gating_excluded {
@@ -228,7 +244,7 @@ impl EntryEngine {
                 .collect();
 
             let warning = EntryWarning::EmptyUniverse {
-                candidates_before: gating_candidates.len(),
+                candidates_before: gating_candidates_count,
                 gating_excluded: gating_excluded.len(),
                 top_reasons,
             };
@@ -237,12 +253,12 @@ impl EntryEngine {
             tracing::warn!(
                 market = ?ctx.market,
                 date = %ctx.date,
-                candidates = gating_candidates.len(),
+                candidates = gating_candidates_count,
                 "[GUARDRAIL] Empty universe: all candidates excluded by gating"
             );
             
             result.diagnostics.warnings.push(warning);
-        } else if eligible.len() < 5 && !gating_candidates.is_empty() {
+        } else if eligible.len() < 5 && gating_candidates_count > 0 {
             // Warn if very few assets
             let warning = EntryWarning::LowUniverse {
                 eligible_count: eligible.len(),
@@ -256,6 +272,9 @@ impl EntryEngine {
             );
             result.diagnostics.warnings.push(warning);
         }
+        
+        // Move excluded list to result (no clone)
+        result.exclusions.extend(gating_excluded);
 
         // Map eligible symbols for lookup
         let eligible_symbols: std::collections::HashSet<_> = 
@@ -294,10 +313,10 @@ impl EntryEngine {
         let weights = self.weighter.calculate_weights(weighting_candidates);
         result.diagnostics.total_weight = weights.iter().map(|w| w.weight).sum();
 
-        // Step 5: Create targets
+        // Step 5: Create targets (Milestone 6: fixed-point throughout)
         for weight_result in &weights {
             let candidate = candidates.iter().find(|c| c.symbol == weight_result.symbol);
-            let price = candidate.and_then(|c| c.price).unwrap_or(Decimal::ZERO);
+            let price = candidate.and_then(|c| c.price).unwrap_or(Price::ZERO);
             let selected_info = selected.iter().find(|s| s.symbol == weight_result.symbol);
             
             let target_shares = self.order_gen.calculate_target_shares(
@@ -350,15 +369,9 @@ impl EntryEngine {
         result.diagnostics.estimated_costs = total_cost;
         result.diagnostics.turnover = self.order_gen.calculate_turnover(&orders, ctx.capital);
 
-        // Calculate cash residual = capital - sum(shares * price)
-        let total_allocated: Decimal = result.targets.iter()
-            .map(|t| {
-                // Get price from order_targets for this symbol
-                order_targets.iter()
-                    .find(|ot| ot.symbol == t.symbol)
-                    .map(|ot| ot.price * Decimal::from(t.target_shares))
-                    .unwrap_or(Decimal::ZERO)
-            })
+        // Calculate cash residual = capital - sum(shares * price) (Milestone 6: fixed-point)
+        let total_allocated: Money = result.targets.iter()
+            .map(|t| t.price.mul_shares(t.target_shares))
             .sum();
         result.diagnostics.cash_residual = ctx.capital - total_allocated;
 
@@ -387,14 +400,18 @@ impl EntryEngine {
     }
 
     /// Evaluate for both markets.
+    ///
+    /// # Performance (Milestone 5/6)
+    ///
+    /// Takes candidates by slice to avoid cloning, uses fixed-point Money.
     pub fn evaluate_all(
         &self,
         date: NaiveDate,
-        candidates: Vec<AssetCandidate>,
+        candidates: &[AssetCandidate],
         positions_br: &HashMap<String, i64>,
         positions_us: &HashMap<String, i64>,
-        capital_br: Decimal,
-        capital_us: Decimal,
+        capital_br: Money,
+        capital_us: Money,
     ) -> (Vec<EntryResult>, Vec<Order>, Vec<RebalanceAuditLog>) {
         let mut all_results = Vec::new();
         let mut all_orders = Vec::new();
@@ -402,7 +419,7 @@ impl EntryEngine {
 
         // BR
         let ctx_br = EntryContext::new(date, capital_br, Market::BR);
-        let (result_br, orders_br, audit_br) = self.evaluate(&ctx_br, candidates.clone(), positions_br);
+        let (result_br, orders_br, audit_br) = self.evaluate(&ctx_br, candidates, positions_br);
         all_results.push(result_br);
         all_orders.extend(orders_br);
         all_audits.push(audit_br);
@@ -426,8 +443,8 @@ mod tests {
         vec![
             {
                 let mut c = AssetCandidate::new("PETR4", Market::BR);
-                c.price = Some(dec!(38));
-                c.avg_volume = Some(dec!(5_000_000));
+                c.price = Some(Price::from_int(38));
+                c.avg_volume = Some(Money::from_int(5_000_000));
                 c.price_days = 30;
                 c.has_fundamentals = true;
                 c.has_dividends = true;
@@ -437,8 +454,8 @@ mod tests {
             },
             {
                 let mut c = AssetCandidate::new("VALE3", Market::BR);
-                c.price = Some(dec!(62));
-                c.avg_volume = Some(dec!(4_000_000));
+                c.price = Some(Price::from_int(62));
+                c.avg_volume = Some(Money::from_int(4_000_000));
                 c.price_days = 30;
                 c.has_fundamentals = true;
                 c.has_dividends = true;
@@ -448,8 +465,8 @@ mod tests {
             },
             {
                 let mut c = AssetCandidate::new("ITUB4", Market::BR);
-                c.price = Some(dec!(32));
-                c.avg_volume = Some(dec!(3_000_000));
+                c.price = Some(Price::from_int(32));
+                c.avg_volume = Some(Money::from_int(3_000_000));
                 c.price_days = 30;
                 c.has_fundamentals = true;
                 c.has_dividends = true;
@@ -459,8 +476,6 @@ mod tests {
             },
         ]
     }
-
-    use rust_decimal_macros::dec;
 
     #[test]
     fn test_full_flow_br() {
@@ -477,12 +492,12 @@ mod tests {
 
         let ctx = EntryContext::new(
             NaiveDate::from_ymd_opt(2025, 1, 3).unwrap(),
-            dec!(100_000),
+            Money::from_int(100_000),
             Market::BR,
         );
 
         let candidates = make_br_candidates();
-        let (result, orders, audit) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, orders, audit) = engine.evaluate(&ctx, &candidates, &HashMap::new());
 
         // Should select top 2
         assert_eq!(result.targets.len(), 2);
@@ -505,12 +520,12 @@ mod tests {
 
         let ctx = EntryContext::new(
             NaiveDate::from_ymd_opt(2025, 1, 3).unwrap(),
-            dec!(100_000),
+            Money::from_int(100_000),
             Market::BR,
         );
 
         let candidates = make_br_candidates();
-        let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
 
         let total_weight: f64 = result.targets.iter().map(|t| t.target_weight).sum();
         assert!((total_weight - 1.0).abs() < 0.01, "Total weight {} should be ~1.0", total_weight);
@@ -525,15 +540,15 @@ mod tests {
 
         let ctx = EntryContext::new(
             NaiveDate::from_ymd_opt(2025, 1, 3).unwrap(),
-            dec!(100_000),
+            Money::from_int(100_000),
             Market::BR,
         );
 
         let mut candidates = make_br_candidates();
         // Make one low volume
-        candidates[0].avg_volume = Some(dec!(100_000)); // Below threshold
+        candidates[0].avg_volume = Some(Money::from_int(100_000)); // Below threshold
 
-        let (result, _, _) = engine.evaluate(&ctx, candidates, &HashMap::new());
+        let (result, _, _) = engine.evaluate(&ctx, &candidates, &HashMap::new());
 
         // PETR4 should be excluded
         assert!(result.exclusions.iter().any(|e| 

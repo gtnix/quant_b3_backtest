@@ -2,9 +2,8 @@
 //!
 //! Proves that Entry and Exit orders are correctly combined without conflicts.
 
-use std::collections::HashMap;
-
-use backtester_intelligence::entry::{AssetCandidate, Order, OrderSide};
+use backtester_core::{Money, Price};
+use backtester_intelligence::entry::{AssetCandidate, OrderSide};
 use backtester_intelligence::exit::Position;
 use backtester_intelligence::filters::Market;
 use backtester_intelligence::orchestrator::{OrchestratorConfig, RebalanceOrchestrator};
@@ -21,9 +20,9 @@ fn make_position(symbol: &str, shares: i64, cost: Decimal, current: Decimal) -> 
         symbol,
         Market::BR,
         shares,
-        cost,
+        Money::from(cost),
         NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-        current,
+        Price::from(current),
     )
 }
 
@@ -31,8 +30,8 @@ fn make_candidate(symbol: &str, price: Decimal, score: f64) -> AssetCandidate {
     AssetCandidate {
         symbol: symbol.to_string(),
         market: Market::BR,
-        price: Some(price),
-        avg_volume: Some(dec!(5_000_000)),
+        price: Some(Price::from(price)),
+        avg_volume: Some(Money::from(dec!(5_000_000))),
         volatility: Some(0.20),
         score: Some(score),
         filter_scores: Vec::new(),
@@ -88,10 +87,10 @@ fn integration_stop_loss_exit_with_entry_same_symbol() {
         fixed_date(),
         Market::BR,
         &positions,
-        candidates,
-        dec!(500_000),  // initial cash
-        dec!(500_000),  // equity
-        dec!(500_000),  // peak equity
+        &candidates,
+        Money::from(dec!(500_000)),  // initial cash
+        Money::from(dec!(500_000)),  // equity
+        Money::from(dec!(500_000)),  // peak equity
     );
 
     // Should have netted orders
@@ -101,16 +100,16 @@ fn integration_stop_loss_exit_with_entry_same_symbol() {
     );
 
     // Total costs should be calculated on net orders only
-    let total_cost: Decimal = result.net_orders.iter().map(|o| o.estimated_cost).sum();
+    let total_cost: Money = result.net_orders.iter().map(|o| o.estimated_cost).sum();
     assert!(
         total_cost == audit.total_cost,
-        "Total cost mismatch: orders={}, audit={}", total_cost, audit.total_cost
+        "Total cost mismatch: orders={:?}, audit={:?}", total_cost, audit.total_cost
     );
 
     // Cash after should be consistent
     assert!(
-        audit.cash_after > Decimal::ZERO,
-        "Cash should remain positive: {}", audit.cash_after
+        audit.cash_after > Money::ZERO,
+        "Cash should remain positive: {:?}", audit.cash_after
     );
 }
 
@@ -138,10 +137,10 @@ fn integration_no_conflict_different_symbols() {
         fixed_date(),
         Market::BR,
         &positions,
-        candidates,
-        dec!(500_000),
-        dec!(500_000),
-        dec!(500_000),
+        &candidates,
+        Money::from(dec!(500_000)),
+        Money::from(dec!(500_000)),
+        Money::from(dec!(500_000)),
     );
 
     // No netting should occur (different symbols)
@@ -197,10 +196,10 @@ fn integration_complete_cancellation() {
         fixed_date(),
         Market::BR,
         &positions,
-        candidates,
-        dec!(100_000),
-        dec!(100_000),
-        dec!(100_000),
+        &candidates,
+        Money::from(dec!(100_000)),
+        Money::from(dec!(100_000)),
+        Money::from(dec!(100_000)),
     );
 
     // If exit sells 400 and entry wants to buy ~same amount, they might cancel
@@ -208,14 +207,15 @@ fn integration_complete_cancellation() {
     // Key: no duplicated costs, no conflicting orders
     
     // Verify determinism - run again and get same result
+    let candidates2 = vec![make_candidate("ITUB4", dec!(28.2), 0.95)];
     let (result2, _) = orchestrator.execute_rebalance(
         fixed_date(),
         Market::BR,
         &positions,
-        vec![make_candidate("ITUB4", dec!(28.2), 0.95)],
-        dec!(100_000),
-        dec!(100_000),
-        dec!(100_000),
+        &candidates2,
+        Money::from(dec!(100_000)),
+        Money::from(dec!(100_000)),
+        Money::from(dec!(100_000)),
     );
 
     assert_eq!(result.net_orders.len(), result2.net_orders.len());
@@ -239,16 +239,16 @@ fn integration_cash_flow_consistency() {
         make_candidate("VALE3", dec!(60), 0.85),
     ];
 
-    let initial_cash = dec!(200_000);
+    let initial_cash = Money::from(dec!(200_000));
 
     let (_result, audit) = orchestrator.execute_rebalance(
         fixed_date(),
         Market::BR,
         &positions,
-        candidates,
+        &candidates,
         initial_cash,
-        dec!(200_000),
-        dec!(200_000),
+        Money::from(dec!(200_000)),
+        Money::from(dec!(200_000)),
     );
 
     // Cash before should match input
@@ -258,8 +258,8 @@ fn integration_cash_flow_consistency() {
     // (we can't verify exact amount without knowing all order details,
     // but it should be non-negative and different from before if orders executed)
     assert!(
-        audit.cash_after >= Decimal::ZERO,
-        "Cash should not go negative: {}", audit.cash_after
+        audit.cash_after >= Money::ZERO,
+        "Cash should not go negative: {:?}", audit.cash_after
     );
 }
 
@@ -302,10 +302,10 @@ fn integration_costs_not_doubled() {
         fixed_date(),
         Market::BR,
         &positions,
-        candidates,
-        dec!(500_000),
-        dec!(500_000),
-        dec!(500_000),
+        &candidates,
+        Money::from(dec!(500_000)),
+        Money::from(dec!(500_000)),
+        Money::from(dec!(500_000)),
     );
 
     // Net order should be SELL 400 (1000 - 600)
@@ -318,22 +318,24 @@ fn integration_costs_not_doubled() {
 
     if !petr4_orders.is_empty() {
         let net_order = &petr4_orders[0];
-        let expected_max_cost = net_order.price * Decimal::from(net_order.shares) * dec!(0.001);
+        let expected_max_notional = net_order.price.mul_shares(net_order.shares);
+        let expected_max_cost = expected_max_notional.mul_rate(backtester_core::Rate::from(dec!(0.001)));
+        let tolerance = Money::from(dec!(1));
         
         assert!(
-            net_order.estimated_cost <= expected_max_cost + dec!(1),
-            "Cost {} should be based on net order, not double-charged (max expected: {})",
+            net_order.estimated_cost <= expected_max_cost + tolerance,
+            "Cost {:?} should be based on net order, not double-charged (max expected: {:?})",
             net_order.estimated_cost, expected_max_cost
         );
     }
 
     // Total cost in audit should match sum of net order costs
-    let calculated_cost: Decimal = result.net_orders.iter()
+    let calculated_cost: Money = result.net_orders.iter()
         .map(|o| o.estimated_cost)
         .sum();
     assert_eq!(
         audit.total_cost, calculated_cost,
-        "Audit cost {} should match sum of net orders {}", audit.total_cost, calculated_cost
+        "Audit cost {:?} should match sum of net orders {:?}", audit.total_cost, calculated_cost
     );
 }
 
@@ -364,10 +366,10 @@ fn integration_determinism() {
             fixed_date(),
             Market::BR,
             &positions,
-            candidates.clone(),
-            dec!(500_000),
-            dec!(500_000),
-            dec!(500_000),
+            &candidates,
+            Money::from(dec!(500_000)),
+            Money::from(dec!(500_000)),
+            Money::from(dec!(500_000)),
         );
         results.push((result.net_orders.len(), result.netting_count, audit.total_cost));
     }

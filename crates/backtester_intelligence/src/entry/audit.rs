@@ -4,6 +4,7 @@ use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use backtester_core::Money;
 use crate::filters::Market;
 use super::types::{EntryDiagnostics, EntryExclusion, ExclusionReason, Order, OrderSide};
 
@@ -144,13 +145,13 @@ impl RebalanceAuditLog {
         counts
     }
 
-    /// Get total cost of all orders.
-    pub fn total_order_cost(&self) -> rust_decimal::Decimal {
+    /// Get total cost of all orders (fixed-point).
+    pub fn total_order_cost(&self) -> Money {
         self.orders.iter().map(|o| o.estimated_cost).sum()
     }
 
-    /// Get cash residual from diagnostics.
-    pub fn cash_residual(&self) -> rust_decimal::Decimal {
+    /// Get cash residual from diagnostics (fixed-point).
+    pub fn cash_residual(&self) -> Money {
         self.diagnostics.cash_residual
     }
 }
@@ -228,7 +229,7 @@ impl AuditLogger {
         } else {
             0.0
         };
-        let total_costs: rust_decimal::Decimal = self.logs.iter()
+        let total_costs: Money = self.logs.iter()
             .map(|l| l.diagnostics.estimated_costs)
             .sum();
 
@@ -249,13 +250,14 @@ pub struct AuditStats {
     pub total_orders: usize,
     pub total_excluded: usize,
     pub avg_turnover: f64,
-    pub total_costs: rust_decimal::Decimal,
+    /// Total costs (fixed-point)
+    pub total_costs: Money,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
+    use backtester_core::Price;
     use super::super::types::{ExclusionReason, ExclusionStage};
 
     fn make_sample_log() -> RebalanceAuditLog {
@@ -291,7 +293,7 @@ mod tests {
                 },
             ],
             orders: vec![
-                Order::new("PETR4".to_string(), OrderSide::Buy, 300, dec!(38), dec!(24)),
+                Order::new("PETR4".to_string(), OrderSide::Buy, 300, Price::from_int(38), Money::from_int(24)),
             ],
             diagnostics: EntryDiagnostics {
                 total_candidates: 50,
@@ -299,9 +301,9 @@ mod tests {
                 selection_excluded: 38,
                 final_selected: 2,
                 turnover: 0.15,
-                estimated_costs: dec!(24),
+                estimated_costs: Money::from_int(24),
                 total_weight: 0.27,
-                cash_residual: dec!(730000),
+                cash_residual: Money::from_int(730_000),
                 warnings: vec![],
             },
         }

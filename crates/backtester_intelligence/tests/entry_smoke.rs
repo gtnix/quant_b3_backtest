@@ -93,7 +93,7 @@ fn smoke_test_br_multiple_rebalances() {
 
     for (i, date) in dates.iter().enumerate() {
         let ctx = EntryContext::new(*date, capital, Market::BR);
-        let (result, orders, audit) = engine.evaluate(&ctx, candidates.clone(), &positions);
+        let (result, orders, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
         // Basic sanity checks
         assert!(result.targets.len() <= 10, "Rebalance {}: too many targets", i);
@@ -161,7 +161,7 @@ fn smoke_test_us_without_fundamentals() {
     // Single rebalance
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::US);
-    let (result, orders, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should select top 10 US assets
     assert!(result.targets.len() <= 10);
@@ -205,7 +205,7 @@ fn smoke_test_fundamentals_required_drops_us() {
 
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::US);
-    let (result, _orders, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _orders, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // All US should be excluded for missing fundamentals
     assert_eq!(result.targets.len(), 0, "No US assets should be selected when fundamentals required");
@@ -231,8 +231,8 @@ fn smoke_test_determinism() {
     let ctx = EntryContext::new(date, capital, Market::BR);
 
     // Run twice
-    let (result1, _, _) = engine.evaluate(&ctx, candidates.clone(), &positions);
-    let (result2, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result1, _, _) = engine.evaluate(&ctx, &candidates, &positions);
+    let (result2, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should be identical
     assert_eq!(result1.targets.len(), result2.targets.len(), "Target count should match");
@@ -317,8 +317,8 @@ fn test_volatility_anti_lookahead() {
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (result1, _, _) = engine.evaluate(&ctx, candidates1, &positions);
-    let (result2, _, _) = engine.evaluate(&ctx, candidates2, &positions);
+    let (result1, _, _) = engine.evaluate(&ctx, &candidates1, &positions);
+    let (result2, _, _) = engine.evaluate(&ctx, &candidates2, &positions);
 
     // Weights should be identical because Entry uses only the volatility passed
     assert_eq!(result1.targets.len(), result2.targets.len());
@@ -451,7 +451,7 @@ fn test_future_fundamentals_excluded() {
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (result, _, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Asset should be excluded for future fundamentals
     assert!(result.targets.is_empty(), "Future data asset should not be selected");
@@ -495,7 +495,7 @@ fn test_past_fundamentals_allowed() {
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Asset should be selected (past fundamentals are valid)
     assert_eq!(result.targets.len(), 1, "Past data asset should be selected");

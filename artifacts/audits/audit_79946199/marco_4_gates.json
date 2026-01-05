@@ -1,0 +1,56 @@
+{
+  "marco": "promotion_gates",
+  "marco_index": 4,
+  "marco_name": "Promotion Gates",
+  "checks": [
+    {
+      "name": "promotion_thresholds",
+      "description": "Promotion thresholds are configured",
+      "verdict": "PASS",
+      "message": "Min OOS Sharpe: 0.5, Max PBO: 0.15",
+      "evidence": {
+        "max_pbo": 0.15,
+        "min_oos_sharpe_net": 0.5,
+        "min_stress_passed": 4
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "gates_required",
+      "description": "Institutional gates are enforced",
+      "verdict": "PASS",
+      "message": "All candidates must pass institutional gates before promotion",
+      "evidence": {
+        "gates_required": true
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "variance_sanity_gate",
+      "description": "Variance sanity gate is active",
+      "verdict": "PASS",
+      "message": "Will detect collapsed metrics (variance ≈ 0) and block promotion",
+      "evidence": {
+        "threshold_sharpe_var": 1e-6,
+        "threshold_pbo_var": 1e-8,
+        "threshold_dsr_var": 1e-6
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "duplicate_prevention",
+      "description": "Duplicate genome prevention is active",
+      "verdict": "PASS",
+      "message": "Genome hashes are tracked to prevent duplicate promotions",
+      "evidence": {
+        "uses_genome_hash": true
+      },
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "PASS",
+  "summary": "4 checks: 4 passed, 0 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884492943Z",
+  "completed_at": "2026-01-05T10:38:51.884496521Z",
+  "duration_ms": 0
+}

@@ -8,7 +8,11 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod fixed;
 pub mod simd;
+
+// Re-export fixed-point types for convenience
+pub use fixed::{Money, Price, Rate, SCALE_6, SCALE_8};
 
 use std::fmt;
 

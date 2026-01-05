@@ -1,14 +1,14 @@
 //! Golden snapshot tests for Exit Module audit output.
 
+use backtester_core::{Money, Price};
 use backtester_intelligence::exit::{
-    ExitAuditLog, ExitContext, ExitDiagnostics, ExitReason, ExitedPosition,
-    Position, RiskViolation,
+    ExitAuditLog, ExitDiagnostics, ExitReason, ExitedPosition,
+    RiskViolation,
 };
 use backtester_intelligence::entry::{Order, OrderSide};
 use backtester_intelligence::filters::Market;
 use chrono::NaiveDate;
 use rust_decimal_macros::dec;
-use std::collections::HashMap;
 
 fn make_sample_log() -> ExitAuditLog {
     ExitAuditLog {
@@ -19,28 +19,28 @@ fn make_sample_log() -> ExitAuditLog {
                 symbol: "PETR4".to_string(),
                 shares: 500,
                 reason: ExitReason::StopLoss,
-                pnl: dec!(-2500),
+                pnl: Money::from(dec!(-2500)),
                 return_pct: -0.10,
             },
             ExitedPosition {
                 symbol: "VALE3".to_string(),
                 shares: 300,
                 reason: ExitReason::TakeProfit,
-                pnl: dec!(4500),
+                pnl: Money::from(dec!(4500)),
                 return_pct: 0.25,
             },
             ExitedPosition {
                 symbol: "ITUB4".to_string(),
                 shares: 200,
                 reason: ExitReason::StopLoss,
-                pnl: dec!(-800),
+                pnl: Money::from(dec!(-800)),
                 return_pct: -0.08,
             },
         ],
         orders: vec![
-            Order::new("PETR4".to_string(), OrderSide::Sell, 500, dec!(45), dec!(225)),
-            Order::new("VALE3".to_string(), OrderSide::Sell, 300, dec!(75), dec!(225)),
-            Order::new("ITUB4".to_string(), OrderSide::Sell, 200, dec!(46), dec!(92)),
+            Order::new("PETR4".to_string(), OrderSide::Sell, 500, Price::from(dec!(45)), Money::from(dec!(225))),
+            Order::new("VALE3".to_string(), OrderSide::Sell, 300, Price::from(dec!(75)), Money::from(dec!(225))),
+            Order::new("ITUB4".to_string(), OrderSide::Sell, 200, Price::from(dec!(46)), Money::from(dec!(92))),
         ],
         diagnostics: ExitDiagnostics {
             positions_evaluated: 10,
@@ -52,9 +52,9 @@ fn make_sample_log() -> ExitAuditLog {
             risk_cap_count: 0,
             drawdown_guard_count: 0,
             rebalance_count: 0,
-            total_exit_pnl: dec!(1200),
-            exit_turnover: dec!(53700),
-            estimated_costs: dec!(542),
+            total_exit_pnl: Money::from(dec!(1200)),
+            exit_turnover: Money::from(dec!(53700)),
+            estimated_costs: Money::from(dec!(542)),
             risk_violations: vec![],
         },
     }

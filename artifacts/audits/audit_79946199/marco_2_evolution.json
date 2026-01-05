@@ -1,0 +1,67 @@
+{
+  "marco": "evolution",
+  "marco_index": 2,
+  "marco_name": "Evolução Genética (Stage A)",
+  "checks": [
+    {
+      "name": "evolution_params",
+      "description": "Evolution parameters are configured",
+      "verdict": "PASS",
+      "message": "Pop: 300, Gens: 200",
+      "evidence": {
+        "population_size": 300,
+        "max_generations": 200,
+        "base_config": "default"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "fitness_objectives",
+      "description": "Fitness objectives are defined",
+      "verdict": "PASS",
+      "message": "Multi-objective optimization (Sharpe, CAGR, MaxDD)",
+      "evidence": {
+        "objectives": [
+          "sharpe",
+          "cagr",
+          "max_drawdown"
+        ]
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "convergence_criteria",
+      "description": "Convergence/stagnation criteria configured",
+      "verdict": "PASS",
+      "message": "Stagnation after 15 generations",
+      "evidence": {
+        "convergence_generations": 15
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "genome_generation",
+      "description": "Genome generation is working",
+      "verdict": "PASS",
+      "message": "Genome generation validated",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "stage_a_evaluator",
+      "description": "Stage A evaluator is configured",
+      "verdict": "PASS",
+      "message": "GROSS metrics evaluation ready",
+      "evidence": {
+        "parallel": true,
+        "evaluation_type": "GROSS"
+      },
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "PASS",
+  "summary": "5 checks: 5 passed, 0 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884478500Z",
+  "completed_at": "2026-01-05T10:38:51.884481617Z",
+  "duration_ms": 0
+}

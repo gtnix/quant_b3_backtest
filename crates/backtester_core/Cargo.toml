@@ -6,8 +6,13 @@ license.workspace = true
 rust-version.workspace = true
 description = "Core types, traits, and events for the backtester"
 
+[features]
+default = []
+decimal = ["dep:rust_decimal"]
+
 [dependencies]
 wide = { workspace = true }
+rust_decimal = { version = "1.39", features = ["maths"], optional = true }
 
 [dev-dependencies]
 criterion.workspace = true

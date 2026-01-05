@@ -27,7 +27,7 @@
 //! lightweight regression detection in CI without full criterion overhead.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use rust_decimal::Decimal;
+use backtester_core::{Money, Price};
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
 use chrono::NaiveDate;
@@ -39,11 +39,15 @@ use backtester_intelligence::entry::{
 use backtester_intelligence::filters::Market;
 
 /// Generate N synthetic BR candidates.
+/// 
+/// # Milestone 6
+/// 
+/// Uses fixed-point Price and Money for monetary fields.
 fn make_candidates(n: usize, market: Market) -> Vec<AssetCandidate> {
     (0..n).map(|i| {
         let mut c = AssetCandidate::new(format!("ASSET{:05}", i), market);
-        c.price = Some(Decimal::from(20 + (i as i64 % 100)));
-        c.avg_volume = Some(Decimal::from(1_000_000 + (i as i64 * 10_000)));
+        c.price = Some(Price::from_int(20 + (i as i64 % 100)));
+        c.avg_volume = Some(Money::from_int(1_000_000 + (i as i64 * 10_000)));
         c.price_days = 30;
         c.has_fundamentals = i % 10 != 0; // 90% have fundamentals
         c.has_dividends = i % 5 != 0;     // 80% have dividends
@@ -56,23 +60,21 @@ fn make_candidates(n: usize, market: Market) -> Vec<AssetCandidate> {
 fn bench_entry_pipeline(c: &mut Criterion) {
     let mut group = c.benchmark_group("entry_pipeline");
     
+    // Use defaults - require_fundamentals and require_dividends default to false
     let config = EntryEngineConfig {
-        gating: GatingConfig {
-            require_fundamentals: false,
-            require_dividends: false,
-            ..Default::default()
-        },
+        gating: GatingConfig::default(),
         selection: SelectionConfig {
             top_n_br: 20,
             top_n_us: 20,
             min_score_threshold: None,
+            ..Default::default()
         },
         weighting: WeightingConfig::default(),
         ..Default::default()
     };
     let engine = EntryEngine::new(config);
     
-    let capital = dec!(1_000_000);
+    let capital = Money::from(dec!(1_000_000));
     let positions: HashMap<String, i64> = HashMap::new();
     let date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(date, capital, Market::BR);
@@ -87,7 +89,7 @@ fn bench_entry_pipeline(c: &mut Criterion) {
                 b.iter(|| {
                     let (result, orders, audit) = engine.evaluate(
                         black_box(&ctx),
-                        black_box(candidates.clone()),
+                        black_box(&candidates),
                         black_box(&positions),
                     );
                     black_box((result, orders, audit))
@@ -110,8 +112,8 @@ fn bench_gating(c: &mut Criterion) {
             GatingCandidate {
                 symbol: format!("SYM{:05}", i),
                 market: Market::BR,
-                price: Some(Decimal::from(20 + (i as i64 % 100))),
-                avg_volume: Some(Decimal::from(1_000_000 + (i as i64 * 10_000))),
+                price: Some(Price::from_int(20 + (i as i64 % 100))),
+                avg_volume: Some(Money::from_int(1_000_000 + (i as i64 * 10_000))),
                 price_days: 30,
                 has_fundamentals: i % 10 != 0,
                 has_dividends: i % 5 != 0,
@@ -126,6 +128,7 @@ fn bench_gating(c: &mut Criterion) {
             &candidates,
             |b, candidates| {
                 b.iter(|| {
+                    // Clone required - apply() takes ownership
                     let (eligible, excluded) = filter.apply(black_box(candidates.clone()));
                     black_box((eligible, excluded))
                 })
@@ -144,6 +147,7 @@ fn bench_selection(c: &mut Criterion) {
         top_n_br: 20,
         top_n_us: 20,
         min_score_threshold: None,
+        ..Default::default()
     });
     
     for size in [100, 1_000, 10_000] {
@@ -160,6 +164,7 @@ fn bench_selection(c: &mut Criterion) {
             &candidates,
             |b, candidates| {
                 b.iter(|| {
+                    // Clone required - select() takes ownership
                     let (selected, excluded) = selector.select(black_box(candidates.clone()));
                     black_box((selected, excluded))
                 })
@@ -190,6 +195,7 @@ fn bench_weighting(c: &mut Criterion) {
             &candidates,
             |b, candidates| {
                 b.iter(|| {
+                    // Clone required - calculate_weights() takes ownership
                     let weights = weighter.calculate_weights(black_box(candidates.clone()));
                     black_box(weights)
                 })

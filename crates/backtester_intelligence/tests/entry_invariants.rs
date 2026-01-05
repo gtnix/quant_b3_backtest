@@ -75,7 +75,7 @@ fn invariant_weight_sum_within_bounds() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     let weight_sum: f64 = result.targets.iter().map(|t| t.target_weight).sum();
     
@@ -95,7 +95,7 @@ fn invariant_no_negative_weights() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     for target in &result.targets {
         assert!(
@@ -129,7 +129,7 @@ fn invariant_weights_respect_bounds() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Only check if we have enough assets selected
     if result.targets.len() >= 4 {
@@ -186,7 +186,7 @@ fn invariant_graceful_degradation_below_top_n() {
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     // Should not panic, should gracefully select fewer than top-N
-    let (result, _, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should have selected <= 5 (the ones with high volume)
     assert!(result.targets.len() <= 5, "Should have at most 5 eligible");
@@ -215,7 +215,7 @@ fn invariant_empty_eligible_no_panic() {
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     // Should not panic
-    let (result, orders, _audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, _audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     assert!(result.targets.is_empty(), "No targets when all filtered");
     assert!(orders.is_empty(), "No orders when no targets");
@@ -235,7 +235,7 @@ fn invariant_br_orders_lot_multiples() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (_, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     for order in &orders {
         assert!(
@@ -273,7 +273,7 @@ fn invariant_us_orders_min_one_share() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::US);
 
-    let (_, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     for order in &orders {
         assert!(
@@ -297,7 +297,7 @@ fn invariant_no_zero_share_orders() {
     
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (_, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     for order in &orders {
         assert!(
@@ -316,7 +316,7 @@ fn invariant_costs_non_negative() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (_, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (_, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     for order in &orders {
         assert!(
@@ -350,9 +350,9 @@ fn invariant_determinism_identical_outputs() {
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     // Run 3 times
-    let (result1, orders1, audit1) = engine.evaluate(&ctx, candidates.clone(), &positions);
-    let (result2, orders2, audit2) = engine.evaluate(&ctx, candidates.clone(), &positions);
-    let (result3, _orders3, audit3) = engine.evaluate(&ctx, candidates.clone(), &positions);
+    let (result1, orders1, audit1) = engine.evaluate(&ctx, &candidates, &positions);
+    let (result2, orders2, audit2) = engine.evaluate(&ctx, &candidates, &positions);
+    let (result3, _orders3, audit3) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Targets must be identical
     assert_eq!(result1.targets.len(), result2.targets.len());
@@ -396,8 +396,8 @@ fn invariant_determinism_multiple_scenarios() {
         let positions: HashMap<String, i64> = HashMap::new();
         let ctx = EntryContext::new(fixed_date(), capital, market);
 
-        let (r1, _, _) = engine.evaluate(&ctx, candidates.clone(), &positions);
-        let (r2, _, _) = engine.evaluate(&ctx, candidates, &positions);
+        let (r1, _, _) = engine.evaluate(&ctx, &candidates, &positions);
+        let (r2, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
         assert_eq!(r1.targets.len(), r2.targets.len(), "N={} determinism failed", n);
     }
@@ -455,7 +455,7 @@ fn invariant_volatility_uses_passed_value() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     let low_vol = result.targets.iter().find(|t| t.symbol == "LOW_VOL");
     let high_vol = result.targets.iter().find(|t| t.symbol == "HIGH_VOL");
@@ -506,7 +506,7 @@ fn invariant_future_fundamentals_excluded() {
     let rebalance_date = NaiveDate::from_ymd_opt(2025, 1, 3).unwrap();
     let ctx = EntryContext::new(rebalance_date, capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // FUTURE should be excluded
     assert!(
@@ -557,7 +557,7 @@ fn invariant_require_fundamentals_false_no_exclusion() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should NOT be excluded for MissingFundamentals
     assert!(
@@ -595,7 +595,7 @@ fn invariant_require_fundamentals_true_excludes() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should be excluded for MissingFundamentals
     assert!(

@@ -1,0 +1,432 @@
+{
+  "audit_id": "audit_6fd61b9d",
+  "schema_version": "1.0.0",
+  "campaign_id": "scg_5h_overnight",
+  "config_path": "configs/campaigns/scg_5h_overnight.toml",
+  "config_hash": "sha256:c548b69293943e63",
+  "marcos": {
+    "marco_1_data.json": {
+      "marco": "data_integrity",
+      "marco_index": 1,
+      "marco_name": "Data Integrity Gate",
+      "checks": [
+        {
+          "name": "data_integrity_config",
+          "description": "Data integrity settings are configured",
+          "verdict": "PASS",
+          "message": "Mode: fast, Max gap: 5 days",
+          "evidence": {
+            "mode": "fast",
+            "jump_threshold_pct": 30.0,
+            "universe_type": "unknown",
+            "max_gap_days": 5
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "lookahead_policy",
+          "description": "Lookahead bias prevention is configured",
+          "verdict": "PASS",
+          "message": "delay_bars = 1 (>= 1 required)",
+          "evidence": {
+            "delay_bars": 1
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "universe_type",
+          "description": "Universe type prevents survivorship bias",
+          "verdict": "WARN",
+          "message": "Unknown universe type - cannot verify survivorship bias prevention",
+          "evidence": {
+            "universe_type": "unknown"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "price_adjustment",
+          "description": "Price adjustment policy is configured",
+          "verdict": "PASS",
+          "message": "Using: adjusted",
+          "evidence": {
+            "price_adjustment": "adjusted"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "dataset_hash",
+          "description": "Dataset has integrity hash",
+          "verdict": "WARN",
+          "message": "No dataset hash configured - cannot verify data integrity across runs",
+          "evidence": {},
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "WARN",
+      "summary": "5 checks: 3 passed, 2 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884463649Z",
+      "completed_at": "2026-01-05T10:38:51.884474467Z",
+      "duration_ms": 0
+    },
+    "marco_3_validation.json": {
+      "marco": "validation",
+      "marco_index": 3,
+      "marco_name": "Validação Completa (Stage B)",
+      "checks": [
+        {
+          "name": "validation_config",
+          "description": "Validation configuration is present",
+          "verdict": "PASS",
+          "message": "Top K: 50",
+          "evidence": {
+            "stress_enabled": true,
+            "top_k": 50
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "wfa_config",
+          "description": "Walk-Forward Analysis is configured",
+          "verdict": "PASS",
+          "message": "WFA will validate out-of-sample performance",
+          "evidence": {
+            "method": "WFA"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "net_metrics",
+          "description": "NET metrics calculation is configured",
+          "verdict": "PASS",
+          "message": "Execution costs will be applied",
+          "evidence": {
+            "config_path": "default",
+            "delay_bars": 1,
+            "slippage_bps": 10.0
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "pbo_dsr_calculation",
+          "description": "PBO/DSR overfitting metrics will be calculated",
+          "verdict": "PASS",
+          "message": "Probability of Backtest Overfitting and Deflated Sharpe Ratio enabled",
+          "evidence": {
+            "dsr_enabled": true,
+            "pbo_enabled": true
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "stress_testing",
+          "description": "Stress testing is enabled",
+          "verdict": "PASS",
+          "message": "Candidates will be stress tested before promotion",
+          "evidence": {
+            "stress_enabled": true
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "PASS",
+      "summary": "5 checks: 5 passed, 0 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884485246Z",
+      "completed_at": "2026-01-05T10:38:51.884487917Z",
+      "duration_ms": 0
+    },
+    "marco_5_artifacts.json": {
+      "marco": "artifacts",
+      "marco_index": 5,
+      "marco_name": "Artefatos Finais",
+      "checks": [
+        {
+          "name": "output_directory",
+          "description": "Output directory is accessible",
+          "verdict": "PASS",
+          "message": "artifacts/ directory is ready",
+          "evidence": {
+            "path": "artifacts/"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "provenance_tracking",
+          "description": "Provenance tracking is enabled",
+          "verdict": "PASS",
+          "message": "Git SHA, config hash, and dataset hash will be recorded",
+          "evidence": {
+            "tracks_git_sha": true,
+            "tracks_config_hash": true,
+            "tracks_dataset_hash": true
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "candidate_bundle",
+          "description": "Candidate bundle structure is defined",
+          "verdict": "PASS",
+          "message": "Bundles include strategy.toml, validation_summary.json, provenance.json",
+          "evidence": {
+            "bundle_contents": [
+              "strategy.toml",
+              "execution_config.toml",
+              "validation_summary.json",
+              "provenance.json",
+              "replay.sh"
+            ]
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "export_format",
+          "description": "Export format supports reproducibility",
+          "verdict": "PASS",
+          "message": "JSON and CSV exports with deterministic ranking",
+          "evidence": {
+            "formats": [
+              "json",
+              "csv"
+            ],
+            "deterministic_ranking": true
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "campaign_registry",
+          "description": "Campaign registry is available",
+          "verdict": "PASS",
+          "message": "Results will be persisted to Neon PostgreSQL",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "campaign_summary",
+          "description": "Campaign configuration summary",
+          "verdict": "PASS",
+          "message": "Campaign 'scg_5h_overnight' ready for execution",
+          "evidence": {
+            "max_generations": 200,
+            "campaign_name": "scg_5h_overnight",
+            "market": "BR",
+            "population_size": 300,
+            "date_range": "not specified",
+            "seeds": 3
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "PASS",
+      "summary": "6 checks: 6 passed, 0 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884499885Z",
+      "completed_at": "2026-01-05T10:38:51.884508011Z",
+      "duration_ms": 0
+    },
+    "marco_0_init.json": {
+      "marco": "initialization",
+      "marco_index": 0,
+      "marco_name": "Inicialização da Campanha",
+      "checks": [
+        {
+          "name": "config_valid",
+          "description": "Campaign config is valid TOML",
+          "verdict": "PASS",
+          "message": "Loaded campaign: scg_5h_overnight",
+          "evidence": {
+            "start_date": "not set",
+            "campaign_name": "scg_5h_overnight",
+            "market": "BR",
+            "end_date": "not set"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "required_fields",
+          "description": "Required fields are present",
+          "verdict": "PASS",
+          "message": "All required fields validated",
+          "evidence": {
+            "max_generations": 200,
+            "population_size": 300
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "date_range_valid",
+          "description": "Dataset date range is valid",
+          "verdict": "WARN",
+          "message": "Date range not specified - will use default or data-driven range",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "database_connection",
+          "description": "Database connection is available",
+          "verdict": "PASS",
+          "message": "NEON_DATABASE_URL is set",
+          "evidence": {
+            "connection_string": "postgresql://neondb_owner:****@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "seeds_config",
+          "description": "Seeds configuration is valid",
+          "verdict": "PASS",
+          "message": "3 seeds starting from 42",
+          "evidence": {
+            "seed_count": 3,
+            "seeds": [
+              42,
+              43,
+              44
+            ],
+            "base_seed": 42
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "WARN",
+      "summary": "5 checks: 4 passed, 1 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884438948Z",
+      "completed_at": "2026-01-05T10:38:51.884457269Z",
+      "duration_ms": 0
+    },
+    "marco_2_evolution.json": {
+      "marco": "evolution",
+      "marco_index": 2,
+      "marco_name": "Evolução Genética (Stage A)",
+      "checks": [
+        {
+          "name": "evolution_params",
+          "description": "Evolution parameters are configured",
+          "verdict": "PASS",
+          "message": "Pop: 300, Gens: 200",
+          "evidence": {
+            "population_size": 300,
+            "max_generations": 200,
+            "base_config": "default"
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "fitness_objectives",
+          "description": "Fitness objectives are defined",
+          "verdict": "PASS",
+          "message": "Multi-objective optimization (Sharpe, CAGR, MaxDD)",
+          "evidence": {
+            "objectives": [
+              "sharpe",
+              "cagr",
+              "max_drawdown"
+            ]
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "convergence_criteria",
+          "description": "Convergence/stagnation criteria configured",
+          "verdict": "PASS",
+          "message": "Stagnation after 15 generations",
+          "evidence": {
+            "convergence_generations": 15
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "genome_generation",
+          "description": "Genome generation is working",
+          "verdict": "PASS",
+          "message": "Genome generation validated",
+          "evidence": {},
+          "duration_ms": 0
+        },
+        {
+          "name": "stage_a_evaluator",
+          "description": "Stage A evaluator is configured",
+          "verdict": "PASS",
+          "message": "GROSS metrics evaluation ready",
+          "evidence": {
+            "parallel": true,
+            "evaluation_type": "GROSS"
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "PASS",
+      "summary": "5 checks: 5 passed, 0 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884478500Z",
+      "completed_at": "2026-01-05T10:38:51.884481617Z",
+      "duration_ms": 0
+    },
+    "marco_4_gates.json": {
+      "marco": "promotion_gates",
+      "marco_index": 4,
+      "marco_name": "Promotion Gates",
+      "checks": [
+        {
+          "name": "promotion_thresholds",
+          "description": "Promotion thresholds are configured",
+          "verdict": "PASS",
+          "message": "Min OOS Sharpe: 0.5, Max PBO: 0.15",
+          "evidence": {
+            "max_pbo": 0.15,
+            "min_oos_sharpe_net": 0.5,
+            "min_stress_passed": 4
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "gates_required",
+          "description": "Institutional gates are enforced",
+          "verdict": "PASS",
+          "message": "All candidates must pass institutional gates before promotion",
+          "evidence": {
+            "gates_required": true
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "variance_sanity_gate",
+          "description": "Variance sanity gate is active",
+          "verdict": "PASS",
+          "message": "Will detect collapsed metrics (variance ≈ 0) and block promotion",
+          "evidence": {
+            "threshold_sharpe_var": 1e-6,
+            "threshold_pbo_var": 1e-8,
+            "threshold_dsr_var": 1e-6
+          },
+          "duration_ms": 0
+        },
+        {
+          "name": "duplicate_prevention",
+          "description": "Duplicate genome prevention is active",
+          "verdict": "PASS",
+          "message": "Genome hashes are tracked to prevent duplicate promotions",
+          "evidence": {
+            "uses_genome_hash": true
+          },
+          "duration_ms": 0
+        }
+      ],
+      "verdict": "PASS",
+      "summary": "4 checks: 4 passed, 0 warnings, 0 failed",
+      "started_at": "2026-01-05T10:38:51.884492943Z",
+      "completed_at": "2026-01-05T10:38:51.884496521Z",
+      "duration_ms": 0
+    }
+  },
+  "marco_order": [
+    "initialization",
+    "data_integrity",
+    "evolution",
+    "validation",
+    "promotion_gates",
+    "artifacts"
+  ],
+  "final_verdict": "WARN",
+  "summary": "6 marcos executados, 30 checks totais (27 passed, 0 failed)",
+  "started_at": "2026-01-05T10:38:51.884427714Z",
+  "completed_at": "2026-01-05T10:38:51.884509805Z",
+  "duration_ms": 0,
+  "output_dir": "artifacts/audits/audit_79946199"
+}

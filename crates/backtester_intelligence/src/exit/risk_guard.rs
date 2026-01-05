@@ -3,6 +3,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+use backtester_core::Money;
 use super::types::{DrawdownAction, ExitContext, Position, RiskViolation};
 use crate::filters::Market;
 
@@ -95,17 +96,17 @@ impl RiskGuard {
     pub fn check_exposure(
         &self,
         positions: &[Position],
-        capital: Decimal,
+        capital: Money,
     ) -> Vec<(String, RiskViolation)> {
-        if !self.config.check_exposure || capital == Decimal::ZERO {
+        if !self.config.check_exposure || capital.is_zero() {
             return Vec::new();
         }
 
         let mut violations = Vec::new();
-        let capital_f64: f64 = capital.try_into().unwrap_or(1.0);
+        let capital_f64 = capital.to_f64();
 
         for pos in positions {
-            let value: f64 = pos.market_value().try_into().unwrap_or(0.0);
+            let value = pos.market_value_fast().to_f64();
             let exposure = value / capital_f64;
 
             if exposure > self.config.max_single_exposure {
@@ -120,19 +121,19 @@ impl RiskGuard {
     pub fn check_market_exposure(
         &self,
         positions: &[Position],
-        capital: Decimal,
+        capital: Money,
         market: Market,
     ) -> Option<RiskViolation> {
-        if !self.config.check_exposure || capital == Decimal::ZERO {
+        if !self.config.check_exposure || capital.is_zero() {
             return None;
         }
 
-        let capital_f64: f64 = capital.try_into().unwrap_or(1.0);
+        let capital_f64 = capital.to_f64();
 
         let total_value: f64 = positions
             .iter()
             .filter(|p| !self.config.per_market_limits || p.market == market)
-            .map(|p| -> f64 { p.market_value().try_into().unwrap_or(0.0) })
+            .map(|p| p.market_value_fast().to_f64())
             .sum();
 
         let exposure = total_value / capital_f64;
@@ -144,19 +145,24 @@ impl RiskGuard {
         }
     }
 
-    /// Check if turnover exceeds limit.
-    pub fn check_turnover(&self, turnover: Decimal, capital: Decimal) -> Option<RiskViolation> {
-        if !self.config.check_turnover || capital == Decimal::ZERO {
+    /// Check if turnover exceeds limit (Money version).
+    pub fn check_turnover_fast(&self, turnover: Money, capital: Money) -> Option<RiskViolation> {
+        if !self.config.check_turnover || capital.is_zero() {
             return None;
         }
 
-        let turnover_pct: f64 = (turnover / capital).try_into().unwrap_or(0.0);
+        let turnover_pct = turnover.div_money(capital);
 
         if turnover_pct > self.config.max_turnover_per_rebalance {
             Some(RiskViolation::TurnoverExceeded)
         } else {
             None
         }
+    }
+
+    /// Check if turnover exceeds limit (Decimal version for compatibility).
+    pub fn check_turnover(&self, turnover: Decimal, capital: Decimal) -> Option<RiskViolation> {
+        self.check_turnover_fast(Money::from(turnover), Money::from(capital))
     }
 
     /// Check if portfolio drawdown exceeds limit.
@@ -246,12 +252,12 @@ impl RiskGuard {
         self.run_all_checks_with_returns(positions, context, turnover, &[])
     }
 
-    /// Run all risk checks including CVaR with daily returns.
-    pub fn run_all_checks_with_returns(
+    /// Run all risk checks including CVaR with daily returns (Money version, fast).
+    pub fn run_all_checks_with_returns_fast(
         &self,
         positions: &[Position],
         context: &ExitContext,
-        turnover: Decimal,
+        turnover: Money,
         daily_returns: &[f64],
     ) -> Vec<RiskViolation> {
         let mut violations = Vec::new();
@@ -269,7 +275,7 @@ impl RiskGuard {
         }
 
         // Turnover check
-        if let Some(v) = self.check_turnover(turnover, context.capital) {
+        if let Some(v) = self.check_turnover_fast(turnover, context.capital) {
             violations.push(v);
         }
 
@@ -285,6 +291,17 @@ impl RiskGuard {
 
         violations
     }
+
+    /// Run all risk checks including CVaR with daily returns (Decimal version for compatibility).
+    pub fn run_all_checks_with_returns(
+        &self,
+        positions: &[Position],
+        context: &ExitContext,
+        turnover: Decimal,
+        daily_returns: &[f64],
+    ) -> Vec<RiskViolation> {
+        self.run_all_checks_with_returns_fast(positions, context, Money::from(turnover), daily_returns)
+    }
 }
 
 #[cfg(test)]
@@ -294,13 +311,8 @@ mod tests {
     use rust_decimal_macros::dec;
 
     fn make_context(equity: Decimal, peak: Decimal) -> ExitContext {
-        ExitContext {
-            date: NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(),
-            capital: dec!(1_000_000),
-            equity,
-            peak_equity: peak,
-            market: Market::BR,
-        }
+        ExitContext::new(NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(), 
+            dec!(1_000_000), equity, Market::BR)
     }
 
     #[test]
@@ -320,7 +332,7 @@ mod tests {
         // PETR4: 1000 * 60 = 60k / 1M = 6% - OK
         // VALE3: 5000 * 65 = 325k / 1M = 32.5% - VIOLATION
 
-        let violations = guard.check_exposure(&positions, dec!(1_000_000));
+        let violations = guard.check_exposure(&positions, Money::from(dec!(1_000_000)));
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].0, "VALE3");
         assert_eq!(violations[0].1, RiskViolation::ExposureExceeded);

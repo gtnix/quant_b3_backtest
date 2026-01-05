@@ -17,8 +17,10 @@
 
 pub mod parallel;
 pub mod rebalancer;
+pub mod symbol_registry;
 pub mod unified;
 
+pub use symbol_registry::{SymbolId, SymbolRegistry};
 pub use unified::{
     DayResult, DividendApplication, DividendEvent, DividendIndex, DualPriceBar, 
     PolicyViolation, PriceType, TraceEvent, UnifiedBacktestResult, UnifiedEngine, 

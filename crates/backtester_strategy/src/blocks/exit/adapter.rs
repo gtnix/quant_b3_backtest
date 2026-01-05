@@ -38,8 +38,8 @@ impl StrategyBlock for StopLossBlock {
         let mut exit_count = 0;
 
         for position in &ctx.positions {
-            let cost_basis: f64 = position.cost_basis.try_into().unwrap_or(0.0);
-            let current_price: f64 = position.current_price.try_into().unwrap_or(0.0);
+            let cost_basis: f64 = position.cost_basis.to_f64();
+            let current_price: f64 = position.current_price.to_f64();
             
             if cost_basis <= 0.0 {
                 continue;
@@ -119,8 +119,8 @@ impl StrategyBlock for TakeProfitBlock {
         let mut exit_count = 0;
 
         for position in &ctx.positions {
-            let cost_basis: f64 = position.cost_basis.try_into().unwrap_or(0.0);
-            let current_price: f64 = position.current_price.try_into().unwrap_or(0.0);
+            let cost_basis: f64 = position.cost_basis.to_f64();
+            let current_price: f64 = position.current_price.to_f64();
             
             if cost_basis <= 0.0 {
                 continue;
@@ -201,9 +201,9 @@ impl StrategyBlock for TrailingStopBlock {
         let mut exit_count = 0;
 
         for position in &ctx.positions {
-            let cost_basis: f64 = position.cost_basis.try_into().unwrap_or(0.0);
-            let current_price: f64 = position.current_price.try_into().unwrap_or(0.0);
-            let high_water_mark: f64 = position.high_water_mark.try_into().unwrap_or(current_price);
+            let cost_basis: f64 = position.cost_basis.to_f64();
+            let current_price: f64 = position.current_price.to_f64();
+            let high_water_mark: f64 = position.high_water_mark.to_f64();
             
             if cost_basis <= 0.0 {
                 continue;

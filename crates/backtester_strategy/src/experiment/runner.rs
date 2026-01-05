@@ -870,19 +870,19 @@ impl ExperimentRunner {
             
             // For now, use equal-weight candidates from compositor weights
             // TODO: integrate with compositor result for real asset selection
-            let candidates = Vec::new(); // Simplified for initial integration
+            // Milestone 5: process_day takes slice
+            let day_result = engine.process_day(date, &bars, &[]);
 
-            let day_result = engine.process_day(date, &bars, candidates);
-
-            // Track dividends
+            // Track dividends (convert from fixed-point to Decimal for output)
             for div in &day_result.dividends_applied {
-                cumulative_dividend += div.cashflow;
+                let cashflow_decimal = div.cashflow.to_decimal();
+                cumulative_dividend += cashflow_decimal;
                 dividend_events.push(DividendTraceEntry {
                     date,
                     symbol: div.symbol.clone(),
-                    rate: div.rate,
+                    rate: div.rate.to_decimal(),
                     shares: div.shares,
-                    cashflow: div.cashflow,
+                    cashflow: cashflow_decimal,
                 });
             }
 

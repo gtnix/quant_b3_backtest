@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "Simulation motor and order router for the backtester"
 
 [dependencies]
-backtester_core.workspace = true
+backtester_core = { workspace = true, features = ["decimal"] }
 backtester_portfolio.workspace = true
 backtester_execution.workspace = true
 backtester_reports.workspace = true
@@ -22,5 +22,9 @@ criterion.workspace = true
 
 [[bench]]
 name = "engine_bench"
+harness = false
+
+[[bench]]
+name = "unified_bench"
 harness = false
 

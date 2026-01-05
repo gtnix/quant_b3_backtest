@@ -1,78 +1,96 @@
 {
-  "version": "1.0.0",
-  "created_at": "2025-12-23T00:00:00Z",
-  "git_commit": "initial_baseline",
+  "version": "4.0.0",
+  "milestone": "4",
+  "created_at": "2026-01-05T00:00:00Z",
+  "git_commit": "milestone4_full_hot_path",
+  "description": "Full Fixed-Point Hot Path - Position and PortfolioState use Money/Price",
   "scenarios": {
-    "intraday_net_zero": {
-      "mean_reversion_10k_events": {
-        "events": 10000,
-        "mean_ns": 835000,
-        "throughput_events_per_sec": 11976000
+    "unified_engine": {
+      "process_day_1_asset": {
+        "mean_us": 1.87,
+        "throughput_kelem_per_sec": 535,
+        "change_vs_m3": "+4%"
       },
-      "noop_baseline_10k_events": {
-        "events": 10000,
-        "mean_ns": 660000,
-        "throughput_events_per_sec": 15150000
+      "process_day_10_assets": {
+        "mean_us": 20.16,
+        "throughput_kelem_per_sec": 50,
+        "change_vs_m3": "-4%"
+      },
+      "full_backtest_252d_10_assets": {
+        "mean_ms": 4.41,
+        "throughput_kelem_per_sec": 57,
+        "change_vs_m3": "-6%"
+      },
+      "engine_init": {
+        "mean_us": 2.30,
+        "change_vs_m3": "+8%"
       }
     },
-    "daily_swing": {
-      "trend_200_assets": {
-        "events": 50400,
-        "mean_ns": 66300000,
-        "throughput_events_per_sec": 760000
+    "unified_scaling": {
+      "process_day_1": {
+        "mean_us": 1.94,
+        "throughput_kelem_per_sec": 515
+      },
+      "process_day_5": {
+        "mean_us": 9.75,
+        "throughput_kelem_per_sec": 513
+      },
+      "process_day_10": {
+        "mean_us": 21.73,
+        "throughput_kelem_per_sec": 460
+      },
+      "process_day_25": {
+        "mean_us": 29.78,
+        "throughput_kelem_per_sec": 839
+      },
+      "process_day_50": {
+        "mean_us": 42.56,
+        "throughput_kelem_per_sec": 1175
       }
     },
-    "stress_universe": {
-      "noop_1000_assets": {
-        "events": 252000,
-        "mean_ns": 1440000000,
-        "throughput_events_per_sec": 175000
+    "previous_baselines": {
+      "milestone_1": {
+        "process_day_1_asset": { "mean_us": 6.65 },
+        "process_day_10_assets": { "mean_us": 75.6 },
+        "full_backtest_252d": { "mean_ms": 19.4 }
+      },
+      "milestone_2": {
+        "process_day_1_asset": { "mean_us": 1.92 },
+        "process_day_10_assets": { "mean_us": 22.68 },
+        "full_backtest_252d_10_assets": { "mean_ms": 4.92 }
+      },
+      "milestone_3": {
+        "process_day_1_asset": { "mean_us": 1.79 },
+        "process_day_10_assets": { "mean_us": 20.87 },
+        "full_backtest_252d_10_assets": { "mean_ms": 4.67 }
       }
     }
   },
   "gates": {
     "hot_path_allocations": 0,
     "max_regression_percent": 5.0
+  },
+  "milestone4_changes": {
+    "added": [
+      "Position uses Price for cost_basis, current_price, high_water_mark",
+      "PortfolioState uses Money for cash, equity, peak_equity, initial_capital",
+      "update_prices_with_fast() - direct Price assignment (no Decimal conversion)",
+      "DividendEvent uses Rate, DividendApplication uses Money",
+      "Money::div_qty() for cost averaging calculations"
+    ],
+    "performance_impact": {
+      "full_backtest_252d": "6% faster than M3 (4.67ms -> 4.41ms)",
+      "process_day_10_assets": "4% faster than M3 (20.87us -> 20.16us)",
+      "process_day_1_asset": "4% slower (variance within noise floor)"
+    },
+    "remaining_bottleneck": "RebalanceOrchestrator, Entry module, Order types still use Decimal",
+    "determinism": "Bit-exact guaranteed via fixed-point arithmetic (all golden tests pass)"
+  },
+  "cumulative_improvement": {
+    "vs_milestone_1": {
+      "process_day_1_asset": "3.6x faster (6.65us -> 1.87us)",
+      "process_day_10_assets": "3.7x faster (75.6us -> 20.16us)",
+      "full_backtest_252d": "4.4x faster (19.4ms -> 4.41ms)"
+    }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

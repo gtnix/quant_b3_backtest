@@ -1,8 +1,12 @@
 //! Exit engine orchestrator.
+//!
+//! # Performance (Milestone 6)
+//!
+//! All monetary calculations use fixed-point `Price` and `Money` types.
 
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+use backtester_core::Money;
 use super::audit::ExitAuditLog;
 use super::policy::{ExitPolicy, ExitPolicyConfig};
 use super::risk_guard::{RiskConfig, RiskGuard};
@@ -160,7 +164,7 @@ impl ExitEngine {
 
         // Step 2: Check portfolio-level risk
         let turnover = result.diagnostics.exit_turnover;
-        let violations = self.risk_guard.run_all_checks(positions, context, turnover);
+        let violations = self.risk_guard.run_all_checks_with_returns_fast(positions, context, turnover, &[]);
 
         // Handle drawdown violation
         if violations.iter().any(|v| matches!(v, super::types::RiskViolation::DrawdownExceeded)) {
@@ -183,7 +187,7 @@ impl ExitEngine {
                         .iter()
                         .filter(|p| !result.exits.iter().any(|e| e.symbol == p.symbol))
                         .collect();
-                    remaining.sort_by(|a, b| b.market_value().cmp(&a.market_value()));
+                    remaining.sort_by(|a, b| b.market_value_fast().cmp(&a.market_value_fast()));
 
                     // Exit top 20% by value
                     let exit_count = (remaining.len() / 5).max(1);
@@ -203,11 +207,12 @@ impl ExitEngine {
 
         result.diagnostics.risk_violations = violations;
 
-        // Step 3: Generate sell orders
+        // Step 3: Generate sell orders (Milestone 6: fixed-point)
         let orders = self.generate_orders(&result.exits, context.market);
 
-        // Calculate costs
-        result.diagnostics.estimated_costs = orders.iter().map(|o| o.estimated_cost).sum();
+        // Calculate costs (already fixed-point)
+        let total_cost: Money = orders.iter().map(|o| o.estimated_cost).sum();
+        result.diagnostics.estimated_costs = total_cost;
 
         // Step 4: Build audit log
         let audit = ExitAuditLog::from_result(&result, &orders);
@@ -216,6 +221,10 @@ impl ExitEngine {
     }
 
     /// Generate sell orders from exit targets.
+    ///
+    /// # Performance (Milestone 6)
+    ///
+    /// Uses fixed-point Price and Money throughout.
     fn generate_orders(&self, exits: &[ExitTarget], _market: Market) -> Vec<Order> {
         exits
             .iter()
@@ -231,8 +240,9 @@ impl ExitEngine {
                     Market::US => self.config.us_cost_bps,
                 };
 
-                let notional = exit.price * Decimal::from(shares);
-                let cost = notional * Decimal::try_from(cost_bps / 10000.0).unwrap_or(Decimal::ZERO);
+                // Calculate using fixed-point (Milestone 6)
+                let notional = exit.price.mul_shares(shares);
+                let cost = notional.mul_f64(cost_bps / 10000.0);
 
                 Some(Order::new(
                     exit.symbol.clone(),
@@ -264,15 +274,16 @@ impl ExitEngine {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use rust_decimal_macros::dec;
+    use backtester_core::Price;
 
     fn make_context() -> ExitContext {
-        ExitContext::new(
-            NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(),
-            dec!(1_000_000),
-            dec!(1_000_000),
-            Market::BR,
-        )
+        ExitContext {
+            date: NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(),
+            capital: Money::from_int(1_000_000),
+            equity: Money::from_int(1_000_000),
+            peak_equity: Money::from_int(1_000_000),
+            market: Market::BR,
+        }
     }
 
     #[test]
@@ -289,10 +300,10 @@ mod tests {
         let ctx = make_context();
 
         let positions = vec![
-            Position::new("PETR4", Market::BR, 500, dec!(50), 
-                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), dec!(40)), // -20%
-            Position::new("VALE3", Market::BR, 300, dec!(60), 
-                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), dec!(65)), // +8%
+            Position::new_fast("PETR4", Market::BR, 500, Price::from_int(50), 
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), Price::from_int(40)), // -20%
+            Position::new_fast("VALE3", Market::BR, 300, Price::from_int(60), 
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), Price::from_int(65)), // +8%
         ];
 
         let (result, orders, _) = engine.evaluate(&positions, &ctx);
@@ -317,8 +328,8 @@ mod tests {
         let ctx = make_context();
 
         let positions = vec![
-            Position::new("ITUB4", Market::BR, 400, dec!(30), 
-                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), dec!(40)), // +33%
+            Position::new_fast("ITUB4", Market::BR, 400, Price::from_int(30), 
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), Price::from_int(40)), // +33%
         ];
 
         let (result, _, _) = engine.evaluate(&positions, &ctx);
@@ -371,20 +382,20 @@ mod tests {
         };
         let engine = ExitEngine::new(config);
 
-        // 20% drawdown
+        // 20% drawdown (using Money for M6)
         let ctx = ExitContext {
             date: NaiveDate::from_ymd_opt(2025, 1, 10).unwrap(),
-            capital: dec!(1_000_000),
-            equity: dec!(800_000),
-            peak_equity: dec!(1_000_000),
+            capital: Money::from_int(1_000_000),
+            equity: Money::from_int(800_000),
+            peak_equity: Money::from_int(1_000_000),
             market: Market::BR,
         };
 
         let positions = vec![
-            Position::new("PETR4", Market::BR, 500, dec!(50), 
-                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), dec!(52)),
-            Position::new("VALE3", Market::BR, 300, dec!(60), 
-                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), dec!(62)),
+            Position::new_fast("PETR4", Market::BR, 500, Price::from_int(50), 
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), Price::from_int(52)),
+            Position::new_fast("VALE3", Market::BR, 300, Price::from_int(60), 
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(), Price::from_int(62)),
         ];
 
         let (result, _, _) = engine.evaluate(&positions, &ctx);

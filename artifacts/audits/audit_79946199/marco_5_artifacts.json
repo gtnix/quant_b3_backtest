@@ -1,0 +1,87 @@
+{
+  "marco": "artifacts",
+  "marco_index": 5,
+  "marco_name": "Artefatos Finais",
+  "checks": [
+    {
+      "name": "output_directory",
+      "description": "Output directory is accessible",
+      "verdict": "PASS",
+      "message": "artifacts/ directory is ready",
+      "evidence": {
+        "path": "artifacts/"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "provenance_tracking",
+      "description": "Provenance tracking is enabled",
+      "verdict": "PASS",
+      "message": "Git SHA, config hash, and dataset hash will be recorded",
+      "evidence": {
+        "tracks_git_sha": true,
+        "tracks_config_hash": true,
+        "tracks_dataset_hash": true
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "candidate_bundle",
+      "description": "Candidate bundle structure is defined",
+      "verdict": "PASS",
+      "message": "Bundles include strategy.toml, validation_summary.json, provenance.json",
+      "evidence": {
+        "bundle_contents": [
+          "strategy.toml",
+          "execution_config.toml",
+          "validation_summary.json",
+          "provenance.json",
+          "replay.sh"
+        ]
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "export_format",
+      "description": "Export format supports reproducibility",
+      "verdict": "PASS",
+      "message": "JSON and CSV exports with deterministic ranking",
+      "evidence": {
+        "formats": [
+          "json",
+          "csv"
+        ],
+        "deterministic_ranking": true
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "campaign_registry",
+      "description": "Campaign registry is available",
+      "verdict": "PASS",
+      "message": "Results will be persisted to Neon PostgreSQL",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "campaign_summary",
+      "description": "Campaign configuration summary",
+      "verdict": "PASS",
+      "message": "Campaign 'scg_5h_overnight' ready for execution",
+      "evidence": {
+        "max_generations": 200,
+        "campaign_name": "scg_5h_overnight",
+        "market": "BR",
+        "population_size": 300,
+        "date_range": "not specified",
+        "seeds": 3
+      },
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "PASS",
+  "summary": "6 checks: 6 passed, 0 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884499885Z",
+  "completed_at": "2026-01-05T10:38:51.884508011Z",
+  "duration_ms": 0
+}

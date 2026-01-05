@@ -1,0 +1,66 @@
+{
+  "marco": "validation",
+  "marco_index": 3,
+  "marco_name": "Validação Completa (Stage B)",
+  "checks": [
+    {
+      "name": "validation_config",
+      "description": "Validation configuration is present",
+      "verdict": "PASS",
+      "message": "Top K: 50",
+      "evidence": {
+        "stress_enabled": true,
+        "top_k": 50
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "wfa_config",
+      "description": "Walk-Forward Analysis is configured",
+      "verdict": "PASS",
+      "message": "WFA will validate out-of-sample performance",
+      "evidence": {
+        "method": "WFA"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "net_metrics",
+      "description": "NET metrics calculation is configured",
+      "verdict": "PASS",
+      "message": "Execution costs will be applied",
+      "evidence": {
+        "config_path": "default",
+        "delay_bars": 1,
+        "slippage_bps": 10.0
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "pbo_dsr_calculation",
+      "description": "PBO/DSR overfitting metrics will be calculated",
+      "verdict": "PASS",
+      "message": "Probability of Backtest Overfitting and Deflated Sharpe Ratio enabled",
+      "evidence": {
+        "dsr_enabled": true,
+        "pbo_enabled": true
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "stress_testing",
+      "description": "Stress testing is enabled",
+      "verdict": "PASS",
+      "message": "Candidates will be stress tested before promotion",
+      "evidence": {
+        "stress_enabled": true
+      },
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "PASS",
+  "summary": "5 checks: 5 passed, 0 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884485246Z",
+  "completed_at": "2026-01-05T10:38:51.884487917Z",
+  "duration_ms": 0
+}

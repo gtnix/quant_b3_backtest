@@ -111,7 +111,7 @@ fn stress_extreme_volatility() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // All should be selected (5 candidates, top_n=20)
     assert_eq!(result.targets.len(), 5, "All 5 should be selected");
@@ -201,7 +201,7 @@ fn stress_threshold_edges() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // BELOW should be excluded
     assert!(
@@ -275,7 +275,7 @@ fn stress_price_threshold_edges() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // BELOW should be excluded
     assert!(
@@ -333,7 +333,7 @@ fn stress_penny_stocks() {
     let positions: HashMap<String, i64> = HashMap::new();
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should select top 5
     assert_eq!(result.targets.len(), 5, "Should select 5");
@@ -393,7 +393,7 @@ fn stress_large_universe() {
 
     // Measure time
     let start = Instant::now();
-    let (result, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
     let elapsed = start.elapsed();
 
     // Performance: should complete in reasonable time (< 100ms)
@@ -465,7 +465,7 @@ fn stress_high_turnover() {
     let capital = dec!(1_000_000);
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, orders, audit) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, audit) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should select 10 new assets
     assert_eq!(result.targets.len(), 10, "Should select 10 new assets");
@@ -529,7 +529,7 @@ fn stress_partial_turnover() {
     let capital = dec!(500_000);
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
-    let (result, orders, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, orders, _) = engine.evaluate(&ctx, &candidates, &positions);
 
     // Should select 5 assets
     assert_eq!(result.targets.len(), 5, "Should select 5 assets");
@@ -581,7 +581,7 @@ fn perf_smoke_1k_under_50ms() {
     let ctx = EntryContext::new(fixed_date(), capital, Market::BR);
 
     let start = Instant::now();
-    let (result, _, _) = engine.evaluate(&ctx, candidates, &positions);
+    let (result, _, _) = engine.evaluate(&ctx, &candidates, &positions);
     let elapsed = start.elapsed();
 
     assert!(

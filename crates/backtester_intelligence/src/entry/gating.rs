@@ -1,33 +1,42 @@
 //! Gating filter for asset eligibility.
+//!
+//! # Performance (Milestone 6)
+//!
+//! Uses fixed-point `Price` and `Money` for thresholds and comparisons.
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use backtester_core::{Money, Price};
 use crate::filters::Market;
 use super::types::{EntryExclusion, ExclusionReason, ExclusionStage};
 use super::universe_range::{EligibilityResult, UniverseRangeProvider};
 use super::eligibility::EligibilityProvider;
 
 /// Configuration for gating filters.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Money` for volume thresholds and `Price` for price thresholds.
+/// Serde uses f64 for config compatibility, converted to fixed-point internally.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatingConfig {
     /// Minimum average daily volume in BRL (for BR market)
-    #[serde(default = "default_min_volume_brl")]
-    pub min_avg_volume_brl: Decimal,
+    #[serde(default = "default_min_volume_brl_f64")]
+    min_avg_volume_brl_f64: f64,
     
     /// Minimum average daily volume in USD (for US market)
-    #[serde(default = "default_min_volume_usd")]
-    pub min_avg_volume_usd: Decimal,
+    #[serde(default = "default_min_volume_usd_f64")]
+    min_avg_volume_usd_f64: f64,
     
     /// Minimum price in BRL (for BR market)
-    #[serde(default = "default_min_price_brl")]
-    pub min_price_brl: Decimal,
+    #[serde(default = "default_min_price_brl_f64")]
+    min_price_brl_f64: f64,
     
     /// Minimum price in USD (for US market)
-    #[serde(default = "default_min_price_usd")]
-    pub min_price_usd: Decimal,
+    #[serde(default = "default_min_price_usd_f64")]
+    min_price_usd_f64: f64,
     
     /// Whether to require fundamentals (Value, Quality techniques)
     #[serde(default)]
@@ -42,19 +51,45 @@ pub struct GatingConfig {
     pub min_price_days: usize,
 }
 
-fn default_min_volume_brl() -> Decimal { Decimal::from(500_000) }
-fn default_min_volume_usd() -> Decimal { Decimal::from(1_000_000) }
-fn default_min_price_brl() -> Decimal { Decimal::ONE }
-fn default_min_price_usd() -> Decimal { Decimal::ONE }
+fn default_min_volume_brl_f64() -> f64 { 500_000.0 }
+fn default_min_volume_usd_f64() -> f64 { 1_000_000.0 }
+fn default_min_price_brl_f64() -> f64 { 1.0 }
+fn default_min_price_usd_f64() -> f64 { 1.0 }
 fn default_min_price_days() -> usize { 20 }
+
+impl GatingConfig {
+    /// Get minimum volume for BR market (fixed-point).
+    #[inline]
+    pub fn min_avg_volume_brl(&self) -> Money {
+        Money::from_f64(self.min_avg_volume_brl_f64)
+    }
+    
+    /// Get minimum volume for US market (fixed-point).
+    #[inline]
+    pub fn min_avg_volume_usd(&self) -> Money {
+        Money::from_f64(self.min_avg_volume_usd_f64)
+    }
+    
+    /// Get minimum price for BR market (fixed-point).
+    #[inline]
+    pub fn min_price_brl(&self) -> Price {
+        Price::from_f64(self.min_price_brl_f64)
+    }
+    
+    /// Get minimum price for US market (fixed-point).
+    #[inline]
+    pub fn min_price_usd(&self) -> Price {
+        Price::from_f64(self.min_price_usd_f64)
+    }
+}
 
 impl Default for GatingConfig {
     fn default() -> Self {
         Self {
-            min_avg_volume_brl: default_min_volume_brl(),
-            min_avg_volume_usd: default_min_volume_usd(),
-            min_price_brl: default_min_price_brl(),
-            min_price_usd: default_min_price_usd(),
+            min_avg_volume_brl_f64: default_min_volume_brl_f64(),
+            min_avg_volume_usd_f64: default_min_volume_usd_f64(),
+            min_price_brl_f64: default_min_price_brl_f64(),
+            min_price_usd_f64: default_min_price_usd_f64(),
             require_fundamentals: false,
             require_dividends: false,
             min_price_days: default_min_price_days(),
@@ -63,12 +98,18 @@ impl Default for GatingConfig {
 }
 
 /// Candidate asset for gating evaluation.
+///
+/// # Performance (Milestone 6)
+///
+/// Uses fixed-point `Price` and `Money` for monetary fields.
 #[derive(Debug, Clone)]
 pub struct GatingCandidate {
     pub symbol: String,
     pub market: Market,
-    pub price: Option<Decimal>,
-    pub avg_volume: Option<Decimal>,
+    /// Current price (fixed-point)
+    pub price: Option<Price>,
+    /// Average daily volume in currency (fixed-point)
+    pub avg_volume: Option<Money>,
     pub price_days: usize,
     pub has_fundamentals: bool,
     pub has_dividends: bool,
@@ -199,6 +240,10 @@ impl GatingFilter {
     }
 
     /// Evaluate a single candidate.
+    ///
+    /// # Performance (Milestone 6)
+    ///
+    /// Uses fixed-point comparisons (Price/Money) for all thresholds.
     fn evaluate(&self, candidate: &GatingCandidate) -> Result<(), ExclusionReason> {
         // FIRST: Check universe date range (survivorship bias guard)
         // This must be the first check - if asset didn't exist at this date,
@@ -217,11 +262,11 @@ impl GatingFilter {
             return Err(ExclusionReason::MissingPriceData);
         }
 
-        // Check price level
+        // Check price level (fixed-point comparison)
         if let Some(price) = candidate.price {
             let min_price = match candidate.market {
-                Market::BR => self.config.min_price_brl,
-                Market::US => self.config.min_price_usd,
+                Market::BR => self.config.min_price_brl(),
+                Market::US => self.config.min_price_usd(),
             };
             if price < min_price {
                 return Err(ExclusionReason::PriceTooLow);
@@ -230,11 +275,11 @@ impl GatingFilter {
             return Err(ExclusionReason::MissingPriceData);
         }
 
-        // Check liquidity
+        // Check liquidity (fixed-point comparison)
         if let Some(volume) = candidate.avg_volume {
             let min_volume = match candidate.market {
-                Market::BR => self.config.min_avg_volume_brl,
-                Market::US => self.config.min_avg_volume_usd,
+                Market::BR => self.config.min_avg_volume_brl(),
+                Market::US => self.config.min_avg_volume_usd(),
             };
             if volume < min_volume {
                 return Err(ExclusionReason::InsufficientLiquidity);
@@ -304,8 +349,8 @@ mod tests {
         GatingCandidate {
             symbol: "PETR4".to_string(),
             market: Market::BR,
-            price: Some(Decimal::from(38)),
-            avg_volume: Some(Decimal::from(1_000_000)),
+            price: Some(Price::from_int(38)),
+            avg_volume: Some(Money::from_int(1_000_000)),
             price_days: 30,
             has_fundamentals: true,
             has_dividends: true,
@@ -330,7 +375,7 @@ mod tests {
     fn test_low_price_excluded() {
         let filter = GatingFilter::new(GatingConfig::default());
         let mut candidate = make_valid_br_candidate();
-        candidate.price = Some(Decimal::new(50, 2)); // R$ 0.50
+        candidate.price = Some(Price::from_f64(0.50)); // R$ 0.50
         
         let (eligible, excluded) = filter.apply(vec![candidate]);
         
@@ -343,7 +388,7 @@ mod tests {
     fn test_low_volume_excluded() {
         let filter = GatingFilter::new(GatingConfig::default());
         let mut candidate = make_valid_br_candidate();
-        candidate.avg_volume = Some(Decimal::from(100_000)); // Below 500k
+        candidate.avg_volume = Some(Money::from_int(100_000)); // Below 500k
         
         let (eligible, excluded) = filter.apply(vec![candidate]);
         
@@ -373,8 +418,8 @@ mod tests {
         let candidate = GatingCandidate {
             symbol: "AAPL".to_string(),
             market: Market::US,
-            price: Some(Decimal::from(150)),
-            avg_volume: Some(Decimal::from(5_000_000)),
+            price: Some(Price::from_int(150)),
+            avg_volume: Some(Money::from_int(5_000_000)),
             price_days: 30,
             has_fundamentals: false, // US typically no fundamentals
             has_dividends: false,
@@ -535,11 +580,11 @@ mod tests {
         let universe = make_test_universe();
         let filter = GatingFilter::with_universe_provider(GatingConfig::default(), universe);
         
-        let mut candidate = GatingCandidate {
+        let candidate = GatingCandidate {
             symbol: "OIBR3".to_string(),
             market: Market::BR,
-            price: Some(Decimal::from(5)),
-            avg_volume: Some(Decimal::from(1_000_000)),
+            price: Some(Price::from_int(5)),
+            avg_volume: Some(Money::from_int(1_000_000)),
             price_days: 30,
             has_fundamentals: true,
             has_dividends: false,
@@ -561,11 +606,11 @@ mod tests {
         let universe = make_test_universe();
         let filter = GatingFilter::with_universe_provider(GatingConfig::default(), universe);
         
-        let mut candidate = GatingCandidate {
+        let candidate = GatingCandidate {
             symbol: "UNKNOWN".to_string(),
             market: Market::BR,
-            price: Some(Decimal::from(10)),
-            avg_volume: Some(Decimal::from(1_000_000)),
+            price: Some(Price::from_int(10)),
+            avg_volume: Some(Money::from_int(1_000_000)),
             price_days: 30,
             has_fundamentals: false,
             has_dividends: false,
@@ -596,8 +641,8 @@ mod tests {
             GatingCandidate {
                 symbol: "PETR4".to_string(),
                 market: Market::BR,
-                price: Some(Decimal::from(30)),
-                avg_volume: Some(Decimal::from(50_000_000)),
+                price: Some(Price::from_int(30)),
+                avg_volume: Some(Money::from_int(50_000_000)),
                 price_days: 100,
                 has_fundamentals: true,
                 has_dividends: true,
@@ -608,8 +653,8 @@ mod tests {
             GatingCandidate {
                 symbol: "RAIZ4".to_string(),
                 market: Market::BR,
-                price: Some(Decimal::from(10)),
-                avg_volume: Some(Decimal::from(10_000_000)),
+                price: Some(Price::from_int(10)),
+                avg_volume: Some(Money::from_int(10_000_000)),
                 price_days: 30,
                 has_fundamentals: false,
                 has_dividends: false,
@@ -620,8 +665,8 @@ mod tests {
             GatingCandidate {
                 symbol: "OIBR3".to_string(),
                 market: Market::BR,
-                price: Some(Decimal::from(5)),
-                avg_volume: Some(Decimal::from(1_000_000)),
+                price: Some(Price::from_int(5)),
+                avg_volume: Some(Money::from_int(1_000_000)),
                 price_days: 30,
                 has_fundamentals: false,
                 has_dividends: false,
@@ -653,8 +698,8 @@ mod tests {
         let candidate = GatingCandidate {
             symbol: "RAIZ4".to_string(),
             market: Market::BR,
-            price: Some(Decimal::from(10)),
-            avg_volume: Some(Decimal::from(10_000_000)),
+            price: Some(Price::from_int(10)),
+            avg_volume: Some(Money::from_int(10_000_000)),
             price_days: 30,
             has_fundamentals: false,
             has_dividends: false,

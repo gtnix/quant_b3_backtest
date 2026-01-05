@@ -1,0 +1,70 @@
+{
+  "marco": "initialization",
+  "marco_index": 0,
+  "marco_name": "Inicialização da Campanha",
+  "checks": [
+    {
+      "name": "config_valid",
+      "description": "Campaign config is valid TOML",
+      "verdict": "PASS",
+      "message": "Loaded campaign: scg_5h_overnight",
+      "evidence": {
+        "start_date": "not set",
+        "campaign_name": "scg_5h_overnight",
+        "market": "BR",
+        "end_date": "not set"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "required_fields",
+      "description": "Required fields are present",
+      "verdict": "PASS",
+      "message": "All required fields validated",
+      "evidence": {
+        "max_generations": 200,
+        "population_size": 300
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "date_range_valid",
+      "description": "Dataset date range is valid",
+      "verdict": "WARN",
+      "message": "Date range not specified - will use default or data-driven range",
+      "evidence": {},
+      "duration_ms": 0
+    },
+    {
+      "name": "database_connection",
+      "description": "Database connection is available",
+      "verdict": "PASS",
+      "message": "NEON_DATABASE_URL is set",
+      "evidence": {
+        "connection_string": "postgresql://neondb_owner:****@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+      },
+      "duration_ms": 0
+    },
+    {
+      "name": "seeds_config",
+      "description": "Seeds configuration is valid",
+      "verdict": "PASS",
+      "message": "3 seeds starting from 42",
+      "evidence": {
+        "seed_count": 3,
+        "seeds": [
+          42,
+          43,
+          44
+        ],
+        "base_seed": 42
+      },
+      "duration_ms": 0
+    }
+  ],
+  "verdict": "WARN",
+  "summary": "5 checks: 4 passed, 1 warnings, 0 failed",
+  "started_at": "2026-01-05T10:38:51.884438948Z",
+  "completed_at": "2026-01-05T10:38:51.884457269Z",
+  "duration_ms": 0
+}
