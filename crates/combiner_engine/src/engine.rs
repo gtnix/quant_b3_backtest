@@ -482,11 +482,9 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         let split_plan = Arc::new(ValidationSplitPlan::generate(split_config, 2520)); // ~10 years of data
         info!("Stage B split plan: {} splits", split_plan.num_splits());
 
-        // Create Stage B validator
-        // DESCONHECIDO: Currently using a mock validator since the executor
-        // doesn't implement Clone. In production, the executor would be Arc'd
-        // from the start or we'd use a different pattern.
-        let stage_b_config = StageBConfig::default();
+        // Create Stage B validator with config from gates
+        let mut stage_b_config = StageBConfig::default();
+        stage_b_config.max_oos_drawdown = self.config.gates.max_drawdown;
 
         // Generate initial population
         self.population = Population::random(

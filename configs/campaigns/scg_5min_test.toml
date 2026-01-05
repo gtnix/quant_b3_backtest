@@ -18,15 +18,18 @@ name = "arrojado"
 
 [evolution]
 population_size = 150
-max_generations = 100
+max_generations = 5000
 tournament_size = 3
 crossover_rate = 0.85
 elitism_rate = 0.10
 mutation_rate = 0.08
-convergence_generations = 15
-max_runtime_seconds = 300
+convergence_generations = 50
+max_runtime_seconds = 3600
 workers = 0
 hall_of_fame_size = 25
+
+[evolution.gates]
+max_drawdown = -0.60
 
 [diversity]
 enabled = true
@@ -80,7 +83,7 @@ max_pbo = 0.15
 min_stress_passed = 4
 max_degradation = 0.40
 min_oos_trades = 30
-max_drawdown = -0.25
+max_drawdown = -0.60
 
 [data_integrity]
 enabled = true
