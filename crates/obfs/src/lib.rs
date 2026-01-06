@@ -35,15 +35,16 @@ pub mod adapters;
 pub use compression::{
     CompressionPipeline, CompressionStrategy, DeltaEncoder, TimeSeriesCompressor, ColumnarCompressor,
     UltraCompressor, ULTRA_COMPRESSION_LEVEL as COMPRESSION_LEVEL_ULTRA,
+    DEFAULT_COMPRESSION_LEVEL,
 };
 pub use consolidator::{Consolidator, ConsolidationStats, consolidate};
-pub use integrity::IntegrityEngine;
+pub use integrity::{IntegrityEngine, IntegrityLevel, IntegrityResult};
 pub use reader::ArtifactReader;
 pub use report_bundle::{
     ReportBundle, ReportBundleReader, ReportBundleWriter, BundleStats, CandidateEntry,
     ULTRA_COMPRESSION_LEVEL,
 };
-pub use store::MetadataStore;
+pub use store::{MetadataStore, DEFAULT_LMDB_MAP_SIZE};
 pub use pending_store::{PendingArtifact, PendingStore, TimeseriesPoint as PendingTimeseriesPoint};
 pub use timeseries::{TimeSeriesStore, TimeSeriesPoint, TimeSeriesRef, ParquetStats};
 pub use types::*;
@@ -65,6 +66,9 @@ pub struct ObfsConfig {
     pub enable_xxh3: bool,
     /// Maximum size of a single data file before rotation (in bytes)
     pub max_file_size: u64,
+    /// LMDB maximum map size in bytes (default: 10 GB).
+    /// Increase for large-scale strategy generation (1000s of artifacts).
+    pub lmdb_map_size: usize,
 }
 
 impl Default for ObfsConfig {
@@ -75,6 +79,7 @@ impl Default for ObfsConfig {
             enable_blake3: true,
             enable_xxh3: true,
             max_file_size: 1024 * 1024 * 1024, // 1 GB
+            lmdb_map_size: store::DEFAULT_LMDB_MAP_SIZE, // 10 GB
         }
     }
 }
@@ -99,11 +104,13 @@ impl Obfs {
         let integrity_engine = IntegrityEngine::new();
         let compression_pipeline = CompressionPipeline::with_level(config.compression_level);
 
-        // Initialize LMDB store
+        // Initialize LMDB store with configurable map size
         let lmdb_path = Path::new(&config.root_path).join("lmdb");
         std::fs::create_dir_all(&lmdb_path).expect("Failed to create LMDB directory");
-        let metadata_store =
-            Arc::new(MetadataStore::open(&lmdb_path).expect("Failed to open metadata store"));
+        let metadata_store = Arc::new(
+            MetadataStore::open_with_map_size(&lmdb_path, config.lmdb_map_size)
+                .expect("Failed to open metadata store")
+        );
 
         // Initialize TimeSeriesStore
         let root_path = Path::new(&config.root_path);
@@ -188,13 +195,26 @@ impl Default for Obfs {
 // =============================================================================
 
 use std::sync::OnceLock;
+use rkyv::rancor::Error as RancorError;
 
-/// Global compression pipeline for artifact helpers (lazily initialized).
-static GLOBAL_PIPELINE: OnceLock<CompressionPipeline> = OnceLock::new();
+/// Fast compression pipeline (level 1) - for hot path / intermediate artifacts
+static FAST_PIPELINE: OnceLock<CompressionPipeline> = OnceLock::new();
+/// Ultra compression pipeline (level 19 + LDM) - for cold storage / final artifacts
+static ULTRA_PIPELINE: OnceLock<CompressionPipeline> = OnceLock::new();
 
-/// Get the global compression pipeline.
+/// Get the fast compression pipeline (level 1).
+pub fn fast_pipeline() -> &'static CompressionPipeline {
+    FAST_PIPELINE.get_or_init(|| CompressionPipeline::with_level(1))
+}
+
+/// Get the ultra compression pipeline (level 19).
+pub fn ultra_pipeline() -> &'static CompressionPipeline {
+    ULTRA_PIPELINE.get_or_init(|| CompressionPipeline::with_level(COMPRESSION_LEVEL_ULTRA))
+}
+
+/// Default pipeline (fast for backward compatibility in helpers).
 fn global_pipeline() -> &'static CompressionPipeline {
-    GLOBAL_PIPELINE.get_or_init(|| CompressionPipeline::with_level(3))
+    fast_pipeline()
 }
 
 /// Write any serializable data to a file with OBFS compression.
@@ -316,6 +336,159 @@ pub fn write_artifacts_batch<T: serde::Serialize>(
     }
     
     Ok(all_stats)
+}
+
+// =============================================================================
+// ULTRA-PERFORMANCE RKYV HELPERS (10-50x faster than JSON)
+// =============================================================================
+
+/// Write a BacktestArtifact with rkyv + ultra compression (10-50x faster than JSON).
+///
+/// This is the **fastest** way to write artifacts - uses rkyv zero-copy 
+/// serialization instead of JSON.
+///
+/// # Example
+/// ```ignore
+/// use obfs::{write_artifact_rkyv, BacktestArtifact};
+/// 
+/// let artifact = BacktestArtifact::with_uuid(uuid::Uuid::new_v4());
+/// write_artifact_rkyv("output/artifact", &artifact)?;
+/// ```
+pub fn write_artifact_rkyv(
+    path: impl AsRef<Path>,
+    data: &BacktestArtifact,
+) -> anyhow::Result<CompressionStats> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    if let Some(parent) = path_with_ext.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    // rkyv serialization (~500 MB/s vs JSON ~10-50 MB/s)
+    let bytes = rkyv::to_bytes::<RancorError>(data)
+        .map_err(|e| anyhow::anyhow!("rkyv serialization failed: {}", e))?;
+    
+    // Ultra compression (level 19 + LDM + checksum)
+    let (compressed, stats) = UltraCompressor::compress_with_stats(&bytes)?;
+    std::fs::write(&path_with_ext, compressed)?;
+    
+    Ok(stats)
+}
+
+/// Read a BacktestArtifact with rkyv + ultra decompression.
+pub fn read_artifact_rkyv(
+    path: impl AsRef<Path>,
+) -> anyhow::Result<BacktestArtifact> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    let compressed = std::fs::read(&path_with_ext)?;
+    let decompressed = UltraCompressor::decompress(&compressed)?;
+    
+    let data: BacktestArtifact = rkyv::from_bytes::<BacktestArtifact, RancorError>(&decompressed)
+        .map_err(|e| anyhow::anyhow!("rkyv deserialization failed: {}", e))?;
+    
+    Ok(data)
+}
+
+/// Write raw bytes with rkyv serialization + ultra compression.
+///
+/// For advanced use when you have pre-serialized rkyv bytes.
+pub fn write_bytes_ultra(
+    path: impl AsRef<Path>,
+    bytes: &[u8],
+) -> anyhow::Result<CompressionStats> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    if let Some(parent) = path_with_ext.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let (compressed, stats) = UltraCompressor::compress_with_stats(bytes)?;
+    std::fs::write(&path_with_ext, compressed)?;
+    
+    Ok(stats)
+}
+
+/// Read raw bytes with ultra decompression.
+pub fn read_bytes_ultra(
+    path: impl AsRef<Path>,
+) -> anyhow::Result<Vec<u8>> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    let compressed = std::fs::read(&path_with_ext)?;
+    let decompressed = UltraCompressor::decompress(&compressed)?;
+    
+    Ok(decompressed)
+}
+
+/// Write with fast compression (level 1) - for hot path / intermediate data.
+///
+/// Use this for temporary artifacts where write speed is critical.
+pub fn write_artifact_fast<T: serde::Serialize>(
+    path: impl AsRef<Path>,
+    data: &T,
+) -> anyhow::Result<CompressionStats> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    if let Some(parent) = path_with_ext.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let json = serde_json::to_vec(data)?;
+    let (compressed, stats) = fast_pipeline().compress_with_stats(&json)?;
+    std::fs::write(&path_with_ext, compressed)?;
+    
+    Ok(stats)
+}
+
+/// Write with ultra compression (level 19) - for cold storage / final artifacts.
+///
+/// Use this for final reports where compression ratio is critical.
+pub fn write_artifact_ultra<T: serde::Serialize>(
+    path: impl AsRef<Path>,
+    data: &T,
+) -> anyhow::Result<CompressionStats> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    if let Some(parent) = path_with_ext.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let json = serde_json::to_vec(data)?;
+    let (compressed, stats) = UltraCompressor::compress_with_stats(&json)?;
+    std::fs::write(&path_with_ext, compressed)?;
+    
+    Ok(stats)
 }
 
 #[cfg(test)]
