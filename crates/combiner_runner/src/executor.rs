@@ -367,16 +367,15 @@ impl CliExecutor {
     }
 
     /// Parse metrics from the output directory.
-    /// Supports both Legacy (metrics.json) and OBFS (pending/*.obfs) formats.
+    /// OBFS mode: reads from pending/*.obfs (no fallback to Legacy)
+    /// Legacy mode: reads from metrics.json
     fn parse_metrics(&self, output_dir: &PathBuf) -> Result<BacktestMetrics, ExecutionError> {
-        // Try OBFS format first if enabled
         if self.use_obfs {
-            if let Ok(metrics) = self.parse_metrics_obfs(output_dir) {
-                return Ok(metrics);
-            }
+            // OBFS only - no fallback to Legacy
+            return self.parse_metrics_obfs(output_dir);
         }
         
-        // Fall back to Legacy format
+        // Legacy format (only when OBFS disabled)
         let metrics_path = output_dir.join("metrics.json");
         if !metrics_path.exists() {
             return Err(ExecutionError::Parse(format!(
@@ -555,6 +554,9 @@ impl BacktestExecutor for CliExecutor {
                 stderr_preview
             );
             
+            // Clean up temp TOML even on failure
+            let _ = std::fs::remove_file(&toml_path);
+            
             return Err(match error_type {
                 BacktestErrorType::InvalidGenome => ExecutionError::InvalidConfig(
                     format!("Invalid genome: {}", stderr.trim())
@@ -617,6 +619,11 @@ impl BacktestExecutor for CliExecutor {
                 "Backtest result is invalid: {}",
                 warning_summary
             )));
+        }
+
+        // Clean up temp TOML to prevent disk accumulation
+        if let Err(e) = std::fs::remove_file(&toml_path) {
+            debug!("Failed to cleanup temp TOML {:?}: {}", toml_path, e);
         }
 
         info!(

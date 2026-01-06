@@ -10,7 +10,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 use combiner_core::{GenomeValidator, ParamRanges};
 use combiner_engine::{
@@ -184,6 +184,32 @@ pub fn execute(
         let result = engine.evolve_ultra(validation_cache, top_k)?;
 
         pb.finish_with_message("ULTRA evolution complete");
+
+        // Consolidate pending OBFS artifacts and cleanup
+        if config.output.artifact_format == "obfs" {
+            let pending_dir = output_path.join("backtests/pending");
+            let consolidated_dir = output_path.join("backtests/consolidated");
+            
+            if pending_dir.exists() {
+                match obfs::consolidate(pending_dir.to_str().unwrap(), consolidated_dir.to_str().unwrap()) {
+                    Ok(stats) => {
+                        info!(
+                            "Consolidated {} backtests: {} rows, {:.1} MB",
+                            stats.artifacts_processed,
+                            stats.timeseries_rows,
+                            stats.parquet_size_bytes as f64 / 1_000_000.0
+                        );
+                        // Cleanup pending after consolidation
+                        if let Err(e) = std::fs::remove_dir_all(&pending_dir) {
+                            debug!("Failed to cleanup pending dir: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Consolidation failed: {}", e);
+                    }
+                }
+            }
+        }
 
         // Save ultra results
         let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);

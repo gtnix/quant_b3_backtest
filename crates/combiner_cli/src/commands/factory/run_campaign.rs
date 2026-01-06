@@ -508,6 +508,13 @@ async fn execute_single_run(
                     stats.parquet_size_bytes as f64 / 1_000_000.0,
                     stats.compression_ratio
                 );
+                
+                // Clean up pending files after successful consolidation
+                if let Err(e) = std::fs::remove_dir_all(&pending_dir) {
+                    tracing::debug!(run_id, "Failed to cleanup pending dir: {}", e);
+                } else {
+                    info!(run_id, "Cleaned up pending OBFS files");
+                }
             }
             Err(e) => {
                 tracing::warn!(run_id, "Consolidation failed (non-fatal): {}", e);
