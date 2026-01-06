@@ -1,0 +1,75 @@
+[metadata]
+name = "Intraday Mean Reversion with Moderate RSI"
+strategy_id = "intraday_mean_reversion_rsi_moderate"
+description = "A mean reversion strategy for intraday trading, using RSI to identify oversold/overbought conditions for entry and a trailing stop for moderate risk management."
+risk_profile = "moderate"
+asset_class = "equities"
+version = 1
+
+[strategy]
+type = "mean_reversion"
+indicator = "RSI"
+base_instrument = "SPY"
+
+[timeframe]
+primary = "5m"
+lookback = "1h"
+data_source = "polygon"
+
+[parameters]
+# RSI Parameters
+rsi_period = 14
+entry_oversold = 30.0
+entry_overbought = 70.0
+exit_rsi_revert = 50.0
+
+# Price Action Filters (Optional but good for robustness)
+sma_period_long = 200
+sma_period_short = 20
+
+# Holding Period
+max_holding_bars = 78 # 6.5 hours * 12 bars/hour (5m timeframe)
+
+[entry_rules]
+# Long Entry: Price is oversold AND above long-term SMA (for trend alignment)
+long_condition = "RSI < parameters.entry_oversold AND CLOSE > SMA(parameters.sma_period_long)"
+# Short Entry: Price is overbought AND below long-term SMA (for trend alignment)
+short_condition = "RSI > parameters.entry_overbought AND CLOSE < SMA(parameters.sma_period_long)"
+# Re-entry: Allow re-entry after a fixed cooldown period
+cooldown_bars = 5
+
+[exit_rules]
+# Exit on Take Profit or Stop Loss (handled by risk_management)
+# Exit on Mean Reversion: RSI crosses back to 50
+mean_reversion_exit_long = "RSI > parameters.exit_rsi_revert"
+mean_reversion_exit_short = "RSI < parameters.exit_rsi_revert"
+# Time-based exit
+time_based_exit = "BAR_COUNT >= parameters.max_holding_bars"
+
+[position_sizing]
+# Moderate risk: 0.5% of total capital per trade
+risk_per_trade_percent = 0.5
+# Position size based on calculated risk and stop loss distance
+sizing_method = "risk_based"
+# Maximum leverage to use
+max_leverage = 2.0
+
+[risk_management]
+# Stop Loss: 0.2% fixed stop loss, typical for moderate intraday
+stop_loss_type = "fixed_percentage"
+stop_loss_value = 0.002
+# Take Profit: 0.5% fixed take profit, R:R of 2.5:1
+take_profit_type = "fixed_percentage"
+take_profit_value = 0.005
+# Trailing Stop: Trailing stop to lock in profits
+trailing_stop_percent = 0.0015 # 0.15% trailing stop
+# Daily Loss Limit
+daily_loss_limit_percent = 2.0
+
+[data_requirements]
+# Required data fields
+fields = ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
+# Required lookback period for initial indicator calculation
+warmup_bars = 200
+# List of instruments to trade
+instruments = ["SPY", "QQQ", "DIA"]

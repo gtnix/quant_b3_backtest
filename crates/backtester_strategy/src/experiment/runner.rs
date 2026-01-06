@@ -86,7 +86,7 @@ impl Default for RunnerConfig {
             initial_capital: Decimal::from(1_000_000),
             dividend_csv_path: None,
             market_data_csv_path: None,
-            artifact_format: ArtifactFormat::Legacy,
+            artifact_format: ArtifactFormat::Obfs,
         }
     }
 }

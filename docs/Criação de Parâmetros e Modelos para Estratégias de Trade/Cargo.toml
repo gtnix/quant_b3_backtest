@@ -1,0 +1,118 @@
+[workspace]
+resolver = "2"
+exclude = ["dashboard/src-tauri"]
+members = [
+    "crates/backtester_core",
+    "crates/backtester_io",
+    "crates/backtester_engine",
+    "crates/backtester_portfolio",
+    "crates/backtester_execution",
+    "crates/backtester_reports",
+    "crates/backtester_tests",
+    "crates/backtester_cli",
+    "crates/backtester_intelligence",
+    "crates/backtester_strategy",
+    "crates/backtester_validation",
+    "crates/market_data",
+    # Generative Combiner (SCG)
+    "crates/combiner_core",
+    "crates/combiner_engine",
+    "crates/combiner_runner",
+    "crates/combiner_cli",
+    # Storage
+    "crates/obfs",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal crates
+backtester_core = { path = "crates/backtester_core" }
+backtester_io = { path = "crates/backtester_io" }
+backtester_engine = { path = "crates/backtester_engine" }
+backtester_portfolio = { path = "crates/backtester_portfolio" }
+backtester_execution = { path = "crates/backtester_execution" }
+backtester_reports = { path = "crates/backtester_reports" }
+backtester_intelligence = { path = "crates/backtester_intelligence" }
+backtester_strategy = { path = "crates/backtester_strategy" }
+backtester_validation = { path = "crates/backtester_validation" }
+
+# Combiner crates (SCG)
+combiner_core = { path = "crates/combiner_core" }
+combiner_engine = { path = "crates/combiner_engine" }
+combiner_runner = { path = "crates/combiner_runner" }
+combiner_cli = { path = "crates/combiner_cli" }
+
+# Storage
+obfs = { path = "crates/obfs" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Hashing
+sha2 = "0.10"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Time
+chrono = "0.4"
+
+# Performance
+rayon = "1.10"
+wide = "0.7"
+memmap2 = "0.9"
+
+# Benchmarking
+criterion = { version = "0.5", default-features = false }
+
+# -----------------------------------------------------------------------------
+# Profiles: Ultra-Performance, determinism-safe
+# -----------------------------------------------------------------------------
+
+[profile.release]
+lto = "fat"           # Full LTO for maximum optimization
+codegen-units = 1     # Single codegen unit for better optimization
+panic = "abort"       # No unwinding overhead
+strip = "symbols"     # Smaller binary
+opt-level = 3         # Maximum optimization
+
+[profile.release.build-override]
+opt-level = 3         # Optimize build scripts too
+
+[profile.bench]
+inherits = "release"
+debug = true          # Enable profiling symbols for flamegraphs
+strip = "none"        # Keep symbols for profiling
+
+[profile.dev]
+opt-level = 0
+debug = 1              # Minimal debug symbols (saves disk space)
+incremental = false    # Disable incremental compilation (saves ~50% disk)
+
+[profile.test]
+inherits = "dev"
+opt-level = 1         # Slightly faster tests
+
+# Ultra-performance profile for production runs
+[profile.ultra]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = 3
+
+# Fast development profile - faster compile + minimal disk usage
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1          # Light optimization for faster execution
+incremental = false    # No incremental cache (saves disk space)
+debug = 0              # No debug symbols (saves disk space)
+

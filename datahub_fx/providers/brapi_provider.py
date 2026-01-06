@@ -212,3 +212,4 @@ class BrapiProvider(FxProvider):
         return records
 
 
+

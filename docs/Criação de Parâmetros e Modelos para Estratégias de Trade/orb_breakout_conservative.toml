@@ -1,0 +1,60 @@
+[metadata]
+name = "Breakout Volatility Expansion (Aggressive)"
+description = "Aggressive swing trading strategy that enters on a price breakout confirmed by a significant expansion in volatility (e.g., ATR or Keltner Channel width)."
+version = 1.0
+risk_profile = "aggressive"
+
+[strategy]
+strategy_id = "breakout_volatility_expansion_aggressive"
+family = "breakout"
+asset_class = "stocks, etfs"
+holding_period_days = "3-15 days"
+
+[timeframe]
+primary_interval = "1D"
+timeframe = "daily"
+data_lookback_days = 252 # 1 year of trading days
+
+[parameters]
+# Breakout parameters
+breakout_lookback_period = 50 # Lookback for high/low breakout (50-day high/low)
+
+# Volatility parameters (using ATR for simplicity)
+atr_period = 20 # Period for Average True Range
+atr_expansion_period = 10 # Period for calculating average ATR
+atr_expansion_multiplier = 1.5 # Volatility must be 1.5x the average ATR of the last 10 days
+
+[entry_rules]
+# Long entry: Close breaks 50-day high AND current volatility is expanding
+long_entry_condition = "Close > High[breakout_lookback_period] AND ATR[atr_period] > atr_expansion_multiplier * Avg(ATR[atr_period], atr_expansion_period)"
+# Short entry: Close breaks 50-day low AND current volatility is expanding
+short_entry_condition = "Close < Low[breakout_lookback_period] AND ATR[atr_period] > atr_expansion_multiplier * Avg(ATR[atr_period], atr_expansion_period)"
+entry_delay_bars = 1 # Enter on the next bar's open
+
+[exit_rules]
+# Profit Target: Aggressive 4.0x ATR
+profit_target_atr_multiple = 4.0
+# Initial Stop Loss: 2.0x ATR
+initial_stop_atr_multiple = 2.0
+# Trailing Stop: Aggressive 2.5x ATR
+trailing_stop_atr_multiple = 2.5
+# Time-based exit
+max_holding_bars = 15 # Exit if not stopped out or target hit after 15 bars/days
+
+[position_sizing]
+# Aggressive risk per trade
+risk_per_trade_percent = 2.0
+# Position size is calculated based on initial stop loss (ATR-based)
+sizing_method = "risk_based"
+max_position_size_percent = 15.0 # Max capital allocation per trade
+
+[risk_management]
+# Portfolio-level risk
+max_open_trades = 5
+max_drawdown_percent = 15.0
+daily_loss_limit_percent = 5.0
+
+[data_requirements]
+required_data_fields = ["Open", "High", "Low", "Close", "Volume"]
+required_indicators = ["ATR"]
+minimum_history_years = 2

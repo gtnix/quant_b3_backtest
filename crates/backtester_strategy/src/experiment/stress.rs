@@ -402,21 +402,26 @@ impl StressTestReport {
             && (self.summary.max_dd_increase_pct - other.summary.max_dd_increase_pct).abs() < TOLERANCE
     }
 
-    /// Save report to disk with full audit trail.
-    /// Path: `{output_dir}/stress/{strategy_id}_{timestamp}.json`
+    /// Save report to disk with full audit trail (OBFS compressed).
+    /// Path: `{output_dir}/stress/{strategy_id}_{timestamp}.obfs`
     pub fn save_to_disk(&self, output_dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
         let dir = output_dir.join("stress");
         std::fs::create_dir_all(&dir)?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("{}_{}.json", self.strategy_id, timestamp);
-        let path = dir.join(&filename);
+        let name = format!("{}_{}", self.strategy_id, timestamp);
+        let path = dir.join(format!("{}.obfs", name));
 
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        std::fs::write(&path, &json)?;
+        let stats = obfs::write_artifact(&path, self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-        tracing::info!(path = %path.display(), bytes = json.len(), "Saved stress report");
+        tracing::info!(
+            path = %path.display(),
+            original = stats.original_size,
+            compressed = stats.compressed_size,
+            ratio = format!("{:.1}x", stats.compression_ratio),
+            "Saved stress report (OBFS)"
+        );
         Ok(path)
     }
 }

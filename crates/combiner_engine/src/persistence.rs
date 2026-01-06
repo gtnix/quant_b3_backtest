@@ -99,14 +99,18 @@ pub struct ExperimentPersistence {
 }
 
 impl ExperimentPersistence {
-    /// Create a new persistence manager (Legacy format by default).
+    /// Create a new persistence manager (OBFS format by default for ultra-performance).
     pub fn new(output_dir: impl Into<PathBuf>, experiment_id: impl Into<String>) -> Self {
-        Self {
-            output_dir: output_dir.into(),
-            experiment_id: experiment_id.into(),
-            format: ArtifactFormat::Legacy,
+        let output_dir = output_dir.into();
+        let experiment_id = experiment_id.into();
+        let mut instance = Self {
+            output_dir,
+            experiment_id,
+            format: ArtifactFormat::Obfs,
             obfs: None,
-        }
+        };
+        instance.init_obfs();
+        instance
     }
 
     /// Set the artifact format (builder pattern).

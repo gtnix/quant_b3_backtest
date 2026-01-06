@@ -261,10 +261,10 @@ impl FinalReportGenerator {
         let report_dir = self.output_dir.join("report");
         fs::create_dir_all(&report_dir)?;
         
-        // Save main report
-        let report_path = report_dir.join("final_report.json");
-        let json = serde_json::to_string_pretty(&report)?;
-        fs::write(&report_path, json)?;
+        // Save main report with OBFS (ultra-performance)
+        let report_path = report_dir.join("final_report");
+        obfs::write_artifact(&report_path, &report)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         
         // Save production candidate TOMLs
         for candidate in &report.production_candidates {
@@ -273,12 +273,13 @@ impl FinalReportGenerator {
             }
         }
         
-        // Save snapshots
-        let snapshots_path = report_dir.join("generation_snapshots.json");
-        let snapshots_json = serde_json::to_string_pretty(snapshots)?;
-        fs::write(snapshots_path, snapshots_json)?;
+        // Save snapshots with OBFS
+        let snapshots_path = report_dir.join("generation_snapshots");
+        let snapshots_vec: Vec<_> = snapshots.to_vec();
+        obfs::write_artifact(&snapshots_path, &snapshots_vec)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         
-        Ok(report_path)
+        Ok(report_dir.join("final_report.obfs"))
     }
 
     /// Generate and save in OBFS format (consolidated bundle)
@@ -579,13 +580,13 @@ impl FinalReportGenerator {
         let candidates_dir = report_dir.join("candidates");
         fs::create_dir_all(&candidates_dir)?;
 
-        // Save TOML
+        // Save TOML (kept human-readable)
         let strategy_config = self.converter.to_strategy_config(&entry.genome)?;
         let toml_content = toml::to_string_pretty(&strategy_config)?;
         let toml_path = candidates_dir.join(format!("{}.toml", entry.genome_id));
         fs::write(&toml_path, toml_content)?;
 
-        // Save validation evidence
+        // Save validation evidence with OBFS
         let evidence = ValidationEvidence {
             genome_id: entry.genome_id.to_string(),
             genome_hash: format!("{:016x}", entry.genome_hash),
@@ -594,9 +595,9 @@ impl FinalReportGenerator {
             rank: entry.rank,
             score: entry.score,
         };
-        let evidence_json = serde_json::to_string_pretty(&evidence)?;
-        let evidence_path = candidates_dir.join(format!("{}_validation.json", entry.genome_id));
-        fs::write(&evidence_path, evidence_json)?;
+        let evidence_path = candidates_dir.join(format!("{}_validation", entry.genome_id));
+        obfs::write_artifact(&evidence_path, &evidence)
+            .map_err(|e| ReportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
         Ok(())
     }

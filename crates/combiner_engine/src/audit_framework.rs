@@ -349,24 +349,25 @@ impl AuditManifest {
         );
     }
 
-    /// Salva o manifesto e resultados de marcos.
+    /// Salva o manifesto e resultados de marcos usando OBFS (ultra-performance).
     pub fn save(&self) -> Result<(), AuditError> {
         // Cria diretório
         fs::create_dir_all(&self.output_dir)?;
         
-        // Salva manifesto
-        let manifest_path = self.output_dir.join("audit_manifest.json");
-        let manifest_json = serde_json::to_string_pretty(self)?;
-        fs::write(&manifest_path, manifest_json)?;
+        // Salva manifesto com OBFS
+        let manifest_path = self.output_dir.join("audit_manifest");
+        obfs::write_artifact(&manifest_path, self)
+            .map_err(|e| AuditError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         
-        // Salva cada marco
+        // Salva cada marco com OBFS
         for (filename, result) in &self.marcos {
-            let path = self.output_dir.join(filename);
-            let json = serde_json::to_string_pretty(result)?;
-            fs::write(path, json)?;
+            let name = filename.strip_suffix(".json").unwrap_or(filename);
+            let path = self.output_dir.join(name);
+            obfs::write_artifact(&path, result)
+                .map_err(|e| AuditError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         }
         
-        // Gera summary.md
+        // Gera summary.md (kept as readable text)
         let summary = self.generate_markdown_summary();
         let summary_path = self.output_dir.join("summary.md");
         fs::write(summary_path, summary)?;
@@ -605,6 +606,7 @@ mod tests {
         assert!(!result.passed());
     }
 }
+
 
 
 

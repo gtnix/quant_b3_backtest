@@ -1,0 +1,379 @@
+# =============================================================================
+# Trade Parameters Module (TPM) - TOML Schema Definition
+# =============================================================================
+# This file defines the complete schema for strategy configuration files.
+# All strategy TOML files must conform to this schema.
+# =============================================================================
+
+# =============================================================================
+# [metadata] - Strategy Identification and Classification
+# =============================================================================
+[metadata]
+# Unique identifier for the strategy (lowercase_snake_case)
+strategy_id = "example_strategy_id"
+
+# Human-readable name
+name = "Example Strategy Name"
+
+# Detailed description of the strategy logic
+description = "Detailed explanation of how this strategy works, its market hypothesis, and expected behavior."
+
+# Version number (semantic versioning)
+version = "1.0.0"
+
+# Risk profile classification
+# Options: "conservative", "moderate", "aggressive", "very_aggressive"
+risk_profile = "moderate"
+
+# Strategy family classification
+# Options: "intraday", "swing", "position", "pair", "portfolio", "momentum", 
+#          "mean_reversion", "breakout", "sector_rotation", "factor", 
+#          "seasonal", "volatility", "event_driven", "buy_hold", "multi_strategy"
+family = "swing"
+
+# Asset class applicability
+# Options: "stocks", "etfs", "futures", "forex", "commodities", "crypto", "bonds"
+# Can be comma-separated for multiple asset classes
+asset_classes = ["stocks", "etfs"]
+
+# Market applicability
+# Options: "BR", "US", "both", "global"
+markets = ["BR", "US"]
+
+# Tags for searchability and filtering
+tags = ["momentum", "technical", "trend_following"]
+
+# =============================================================================
+# [timeframe] - Time-based Parameters
+# =============================================================================
+[timeframe]
+# Primary bar interval
+# Options: "1h", "4h", "1D", "1W", "1M"
+bar_interval = "1D"
+
+# Data window specification
+data_window_years = 3  # For daily+ strategies
+# data_window_months = 6  # For intraday strategies (alternative to years)
+
+# Lookback period for indicators (in bars)
+lookback_bars = 60
+
+# Minimum history required (in bars)
+min_history_bars = 252
+
+# Holding period range (in days for daily, hours for intraday)
+holding_period_min = 2
+holding_period_max = 10
+
+# Rebalancing frequency
+# Options: "bar", "daily", "weekly", "monthly", "quarterly"
+rebalancing_frequency = "daily"
+
+# =============================================================================
+# [strategy] - Core Strategy Logic
+# =============================================================================
+[strategy]
+# Strategy type
+# Options: "directional", "market_neutral", "pairs", "portfolio", "multi_asset"
+type = "directional"
+
+# Direction capability
+# Options: "long_only", "short_only", "long_short"
+direction = "long_short"
+
+# Number of assets
+num_assets = 1  # 1 for single-asset, 2 for pairs, N for portfolio
+
+# Entry logic type
+# Options: "technical", "fundamental", "statistical", "hybrid"
+entry_logic = "technical"
+
+# Exit logic type
+# Options: "technical", "time_based", "target_stop", "trailing_stop", "hybrid"
+exit_logic = "hybrid"
+
+# =============================================================================
+# [parameters] - Strategy-Specific Parameters
+# =============================================================================
+[parameters]
+# This section is highly strategy-specific
+# Examples for different strategy types:
+
+# --- For Moving Average Strategies ---
+# ma_fast_period = 20
+# ma_slow_period = 50
+# ma_type = "SMA"  # Options: "SMA", "EMA", "WMA"
+
+# --- For RSI Strategies ---
+# rsi_period = 14
+# rsi_oversold = 30
+# rsi_overbought = 70
+
+# --- For Bollinger Bands ---
+# bb_period = 20
+# bb_std_dev = 2.0
+
+# --- For Pair Trading ---
+# cointegration_lookback = 252
+# z_score_entry = 2.0
+# z_score_exit = 0.0
+# z_score_stop = 3.0
+# half_life_max_days = 30
+
+# --- For Portfolio Strategies ---
+# portfolio_size = 10
+# weighting_method = "equal"  # Options: "equal", "risk_parity", "min_variance", "max_sharpe"
+# rebalance_threshold = 0.05  # 5% drift triggers rebalance
+
+# --- For Breakout Strategies ---
+# breakout_period = 20
+# volume_filter_multiplier = 1.5
+# atr_period = 14
+
+# =============================================================================
+# [entry_rules] - Entry Conditions
+# =============================================================================
+[entry_rules]
+# Long entry condition (pseudo-code or expression)
+long_condition = "CLOSE > SMA(50) AND RSI(14) > 50 AND VOLUME > SMA(VOLUME, 20) * 1.5"
+
+# Short entry condition (if applicable)
+short_condition = "CLOSE < SMA(50) AND RSI(14) < 50 AND VOLUME > SMA(VOLUME, 20) * 1.5"
+
+# Entry delay (bars to wait after signal)
+entry_delay_bars = 1
+
+# Entry timing
+# Options: "open", "close", "limit", "market"
+entry_timing = "open"
+
+# Entry filters (additional conditions)
+# trend_filter = true
+# volatility_filter = true
+# time_of_day_filter = false  # For intraday strategies
+
+# =============================================================================
+# [exit_rules] - Exit Conditions
+# =============================================================================
+[exit_rules]
+# Exit methods (can have multiple)
+# Options: "profit_target", "stop_loss", "trailing_stop", "time_based", "signal_based"
+exit_methods = ["profit_target", "stop_loss", "trailing_stop"]
+
+# Profit target (if applicable)
+profit_target_type = "atr_multiple"  # Options: "fixed_pct", "atr_multiple", "r_multiple"
+profit_target_value = 3.0  # 3x ATR or 3R
+
+# Stop loss (if applicable)
+stop_loss_type = "atr_multiple"  # Options: "fixed_pct", "atr_multiple", "trailing_pct"
+stop_loss_value = 2.0  # 2x ATR
+
+# Trailing stop (if applicable)
+trailing_stop_type = "atr_multiple"
+trailing_stop_value = 2.5
+trailing_stop_activation = 1.5  # Activate after 1.5x ATR profit
+
+# Time-based exit
+max_holding_bars = 10  # Exit after N bars regardless
+
+# Signal-based exit
+exit_on_opposite_signal = true
+
+# =============================================================================
+# [position_sizing] - Position Size Calculation
+# =============================================================================
+[position_sizing]
+# Sizing method
+# Options: "fixed_dollar", "fixed_pct", "risk_based", "volatility_based", "kelly"
+method = "risk_based"
+
+# Risk per trade (as % of capital)
+risk_per_trade_pct = 1.0
+
+# Maximum position size (as % of capital)
+max_position_pct = 10.0
+
+# Minimum position size (as % of capital)
+min_position_pct = 0.5
+
+# Leverage (if applicable)
+max_leverage = 1.0
+
+# Position sizing adjustments
+scale_in_enabled = false
+scale_out_enabled = false
+
+# =============================================================================
+# [risk_management] - Portfolio-Level Risk Controls
+# =============================================================================
+[risk_management]
+# Maximum number of concurrent positions
+max_open_positions = 5
+
+# Maximum portfolio drawdown (%)
+max_drawdown_pct = 20.0
+
+# Daily loss limit (%)
+daily_loss_limit_pct = 3.0
+
+# Maximum correlation between positions
+max_position_correlation = 0.7
+
+# Sector/industry concentration limits
+max_sector_exposure_pct = 30.0
+
+# Market exposure limits
+max_long_exposure_pct = 100.0
+max_short_exposure_pct = 50.0
+max_net_exposure_pct = 100.0
+
+# =============================================================================
+# [execution] - Execution Parameters
+# =============================================================================
+[execution]
+# Slippage model
+# Options: "fixed_bps", "fixed_pct", "volume_based", "linear", "sqrt"
+slippage_model = "fixed_bps"
+slippage_value = 10.0  # 10 basis points
+
+# Commission structure
+commission_type = "bps"  # Options: "bps", "fixed", "tiered"
+commission_value = 5.0  # 5 basis points
+
+# Market impact (for large orders)
+market_impact_enabled = false
+market_impact_model = "linear"
+
+# Order type
+# Options: "market", "limit", "stop", "stop_limit"
+default_order_type = "market"
+
+# Execution timing constraints (for intraday)
+# trading_hours_only = true
+# avoid_first_minutes = 30
+# avoid_last_minutes = 15
+
+# =============================================================================
+# [validation] - Backtest Validation Parameters
+# =============================================================================
+[validation]
+# Train/test split ratio
+train_test_split = 0.65
+
+# Walk-forward analysis
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.6  # In-sample ratio per fold
+wfa_purge_days = 5  # Days to purge between folds
+
+# Probability of Backtest Overfitting (PBO)
+pbo_enabled = true
+pbo_num_permutations = 1000
+pbo_significance_level = 0.05
+
+# Minimum trade requirements
+min_trades_total = 100
+min_trades_is = 60
+min_trades_oos = 30
+
+# Performance gates
+min_sharpe_ratio_oos = 0.8
+max_pbo = 0.30
+max_degradation_is_to_oos = 0.40
+min_win_rate = 0.40
+
+# =============================================================================
+# [optimization] - Genetic Algorithm Optimization Settings
+# =============================================================================
+[optimization]
+# Population size
+population_size = 150
+
+# Maximum generations
+max_generations = 100
+
+# Complexity tier (affects computational resources)
+# Options: "tier1_fast", "tier2_medium", "tier3_slow", "tier4_very_slow"
+complexity_tier = "tier2_medium"
+
+# Fitness function weights
+fitness_sharpe_weight = 1.5
+fitness_cagr_weight = 1.0
+fitness_drawdown_weight = 3.0
+fitness_calmar_weight = 1.2
+
+# Penalties
+low_trades_penalty = true
+min_trades_for_no_penalty = 50
+extreme_turnover_penalty = true
+max_turnover_annual = 400.0
+
+# =============================================================================
+# [data_requirements] - Required Data Fields
+# =============================================================================
+[data_requirements]
+# Required OHLCV fields
+required_fields = ["open", "high", "low", "close", "volume"]
+
+# Required indicators (will be calculated)
+required_indicators = ["SMA", "RSI", "ATR"]
+
+# Fundamental data requirements (if applicable)
+# fundamental_fields = ["pe_ratio", "market_cap", "dividend_yield"]
+
+# Alternative data requirements (if applicable)
+# alternative_data = ["news_sentiment", "social_media"]
+
+# Minimum data quality
+min_data_completeness = 0.95  # 95% of bars must be present
+max_missing_consecutive_bars = 5
+
+# =============================================================================
+# [universe] - Asset Universe Selection
+# =============================================================================
+[universe]
+# Universe type
+# Options: "fixed", "dynamic", "index_constituents", "sector", "custom"
+type = "dynamic"
+
+# Universe size (for portfolio strategies)
+universe_size = 100
+
+# Liquidity filters
+min_avg_daily_volume_usd = 1000000  # $1M minimum
+min_market_cap_usd = 100000000  # $100M minimum
+
+# Price filters
+min_price = 5.0  # Avoid penny stocks
+max_price = 10000.0
+
+# Exclusions
+exclude_sectors = []  # e.g., ["Utilities", "Real Estate"]
+exclude_tickers = []  # e.g., ["PETR4", "VALE3"]
+
+# =============================================================================
+# [notes] - Additional Notes and References
+# =============================================================================
+[notes]
+# References to academic papers, books, or articles
+references = [
+    "Turtle Trading Rules - Richard Dennis",
+    "Technical Analysis of the Financial Markets - John Murphy"
+]
+
+# Known limitations or caveats
+limitations = [
+    "Performs poorly in low-volatility environments",
+    "Requires liquid markets for execution"
+]
+
+# Suggested improvements or variations
+improvements = [
+    "Add regime filter to avoid ranging markets",
+    "Incorporate fundamental filters for quality"
+]
+
+# Author and creation date
+author = "TPM Generator"
+created_date = "2026-01-05"
+last_modified_date = "2026-01-05"

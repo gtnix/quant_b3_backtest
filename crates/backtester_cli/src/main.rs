@@ -431,12 +431,13 @@ fn run_command(
         println!("Risk profile: {}", rp);
     }
     
-    // Determine artifact format
+    // Determine artifact format (OBFS default for ultra-performance)
     let artifact_format = if obfs {
         println!("Artifact format: OBFS (binary, ~90% storage reduction)");
         ArtifactFormat::Obfs
     } else {
-        ArtifactFormat::Legacy
+        println!("Artifact format: OBFS (default, ultra-performance)");
+        ArtifactFormat::Obfs
     };
     
     let runner_config = RunnerConfig {
@@ -507,12 +508,13 @@ fn run_batch_command(
         println!("Market data: {}", md_path.display());
     }
 
-    // Determine artifact format
+    // Determine artifact format (OBFS default for ultra-performance)
     let artifact_format = if obfs {
         println!("Artifact format: OBFS (binary, ~90% storage reduction)");
         ArtifactFormat::Obfs
     } else {
-        ArtifactFormat::Legacy
+        println!("Artifact format: OBFS (default, ultra-performance)");
+        ArtifactFormat::Obfs
     };
 
     let runner_config = RunnerConfig {

@@ -1,0 +1,164 @@
+# =============================================================================
+# Swing Momentum - MA Crossover (Moderate)
+# =============================================================================
+# Classic moving average crossover strategy for swing trading
+# Enters on MA crossover with volume confirmation, exits on opposite signal or stops
+# =============================================================================
+
+[metadata]
+strategy_id = "swing_momentum_ma_crossover_moderate"
+name = "Swing Momentum - MA Crossover (Moderate)"
+description = "Classic swing trading strategy using 20/50 SMA crossover with volume confirmation. Enters long when fast MA crosses above slow MA with above-average volume. Moderate risk profile with 2x ATR stop loss and 3x ATR profit target."
+version = "1.0.0"
+risk_profile = "moderate"
+family = "swing"
+asset_classes = ["stocks", "etfs"]
+markets = ["BR", "US"]
+tags = ["momentum", "moving_average", "crossover", "volume_confirmation"]
+
+[timeframe]
+bar_interval = "1D"
+data_window_years = 2
+lookback_bars = 60
+min_history_bars = 100
+holding_period_min = 3
+holding_period_max = 10
+rebalancing_frequency = "daily"
+
+[strategy]
+type = "directional"
+direction = "long_short"
+num_assets = 1
+entry_logic = "technical"
+exit_logic = "hybrid"
+
+[parameters]
+# Moving Average Parameters
+ma_fast_period = 20
+ma_slow_period = 50
+ma_type = "SMA"  # Simple Moving Average
+
+# Volume Filter
+volume_ma_period = 20
+volume_multiplier = 1.2  # Volume must be 1.2x average
+
+# ATR for stops and targets
+atr_period = 14
+
+# Trend Filter (optional)
+use_trend_filter = true
+trend_ma_period = 200  # Only trade in direction of 200-day MA
+
+[entry_rules]
+long_condition = "SMA(close, 20) > SMA(close, 50) AND SMA(close, 20)[1] <= SMA(close, 50)[1] AND volume > SMA(volume, 20) * 1.2 AND close > SMA(close, 200)"
+short_condition = "SMA(close, 20) < SMA(close, 50) AND SMA(close, 20)[1] >= SMA(close, 50)[1] AND volume > SMA(volume, 20) * 1.2 AND close < SMA(close, 200)"
+entry_delay_bars = 1
+entry_timing = "open"
+
+[exit_rules]
+exit_methods = ["profit_target", "stop_loss", "signal_based"]
+
+# Profit Target: 3x ATR
+profit_target_type = "atr_multiple"
+profit_target_value = 3.0
+
+# Stop Loss: 2x ATR
+stop_loss_type = "atr_multiple"
+stop_loss_value = 2.0
+
+# Exit on opposite MA crossover
+exit_on_opposite_signal = true
+
+# Maximum holding period
+max_holding_bars = 15
+
+[position_sizing]
+method = "risk_based"
+risk_per_trade_pct = 1.0
+max_position_pct = 15.0
+min_position_pct = 2.0
+max_leverage = 1.0
+scale_in_enabled = false
+scale_out_enabled = false
+
+[risk_management]
+max_open_positions = 5
+max_drawdown_pct = 20.0
+daily_loss_limit_pct = 3.0
+max_position_correlation = 0.70
+max_sector_exposure_pct = 40.0
+max_long_exposure_pct = 100.0
+max_short_exposure_pct = 50.0
+max_net_exposure_pct = 100.0
+
+[execution]
+slippage_model = "fixed_bps"
+slippage_value = 10.0
+commission_type = "bps"
+commission_value = 5.0
+market_impact_enabled = false
+default_order_type = "market"
+
+[validation]
+train_test_split = 0.65
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.6
+wfa_purge_days = 5
+pbo_enabled = true
+pbo_num_permutations = 1000
+pbo_significance_level = 0.05
+min_trades_total = 80
+min_trades_is = 50
+min_trades_oos = 25
+min_sharpe_ratio_oos = 0.8
+max_pbo = 0.30
+max_degradation_is_to_oos = 0.40
+min_win_rate = 0.42
+
+[optimization]
+population_size = 150
+max_generations = 100
+complexity_tier = "tier1_fast"
+fitness_sharpe_weight = 1.5
+fitness_cagr_weight = 1.0
+fitness_drawdown_weight = 3.0
+fitness_calmar_weight = 1.2
+low_trades_penalty = true
+min_trades_for_no_penalty = 60
+extreme_turnover_penalty = true
+max_turnover_annual = 300.0
+
+[data_requirements]
+required_fields = ["open", "high", "low", "close", "volume"]
+required_indicators = ["SMA", "ATR"]
+min_data_completeness = 0.95
+max_missing_consecutive_bars = 5
+
+[universe]
+type = "dynamic"
+universe_size = 100
+min_avg_daily_volume_usd = 2000000
+min_market_cap_usd = 500000000
+min_price = 5.0
+max_price = 5000.0
+exclude_sectors = []
+exclude_tickers = []
+
+[notes]
+references = [
+    "Technical Analysis of the Financial Markets - John Murphy",
+    "Moving Average Crossover Systems - Perry Kaufman"
+]
+limitations = [
+    "Whipsaws in ranging markets",
+    "Lagging indicator - enters after trend has started"
+]
+improvements = [
+    "Add ADX filter to avoid ranging markets (ADX > 25)",
+    "Use EMA instead of SMA for faster response",
+    "Add multiple timeframe confirmation"
+]
+author = "TPM Generator"
+created_date = "2026-01-05"
+last_modified_date = "2026-01-05"

@@ -129,3 +129,4 @@ After baseline collection, optimization priorities are:
 2. SoA layout for price data
 3. Decimal → f64 hybrid for hot path
 
+

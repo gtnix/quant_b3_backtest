@@ -183,6 +183,141 @@ impl Default for Obfs {
     }
 }
 
+// =============================================================================
+// STANDARDIZED ARTIFACT HELPERS
+// =============================================================================
+
+use std::sync::OnceLock;
+
+/// Global compression pipeline for artifact helpers (lazily initialized).
+static GLOBAL_PIPELINE: OnceLock<CompressionPipeline> = OnceLock::new();
+
+/// Get the global compression pipeline.
+fn global_pipeline() -> &'static CompressionPipeline {
+    GLOBAL_PIPELINE.get_or_init(|| CompressionPipeline::with_level(3))
+}
+
+/// Write any serializable data to a file with OBFS compression.
+///
+/// This is the primary helper for writing artifacts across all modules.
+/// It automatically handles JSON serialization and Zstd compression.
+///
+/// # Arguments
+/// * `path` - Output file path (will have .obfs extension)
+/// * `data` - Any type that implements Serialize
+///
+/// # Returns
+/// * `Ok(CompressionStats)` - Compression statistics
+/// * `Err` - If serialization or I/O fails
+///
+/// # Example
+/// ```ignore
+/// use obfs::write_artifact;
+/// 
+/// let report = MyReport { ... };
+/// write_artifact("output/report", &report)?;
+/// // Creates: output/report.obfs
+/// ```
+pub fn write_artifact<T: serde::Serialize>(
+    path: impl AsRef<Path>,
+    data: &T,
+) -> anyhow::Result<CompressionStats> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    // Ensure parent directory exists
+    if let Some(parent) = path_with_ext.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let json = serde_json::to_vec(data)?;
+    let (compressed, stats) = global_pipeline().compress_with_stats(&json)?;
+    std::fs::write(&path_with_ext, compressed)?;
+    
+    Ok(stats)
+}
+
+/// Read any deserializable data from an OBFS-compressed file.
+///
+/// # Arguments
+/// * `path` - Input file path (.obfs extension optional)
+///
+/// # Returns
+/// * `Ok(T)` - Deserialized data
+/// * `Err` - If I/O, decompression, or deserialization fails
+pub fn read_artifact<T: serde::de::DeserializeOwned>(
+    path: impl AsRef<Path>,
+) -> anyhow::Result<T> {
+    let path = path.as_ref();
+    let path_with_ext = if path.extension().map_or(true, |e| e != "obfs") {
+        path.with_extension("obfs")
+    } else {
+        path.to_path_buf()
+    };
+    
+    let compressed = std::fs::read(&path_with_ext)?;
+    let decompressed = global_pipeline().decompress(&compressed)?;
+    let data: T = serde_json::from_slice(&decompressed)?;
+    
+    Ok(data)
+}
+
+/// Write JSON data with optional OBFS compression based on format flag.
+///
+/// This helper maintains backward compatibility with legacy JSON output
+/// while allowing a smooth transition to OBFS.
+///
+/// # Arguments
+/// * `base_path` - Base path without extension
+/// * `name` - File name without extension
+/// * `data` - Serializable data
+/// * `use_obfs` - If true, writes .obfs; if false, writes .json
+pub fn write_artifact_conditional<T: serde::Serialize>(
+    base_path: impl AsRef<Path>,
+    name: &str,
+    data: &T,
+    use_obfs: bool,
+) -> anyhow::Result<()> {
+    let base = base_path.as_ref();
+    
+    if use_obfs {
+        let path = base.join(format!("{}.obfs", name));
+        write_artifact(&path, data)?;
+    } else {
+        let path = base.join(format!("{}.json", name));
+        let json = serde_json::to_string_pretty(data)?;
+        std::fs::write(path, json)?;
+    }
+    
+    Ok(())
+}
+
+/// Batch write multiple artifacts to a directory.
+///
+/// # Arguments
+/// * `dir` - Output directory
+/// * `artifacts` - List of (name, data) pairs
+pub fn write_artifacts_batch<T: serde::Serialize>(
+    dir: impl AsRef<Path>,
+    artifacts: &[(&str, &T)],
+) -> anyhow::Result<Vec<CompressionStats>> {
+    let dir = dir.as_ref();
+    std::fs::create_dir_all(dir)?;
+    
+    let mut all_stats = Vec::with_capacity(artifacts.len());
+    for (name, data) in artifacts {
+        let path = dir.join(format!("{}.obfs", name));
+        let stats = write_artifact(&path, data)?;
+        all_stats.push(stats);
+    }
+    
+    Ok(all_stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

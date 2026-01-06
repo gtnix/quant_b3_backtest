@@ -46,11 +46,11 @@ pub struct ArtifactWriter {
 }
 
 impl ArtifactWriter {
-    /// Create a new artifact writer with the given base output path (Legacy format).
+    /// Create a new artifact writer with the given base output path (OBFS format for ultra-performance).
     pub fn new(base_path: impl AsRef<Path>) -> Self {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
-            format: ArtifactFormat::Legacy,
+            format: ArtifactFormat::Obfs,
         }
     }
 

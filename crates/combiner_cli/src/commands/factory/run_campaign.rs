@@ -523,6 +523,7 @@ async fn execute_single_run(
     }
 
     // Collect Stage B validated candidates
+    let artifact_format = config.output.artifact_format_enum();
     let mut candidates = Vec::new();
     for (rank, entry) in result.validated_hall_of_fame.entries().iter().enumerate() {
         // Compute genome hash
@@ -560,12 +561,10 @@ async fn execute_single_run(
             std::fs::write(format!("{}/strategy.toml", strategy_dir), toml_str)?;
         }
         
-        // Save genome JSON
-        if let Ok(genome_json) = serde_json::to_string_pretty(&entry.genome) {
-            std::fs::write(format!("{}/genome.json", strategy_dir), genome_json)?;
-        }
+        // Save genome with OBFS
+        write_json_artifact(&strategy_dir, "genome", &entry.genome, artifact_format)?;
         
-        // Save WFA report
+        // Save WFA report with OBFS
         let wfa_report = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "oos_sharpe_median": v.oos_sharpe_median,
@@ -577,36 +576,27 @@ async fn execute_single_run(
             "splits_evaluated": v.splits_evaluated,
             "splits_passed": v.splits_passed
         });
-        std::fs::write(
-            format!("{}/wfa_report.json", strategy_dir),
-            serde_json::to_string_pretty(&wfa_report)?
-        )?;
+        write_json_artifact(&strategy_dir, "wfa_report", &wfa_report, artifact_format)?;
         
-        // Save PBO/DSR report
+        // Save PBO/DSR report with OBFS
         let pbo_dsr = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "pbo": v.pbo,
             "dsr": v.dsr,
             "passed": v.pbo <= 0.25 && v.dsr >= 0.5
         });
-        std::fs::write(
-            format!("{}/pbo_dsr.json", strategy_dir),
-            serde_json::to_string_pretty(&pbo_dsr)?
-        )?;
+        write_json_artifact(&strategy_dir, "pbo_dsr", &pbo_dsr, artifact_format)?;
         
-        // Save stress report
+        // Save stress report with OBFS
         let stress_report = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "splits_evaluated": v.splits_evaluated,
             "splits_passed": v.splits_passed,
             "pass_rate": v.splits_passed as f64 / v.splits_evaluated.max(1) as f64
         });
-        std::fs::write(
-            format!("{}/stress_report.json", strategy_dir),
-            serde_json::to_string_pretty(&stress_report)?
-        )?;
+        write_json_artifact(&strategy_dir, "stress_report", &stress_report, artifact_format)?;
         
-        // Save metrics.json (Marco 4: bundle_complete requirement)
+        // Save metrics with OBFS (Marco 4: bundle_complete requirement)
         let metrics = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "sharpe_ratio": v.oos_sharpe_median,
@@ -619,12 +609,9 @@ async fn execute_single_run(
             "splits_evaluated": v.splits_evaluated,
             "splits_passed": v.splits_passed
         });
-        std::fs::write(
-            format!("{}/metrics.json", strategy_dir),
-            serde_json::to_string_pretty(&metrics)?
-        )?;
+        write_json_artifact(&strategy_dir, "metrics", &metrics, artifact_format)?;
         
-        // Save validation_bundle.json (Marco 4: complete bundle for replay)
+        // Save validation_bundle with OBFS (Marco 4: complete bundle for replay)
         let validation_bundle = serde_json::json!({
             "genome_id": entry.genome_id.to_string(),
             "rank": rank,
@@ -650,10 +637,7 @@ async fn execute_single_run(
             },
             "score": entry.score
         });
-        std::fs::write(
-            format!("{}/validation_bundle.json", strategy_dir),
-            serde_json::to_string_pretty(&validation_bundle)?
-        )?;
+        write_json_artifact(&strategy_dir, "validation_bundle", &validation_bundle, artifact_format)?;
 
         if rank >= config.budget.top_k {
             break;
@@ -781,12 +765,12 @@ async fn execute_single_run(
     // Write ranking as array (audit expects array format)
     write_json_artifact(&hof_dir, "ranking", &ranking, artifact_format)?;
     
-    // Save individual genomes
+    // Save individual genomes with OBFS
+    let genomes_dir = format!("{}/genomes", hof_dir);
+    std::fs::create_dir_all(&genomes_dir)?;
     for (rank, entry) in result.stage_a_hall_of_fame.entries().iter().enumerate() {
-        let genome_path = format!("{}/genomes/genome_{:03}.json", hof_dir, rank);
-        if let Ok(json) = serde_json::to_string_pretty(&entry.genome) {
-            let _ = std::fs::write(&genome_path, json);
-        }
+        let genome_name = format!("genome_{:03}", rank);
+        let _ = write_json_artifact(&genomes_dir, &genome_name, &entry.genome, artifact_format);
     }
     info!(run_id, "Generated hall_of_fame/ with {} candidates", ranking.len());
 
@@ -796,10 +780,8 @@ async fn execute_single_run(
     
     let snapshots = result.performance_metrics.snapshots();
     for snapshot in &snapshots {
-        let gen_path = format!("{}/gen_{:03}.json", gen_dir, snapshot.generation);
-        if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-            let _ = std::fs::write(&gen_path, json);
-        }
+        let gen_name = format!("gen_{:03}", snapshot.generation);
+        let _ = write_json_artifact(&gen_dir, &gen_name, &snapshot, artifact_format);
     }
     
     // Summary of all generations (with timestamp for Marco 1 consistency)

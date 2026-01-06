@@ -162,15 +162,16 @@ impl DataIntegrityReport {
         )
     }
 
-    /// Save report to JSON file.
+    /// Save report using OBFS (ultra-compressed by default).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, json)
+        // Use OBFS by default for ultra-performance
+        let obfs_path = path.with_extension("obfs");
+        obfs::write_artifact(&obfs_path, self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            .map(|_| ())
     }
 
     /// Load report from JSON file.
@@ -477,11 +478,10 @@ impl IntegrityBundleWriter {
             file.sync_all()?;
         }
 
-        // Write index
-        let index_path = self.root_path.join("index.json");
-        let index_json = serde_json::to_string_pretty(&self.entries)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        fs::write(index_path, index_json)?;
+        // Write index with OBFS
+        let index_path = self.root_path.join("index");
+        obfs::write_artifact(&index_path, &self.entries)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         // Get data file size
         let data_size = if self.data_file_path().exists() {
