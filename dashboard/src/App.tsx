@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
-import { Dashboard } from './pages/Dashboard';
-import { Evolution } from './pages/Evolution';
 import { Candidates } from './pages/Candidates';
 import { Backtest } from './pages/Backtest';
 import { Campaigns } from './pages/Campaigns';
@@ -11,7 +9,6 @@ import { StrategyComparison } from './pages/StrategyComparison';
 import { WalkForward } from './pages/WalkForward';
 import { MonteCarlo } from './pages/MonteCarlo';
 import { RegimeAnalysis } from './pages/RegimeAnalysis';
-import { Cockpit } from './pages/Cockpit';
 import { StrategyView } from './pages/StrategyView';
 import { MinerControl } from './pages/MinerControl';
 import { HallOfFame } from './pages/HallOfFame';
@@ -20,6 +17,7 @@ import { ConfigTrading } from './pages/ConfigTrading';
 import { ConfigBudget } from './pages/ConfigBudget';
 import { ConfigGates } from './pages/ConfigGates';
 import { AuditReport } from './pages/AuditReport';
+import { StrategySelector } from './pages/StrategySelector';
 import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
 import { platform, features } from './lib/platform';
@@ -28,14 +26,12 @@ import { createSSEConnection, type SSEEvent } from './lib/commands';
 export type Page = 
   | 'miner'
   | 'hall-of-fame'
+  | 'strategies'
   | 'config-universe'
   | 'config-trading'
   | 'config-budget'
   | 'config-gates'
-  | 'cockpit'
   | 'campaigns' 
-  | 'dashboard' 
-  | 'evolution' 
   | 'candidates' 
   | 'strategy'
   | 'backtest' 
@@ -101,9 +97,8 @@ function App() {
   useEffect(() => {
     const handleNavigate = (e: CustomEvent<string>) => {
       const validPages = [
-        'miner', 'hall-of-fame', 'config-universe', 'config-trading', 'config-budget', 'config-gates',
-        'cockpit', 'campaigns', 'dashboard', 'evolution', 'candidates', 'strategy', 
-        'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes', 'audit'
+        'miner', 'hall-of-fame', 'strategies', 'config-universe', 'config-trading', 'config-budget', 'config-gates',
+        'campaigns', 'candidates', 'strategy', 'backtest', 'risk', 'comparison', 'walkforward', 'montecarlo', 'regimes', 'audit'
       ];
       if (validPages.includes(e.detail)) {
         setCurrentPage(e.detail as Page);
@@ -120,6 +115,8 @@ function App() {
         return <MinerControl />;
       case 'hall-of-fame':
         return <HallOfFame />;
+      case 'strategies':
+        return <StrategySelector />;
       case 'config-universe':
         return <ConfigUniverse />;
       case 'config-trading':
@@ -128,14 +125,8 @@ function App() {
         return <ConfigBudget />;
       case 'config-gates':
         return <ConfigGates />;
-      case 'cockpit':
-        return <Cockpit />;
       case 'campaigns':
         return <Campaigns />;
-      case 'dashboard':
-        return <Dashboard />;
-      case 'evolution':
-        return <Evolution />;
       case 'candidates':
         return <Candidates />;
       case 'strategy':

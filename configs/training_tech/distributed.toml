@@ -1,0 +1,33 @@
+# =============================================================================
+# Training Tech: Distributed
+# =============================================================================
+# Cluster-level computation for institutional-grade strategies.
+# Maximum resources, longest runtime allowed.
+# =============================================================================
+
+[tech]
+id = "distributed"
+name = "Distributed Cluster"
+description = "Cluster-level distributed computing for maximum exploration"
+
+[resources]
+workers = 0  # Auto-detect cluster capacity
+max_memory_gb = 64
+timeout_minutes = 1440  # 24 hours
+
+[evolution]
+population_size = 500
+max_generations = 500
+convergence_generations = 30
+
+[allowed_complexity]
+tiers = ["tier1_fast", "tier2_medium", "tier3_slow", "tier4_very_slow"]
+max_parameters_to_optimize = 25
+max_universe_size = 500
+
+[scheduling]
+priority = "critical"
+preemptible = false
+cluster_mode = true
+
+

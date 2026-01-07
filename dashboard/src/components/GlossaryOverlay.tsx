@@ -6,7 +6,18 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useCockpitStore } from '../stores/cockpitStore';
+import { create } from 'zustand';
+
+// Simple local state for glossary toggle (was in cockpitStore)
+interface GlossaryState {
+  isGlossaryOpen: boolean;
+  toggleGlossary: () => void;
+}
+
+const useGlossaryState = create<GlossaryState>((set) => ({
+  isGlossaryOpen: false,
+  toggleGlossary: () => set((s) => ({ isGlossaryOpen: !s.isGlossaryOpen })),
+}));
 
 // =============================================================================
 // GLOSSARY DATA (extracted from docs/reference/glossary.md)
@@ -15,7 +26,7 @@ import { useCockpitStore } from '../stores/cockpitStore';
 interface GlossaryTerm {
   term: string;
   definition: string;
-  category: 'metrics' | 'validation' | 'execution' | 'data' | 'scg';
+  category: 'metrics' | 'validation' | 'execution' | 'data' | 'scg' | 'strategy';
 }
 
 const GLOSSARY: GlossaryTerm[] = [
@@ -158,6 +169,83 @@ const GLOSSARY: GlossaryTerm[] = [
     definition: 'Thresholds mínimos para promoção de estratégias. Ex: Sharpe > 0.5, PBO < 0.15.',
     category: 'scg',
   },
+  
+  // Strategy Types (TPM - Trade Parameters Module)
+  {
+    term: 'ORB Breakout',
+    definition: 'Opening Range Breakout. Compra quando o preço rompe a máxima dos primeiros 30-60 minutos do pregão. Ideal para capturar movimentos direcionais fortes no início do dia.',
+    category: 'strategy',
+  },
+  {
+    term: 'VWAP',
+    definition: 'Volume Weighted Average Price. Preço médio ponderado pelo volume. Usado como referência para avaliar se está "caro" ou "barato" no dia.',
+    category: 'strategy',
+  },
+  {
+    term: 'Mean Reversion',
+    definition: 'Reversão à média. Estratégia que aposta que preços extremos eventualmente voltam para a média histórica. Compra em quedas fortes, vende em altas fortes.',
+    category: 'strategy',
+  },
+  {
+    term: 'Momentum',
+    definition: 'Estratégia que segue a tendência. Compra ativos que estão subindo esperando que continuem subindo. "A tendência é sua amiga."',
+    category: 'strategy',
+  },
+  {
+    term: 'Pair Trading',
+    definition: 'Compra uma ação e vende outra correlacionada quando a diferença entre elas fica anormal. Ex: PETR3 vs PETR4. Baixo risco de mercado.',
+    category: 'strategy',
+  },
+  {
+    term: 'Swing Trading',
+    definition: 'Operações que duram de 2 a 10 dias. Captura "swings" (oscilações) de curto prazo no preço. Mais comum que day trade.',
+    category: 'strategy',
+  },
+  {
+    term: 'Breakout',
+    definition: 'Rompimento. Compra quando preço supera uma resistência importante ou máxima histórica. Espera-se continuação do movimento.',
+    category: 'strategy',
+  },
+  {
+    term: 'Bollinger Bands',
+    definition: 'Bandas de Bollinger. Indicador com média móvel ± 2 desvios padrão. Toque na banda inferior = possível compra, superior = possível venda.',
+    category: 'strategy',
+  },
+  {
+    term: 'RSI',
+    definition: 'Relative Strength Index. Oscilador de 0-100. RSI < 30 = sobrevendido (possível compra). RSI > 70 = sobrecomprado (possível venda).',
+    category: 'strategy',
+  },
+  {
+    term: 'MACD',
+    definition: 'Moving Average Convergence Divergence. Indicador de momentum. Sinal de compra quando linha MACD cruza acima da linha de sinal.',
+    category: 'strategy',
+  },
+  {
+    term: 'Donchian Channel',
+    definition: 'Canal formado pela máxima e mínima de N períodos. Estratégia Turtle: compra nova máxima de 20 dias, vende nova mínima.',
+    category: 'strategy',
+  },
+  {
+    term: 'Risk Parity',
+    definition: 'Paridade de risco. Aloca capital para que cada ativo contribua igualmente ao risco total do portfólio. Diversificação inteligente.',
+    category: 'strategy',
+  },
+  {
+    term: 'Cointegração',
+    definition: 'Relação estatística de longo prazo entre dois ativos. Base para pair trading. Se divergem, tendem a convergir novamente.',
+    category: 'strategy',
+  },
+  {
+    term: 'Sector Rotation',
+    definition: 'Rotação setorial. Move capital entre setores conforme o ciclo econômico. Ex: tecnologia em expansão, utilities em recessão.',
+    category: 'strategy',
+  },
+  {
+    term: 'Factor Investing',
+    definition: 'Investimento por fatores. Seleciona ações por características quantificáveis: valor (P/L baixo), qualidade (ROE alto), momentum.',
+    category: 'strategy',
+  },
 ];
 
 // =============================================================================
@@ -165,7 +253,7 @@ const GLOSSARY: GlossaryTerm[] = [
 // =============================================================================
 
 export function GlossaryOverlay() {
-  const { isGlossaryOpen, toggleGlossary } = useCockpitStore();
+  const { isGlossaryOpen, toggleGlossary } = useGlossaryState();
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
@@ -206,6 +294,7 @@ export function GlossaryOverlay() {
     { key: 'execution', label: 'Execução', icon: '⚡' },
     { key: 'data', label: 'Dados', icon: '💾' },
     { key: 'scg', label: 'SCG', icon: '🧬' },
+    { key: 'strategy', label: 'Estratégias', icon: '📦' },
   ];
   
   return (

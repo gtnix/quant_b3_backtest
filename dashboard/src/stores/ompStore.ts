@@ -230,6 +230,7 @@ export interface OmpState {
   stop: () => Promise<boolean>;
   pause: () => Promise<boolean>;
   resume: () => Promise<boolean>;
+  cleanup: () => Promise<{ success: boolean; results: { folders: boolean; database: boolean }; message: string } | null>;
   
   addToQueue: (campaign: Partial<QueuedCampaign>) => Promise<QueuedCampaign | null>;
   updateQueueItem: (id: string, updates: Partial<QueuedCampaign>) => Promise<boolean>;
@@ -446,6 +447,23 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     } catch (err) {
       set({ lastError: err instanceof Error ? err.message : 'Failed to resume' });
       return false;
+    }
+  },
+  
+  cleanup: async () => {
+    try {
+      const response = await fetch(`${platformConfig.apiBase}/omp/cleanup`, { method: 'POST', credentials: 'same-origin' });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to cleanup');
+      }
+      const result = await response.json();
+      await get().fetchStatus();
+      await get().fetchStats();
+      return result;
+    } catch (err) {
+      set({ lastError: err instanceof Error ? err.message : 'Failed to cleanup' });
+      return null;
     }
   },
   

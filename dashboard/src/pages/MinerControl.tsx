@@ -11,9 +11,10 @@ import {
   Trophy, Clock, Zap, Database, Gauge, Terminal,
   CheckCircle2, XCircle, AlertCircle, Wifi, WifiOff,
   RefreshCw, ChevronRight, Globe, TrendingUp, BarChart2,
-  ArrowUp, ArrowDown, Minus
+  ArrowUp, ArrowDown, Minus, Boxes, Settings, Trash2
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
+import { useStrategyStore } from '../stores/strategyStore';
 import type { OmpStatus, CurrentCampaign, QueuedCampaign, ActivityLogEntry } from '../stores/ompStore';
 import { Sparkline } from '../components/charts/Sparkline';
 import { QuickTooltip } from '../components/ui/TooltipInfo';
@@ -633,6 +634,94 @@ function StatRow({ label, value, trend, color = 'white' }: {
 }
 
 // =============================================================================
+// STRATEGY SUMMARY
+// =============================================================================
+
+function StrategySummary() {
+  const { selectedStrategies, families, templates, fetchAll } = useStrategyStore();
+  
+  useEffect(() => {
+    if (templates.length === 0) fetchAll();
+  }, [templates.length, fetchAll]);
+  
+  // Group selected strategies by family
+  const familyCounts = selectedStrategies.reduce((acc, slug) => {
+    const template = templates.find(t => t.slug === slug);
+    if (template) {
+      const family = families.find(f => f.id === template.family_id);
+      if (family) {
+        acc[family.slug] = (acc[family.slug] || 0) + 1;
+      }
+    }
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const topFamilies = Object.entries(familyCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4 mb-4 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Boxes className="w-5 h-5 text-cyan-400" />
+          <div>
+            <span className="text-sm font-medium text-slate-300">Estratégias Ativas</span>
+            <span className="ml-2 px-2 py-0.5 text-xs bg-cyan-500/20 text-cyan-400 rounded-full">
+              {selectedStrategies.length} selecionadas
+            </span>
+          </div>
+        </div>
+        
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'strategies' }))}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-colors"
+        >
+          <Settings className="w-3.5 h-3.5" />
+          Configurar
+        </button>
+      </div>
+      
+      {selectedStrategies.length === 0 ? (
+        <div className="mt-3 text-center py-3 text-slate-500 text-sm">
+          Nenhuma estratégia selecionada. 
+          <button 
+            onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'strategies' }))}
+            className="text-cyan-400 hover:text-cyan-300 ml-1"
+          >
+            Configurar agora →
+          </button>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {topFamilies.map(([slug, count]) => {
+            const family = families.find(f => f.slug === slug);
+            return (
+              <span
+                key={slug}
+                className="px-2.5 py-1 text-xs rounded-lg border"
+                style={{
+                  backgroundColor: `${family?.color}15`,
+                  borderColor: `${family?.color}40`,
+                  color: family?.color,
+                }}
+              >
+                {family?.name} ({count})
+              </span>
+            );
+          })}
+          {Object.keys(familyCounts).length > 5 && (
+            <span className="px-2.5 py-1 text-xs text-slate-500">
+              +{Object.keys(familyCounts).length - 5} famílias
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -652,10 +741,13 @@ export function MinerControl() {
     stop,
     pause,
     resume,
+    cleanup,
     updateQueueItem,
     removeFromQueue,
     subscribeToUpdates,
   } = useOmpStore();
+  
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
   
   // Subscribe to updates on mount
   useEffect(() => {
@@ -689,13 +781,28 @@ export function MinerControl() {
             {/* Control Buttons */}
             <div className="flex items-center gap-2">
               {isOffline && (
-                <button
-                  onClick={start}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded font-medium text-sm transition-colors"
-                >
-                  <Play className="w-4 h-4" />
-                  START
-                </button>
+                <>
+                  <button
+                    onClick={async () => {
+                      setIsCleaningUp(true);
+                      await cleanup();
+                      setIsCleaningUp(false);
+                    }}
+                    disabled={isCleaningUp}
+                    className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded font-medium text-sm transition-colors"
+                    title="Limpar dados anteriores"
+                  >
+                    <Trash2 className={`w-4 h-4 ${isCleaningUp ? 'animate-spin' : ''}`} />
+                    {isCleaningUp ? 'Limpando...' : 'Limpar'}
+                  </button>
+                  <button
+                    onClick={start}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded font-medium text-sm transition-colors"
+                  >
+                    <Play className="w-4 h-4" />
+                    START
+                  </button>
+                </>
               )}
               
               {isRunning && (
@@ -776,6 +883,9 @@ export function MinerControl() {
             <TrendingUp className="w-5 h-5 text-violet-500" />
           </div>
         </div>
+        
+        {/* Strategy Selection Summary */}
+        <StrategySummary />
         
         {/* Main Grid */}
         <div className="grid grid-cols-12 gap-4 animate-slide-up">

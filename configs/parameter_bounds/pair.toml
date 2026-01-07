@@ -1,0 +1,176 @@
+# =============================================================================
+# Parameter Bounds - Pair Trading Family
+# =============================================================================
+
+[metadata]
+family = "pair"
+version = "1.0.0"
+description = "Parameter bounds for pair trading and statistical arbitrage strategies"
+
+# Cointegration Parameters
+[parameters.cointegration_lookback]
+type = "integer"
+min = 60
+max = 504
+step = 21
+default = 252
+description = "Lookback period for cointegration test (days)"
+
+[parameters.cointegration_pvalue]
+type = "float"
+min = 0.01
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Maximum p-value for cointegration test"
+
+[parameters.half_life_max]
+type = "integer"
+min = 20
+max = 120
+step = 10
+default = 60
+description = "Maximum acceptable half-life in days"
+
+# Z-Score Entry/Exit
+[parameters.zscore_entry]
+type = "float"
+min = 1.5
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Z-score threshold for entry"
+
+[parameters.zscore_exit]
+type = "float"
+min = 0.0
+max = 1.0
+step = 0.25
+default = 0.5
+description = "Z-score threshold for exit"
+
+[parameters.zscore_stop]
+type = "float"
+min = 2.5
+max = 4.0
+step = 0.25
+default = 3.0
+description = "Z-score threshold for stop loss"
+
+# Spread Calculation
+[parameters.spread_lookback]
+type = "integer"
+min = 20
+max = 100
+step = 10
+default = 60
+description = "Lookback for spread mean/std calculation"
+
+[parameters.hedge_ratio_method]
+type = "enum"
+values = ["ols", "tls", "kalman"]
+default = "ols"
+description = "Method for calculating hedge ratio"
+
+[parameters.hedge_ratio_rolling]
+type = "boolean"
+default = true
+description = "Use rolling hedge ratio calculation"
+
+[parameters.hedge_ratio_window]
+type = "integer"
+min = 30
+max = 126
+step = 21
+default = 63
+description = "Window for rolling hedge ratio"
+
+# Distance Method
+[parameters.distance_lookback]
+type = "integer"
+min = 60
+max = 252
+step = 21
+default = 126
+description = "Lookback for distance calculation"
+
+[parameters.distance_entry_std]
+type = "float"
+min = 1.5
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Standard deviations for entry"
+
+[parameters.distance_exit_std]
+type = "float"
+min = 0.0
+max = 1.0
+step = 0.25
+default = 0.5
+description = "Standard deviations for exit"
+
+# Multi-Pair Statistical Arbitrage
+[parameters.num_pairs]
+type = "integer"
+min = 3
+max = 20
+step = 1
+default = 5
+description = "Number of pairs to trade simultaneously"
+
+[parameters.correlation_threshold]
+type = "float"
+min = 0.6
+max = 0.95
+step = 0.05
+default = 0.8
+description = "Minimum correlation for pair selection"
+
+[parameters.sector_constraint]
+type = "boolean"
+default = true
+description = "Require pairs from same sector"
+
+# Risk Management Pair Trading
+[parameters.max_position_per_pair]
+type = "float"
+min = 0.05
+max = 0.25
+step = 0.05
+default = 0.1
+description = "Maximum position size per pair as portfolio percentage"
+
+[parameters.max_total_exposure]
+type = "float"
+min = 0.5
+max = 2.0
+step = 0.25
+default = 1.0
+description = "Maximum total portfolio exposure"
+
+[parameters.stop_loss_zscore]
+type = "float"
+min = 2.5
+max = 4.0
+step = 0.5
+default = 3.0
+description = "Z-score for stop loss"
+
+[parameters.max_holding_days]
+type = "integer"
+min = 10
+max = 60
+step = 5
+default = 30
+description = "Maximum holding period in days"
+
+[parameters.min_holding_days]
+type = "integer"
+min = 1
+max = 10
+step = 1
+default = 3
+description = "Minimum holding period in days"
+
+

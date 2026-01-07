@@ -1,0 +1,105 @@
+# =============================================================================
+# Parameter Bounds: Momentum Family
+# =============================================================================
+# Defines valid ranges for momentum-based strategies.
+# Both cross-sectional and time-series momentum.
+# =============================================================================
+
+[bounds]
+family = "momentum"
+description = "Trend-following strategies based on price momentum"
+
+# -----------------------------------------------------------------------------
+# Momentum Lookback
+# -----------------------------------------------------------------------------
+[bounds.momentum]
+lookback_days = { min = 21, max = 252, step = 21, default = 126 }
+skip_days = { min = 0, max = 21, step = 5, default = 5 }
+smoothing_period = { min = 1, max = 20, step = 5, default = 5 }
+
+# -----------------------------------------------------------------------------
+# Cross-Sectional Parameters
+# -----------------------------------------------------------------------------
+[bounds.cross_sectional]
+top_pct = { min = 10, max = 30, step = 5, default = 20 }
+bottom_pct = { min = 10, max = 30, step = 5, default = 20 }
+universe_min_size = { min = 20, max = 100, step = 20, default = 50 }
+
+# -----------------------------------------------------------------------------
+# Moving Average Trend Filter
+# -----------------------------------------------------------------------------
+[bounds.trend_filter]
+enabled = { options = [true, false], default = true }
+ma_period = { min = 100, max = 252, step = 50, default = 200 }
+type = { options = ["SMA", "EMA"], default = "SMA" }
+
+# -----------------------------------------------------------------------------
+# ADX Trend Strength
+# -----------------------------------------------------------------------------
+[bounds.adx]
+period = { min = 10, max = 20, step = 2, default = 14 }
+threshold = { min = 20, max = 35, step = 5, default = 25 }
+
+# -----------------------------------------------------------------------------
+# Volume Confirmation
+# -----------------------------------------------------------------------------
+[bounds.volume]
+ma_period = { min = 10, max = 30, step = 5, default = 20 }
+multiplier = { min = 1.0, max = 2.0, step = 0.2, default = 1.2 }
+
+# -----------------------------------------------------------------------------
+# ATR Parameters
+# -----------------------------------------------------------------------------
+[bounds.atr]
+period = { min = 10, max = 20, step = 2, default = 14 }
+stop_multiplier = { min = 2.0, max = 4.5, step = 0.5, default = 2.5 }
+target_multiplier = { min = 2.5, max = 6.0, step = 0.5, default = 3.5 }
+
+# -----------------------------------------------------------------------------
+# Timeframe Configuration
+# -----------------------------------------------------------------------------
+[bounds.timeframe]
+bar_interval = { options = ["1D"], default = "1D" }
+data_window_years = { min = 2, max = 5, step = 1, default = 3 }
+lookback_bars = { min = 60, max = 252, step = 20, default = 126 }
+min_history_bars = { min = 126, max = 504, step = 126, default = 252 }
+
+# -----------------------------------------------------------------------------
+# Holding Period
+# -----------------------------------------------------------------------------
+[bounds.holding]
+period_min = { min = 21, max = 63, step = 21, default = 21 }
+period_max = { min = 63, max = 252, step = 21, default = 126 }
+
+# -----------------------------------------------------------------------------
+# Rebalancing
+# -----------------------------------------------------------------------------
+[bounds.rebalancing]
+frequency = { options = ["weekly", "monthly"], default = "monthly" }
+drift_threshold = { min = 0.03, max = 0.10, step = 0.01, default = 0.05 }
+
+# -----------------------------------------------------------------------------
+# Position Sizing
+# -----------------------------------------------------------------------------
+[bounds.position_sizing]
+risk_per_trade_pct = { min = 0.5, max = 2.0, step = 0.25, default = 1.0 }
+max_position_pct = { min = 5.0, max = 15.0, step = 2.5, default = 10.0 }
+max_positions = { min = 5, max = 20, step = 5, default = 10 }
+
+# -----------------------------------------------------------------------------
+# Validation Parameters
+# -----------------------------------------------------------------------------
+[bounds.validation]
+train_test_split = { min = 0.55, max = 0.70, step = 0.05, default = 0.60 }
+wfa_folds = { min = 5, max = 12, step = 1, default = 8 }
+min_trades_total = { min = 30, max = 100, step = 10, default = 50 }
+
+# -----------------------------------------------------------------------------
+# Complexity Classification
+# -----------------------------------------------------------------------------
+[complexity]
+tier = "tier1_fast"
+typical_parameters = 10
+evaluation_time_ms = 75
+
+

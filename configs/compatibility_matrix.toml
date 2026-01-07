@@ -1,0 +1,159 @@
+# =============================================================================
+# Parameter Universe System - Compatibility Matrix
+# =============================================================================
+# Defines valid combinations between the 4 axes:
+# - Robustness Profile
+# - Training Strategy
+# - Training Tech
+# - Training Model (Strategy Family)
+#
+# Invalid combinations will be rejected during validation.
+# =============================================================================
+
+[metadata]
+version = "1.0.0"
+description = "Compatibility rules for Parameter Universe System"
+last_updated = "2026-01-06"
+
+# =============================================================================
+# Robustness Profile → Allowed Training Strategies
+# =============================================================================
+# More conservative profiles require more robust validation methods
+
+[robustness_to_training_strategy]
+muito_conservador = ["purged_kfold", "walk_forward"]
+conservador = ["purged_kfold", "walk_forward", "anchored"]
+moderado = ["purged_kfold", "walk_forward", "anchored", "expanding_window"]
+arrojado = ["purged_kfold", "walk_forward", "anchored", "expanding_window", "monte_carlo"]
+muito_arrojado = ["purged_kfold", "walk_forward", "anchored", "expanding_window", "monte_carlo"]
+
+# =============================================================================
+# Training Model (Strategy Family) → Allowed Robustness Profiles
+# =============================================================================
+# High-frequency strategies require more aggressive profiles
+# Long-term strategies can use conservative profiles
+
+[training_model_to_robustness]
+intraday = ["moderado", "arrojado", "muito_arrojado"]
+swing = ["conservador", "moderado", "arrojado", "muito_arrojado"]
+position = ["muito_conservador", "conservador", "moderado", "arrojado"]
+pair = ["conservador", "moderado", "arrojado"]
+portfolio = ["muito_conservador", "conservador", "moderado", "arrojado"]
+momentum = ["conservador", "moderado", "arrojado", "muito_arrojado"]
+mean_reversion = ["conservador", "moderado", "arrojado"]
+breakout = ["moderado", "arrojado", "muito_arrojado"]
+sector_rotation = ["muito_conservador", "conservador", "moderado"]
+factor = ["muito_conservador", "conservador", "moderado"]
+seasonal = ["muito_conservador", "conservador", "moderado"]
+volatility = ["moderado", "arrojado", "muito_arrojado"]
+event_driven = ["moderado", "arrojado"]
+buy_hold = ["muito_conservador", "conservador", "moderado"]
+multi_strategy = ["conservador", "moderado", "arrojado"]
+
+# =============================================================================
+# Training Tech → Allowed Complexity Tiers
+# =============================================================================
+# Resources limit which complexity strategies can be evaluated
+
+[training_tech_to_complexity]
+cpu_fast = ["tier1_fast"]
+cpu_parallel = ["tier1_fast", "tier2_medium"]
+cpu_intensive = ["tier1_fast", "tier2_medium", "tier3_slow"]
+distributed = ["tier1_fast", "tier2_medium", "tier3_slow", "tier4_very_slow"]
+
+# =============================================================================
+# Training Model (Strategy Family) → Complexity Tier
+# =============================================================================
+# Inherent complexity of each strategy family
+
+[training_model_complexity]
+intraday = "tier1_fast"
+swing = "tier1_fast"
+position = "tier2_medium"
+pair = "tier2_medium"
+portfolio = "tier3_slow"
+momentum = "tier1_fast"
+mean_reversion = "tier1_fast"
+breakout = "tier1_fast"
+sector_rotation = "tier2_medium"
+factor = "tier3_slow"
+seasonal = "tier2_medium"
+volatility = "tier2_medium"
+event_driven = "tier2_medium"
+buy_hold = "tier1_fast"
+multi_strategy = "tier3_slow"
+
+# =============================================================================
+# Training Strategy → Minimum Data Requirements (years)
+# =============================================================================
+
+[training_strategy_min_data]
+purged_kfold = 2
+walk_forward = 3
+anchored = 5
+expanding_window = 3
+monte_carlo = 5
+
+# =============================================================================
+# Training Model → Recommended Data Window (years)
+# =============================================================================
+
+[training_model_data_window]
+intraday = { min = 0.5, optimal = 0.5, max = 1 }
+swing = { min = 1, optimal = 2, max = 5 }
+position = { min = 2, optimal = 5, max = 10 }
+pair = { min = 2, optimal = 3, max = 5 }
+portfolio = { min = 2, optimal = 5, max = 10 }
+momentum = { min = 1, optimal = 3, max = 5 }
+mean_reversion = { min = 1, optimal = 2, max = 4 }
+breakout = { min = 1, optimal = 3, max = 5 }
+sector_rotation = { min = 5, optimal = 10, max = 20 }
+factor = { min = 5, optimal = 10, max = 20 }
+seasonal = { min = 10, optimal = 15, max = 30 }
+volatility = { min = 2, optimal = 5, max = 10 }
+event_driven = { min = 2, optimal = 5, max = 10 }
+buy_hold = { min = 10, optimal = 20, max = 50 }
+multi_strategy = { min = 3, optimal = 5, max = 10 }
+
+# =============================================================================
+# Training Model → Minimum Trades Requirements
+# =============================================================================
+
+[training_model_min_trades]
+intraday = { is = 50, oos = 25, total = 100 }
+swing = { is = 60, oos = 30, total = 100 }
+position = { is = 30, oos = 15, total = 50 }
+pair = { is = 40, oos = 20, total = 60 }
+portfolio = { is = 24, oos = 12, total = 36 }
+momentum = { is = 36, oos = 18, total = 60 }
+mean_reversion = { is = 50, oos = 25, total = 80 }
+breakout = { is = 40, oos = 20, total = 70 }
+sector_rotation = { is = 20, oos = 10, total = 30 }
+factor = { is = 16, oos = 8, total = 24 }
+seasonal = { is = 15, oos = 8, total = 25 }
+volatility = { is = 30, oos = 15, total = 50 }
+event_driven = { is = 20, oos = 10, total = 30 }
+buy_hold = { is = 10, oos = 5, total = 15 }
+multi_strategy = { is = 30, oos = 15, total = 50 }
+
+# =============================================================================
+# Validation Rules (Programmatic Check)
+# =============================================================================
+
+[validation_rules]
+# Rule 1: Training tech must support the complexity tier of the training model
+check_tech_complexity = true
+
+# Rule 2: Data window must be >= training strategy minimum
+check_data_window = true
+
+# Rule 3: Robustness profile must be in allowed list for training model
+check_robustness_compatibility = true
+
+# Rule 4: Training strategy must be in allowed list for robustness profile
+check_strategy_compatibility = true
+
+# Rule 5: Market-specific adjustments apply
+apply_market_adjustments = true
+
+

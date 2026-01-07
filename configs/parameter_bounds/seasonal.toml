@@ -1,0 +1,170 @@
+# =============================================================================
+# Parameter Bounds - Seasonal Trading Family
+# =============================================================================
+
+[metadata]
+family = "seasonal"
+version = "1.0.0"
+description = "Parameter bounds for seasonal trading strategies"
+
+# Calendar Effects - January Effect
+[parameters.january_start_day]
+type = "integer"
+min = -10
+max = 5
+step = 5
+default = -5
+description = "Days before Jan 1 to enter (negative = December)"
+
+[parameters.january_exit_day]
+type = "integer"
+min = 10
+max = 31
+step = 5
+default = 20
+description = "Day of January to exit"
+
+[parameters.january_small_cap_only]
+type = "boolean"
+default = true
+description = "Focus on small cap for January effect"
+
+[parameters.january_size_percentile]
+type = "integer"
+min = 10
+max = 50
+step = 10
+default = 30
+description = "Market cap percentile for small cap"
+
+# Calendar Effects - Sell in May
+[parameters.sell_in_may_entry_month]
+type = "integer"
+min = 10
+max = 11
+step = 1
+default = 11
+description = "Month to enter (10=Oct, 11=Nov)"
+
+[parameters.sell_in_may_exit_month]
+type = "integer"
+min = 4
+max = 5
+step = 1
+default = 5
+description = "Month to exit (4=Apr, 5=May)"
+
+[parameters.sell_in_may_defensive]
+type = "boolean"
+default = false
+description = "Use defensive sectors during summer"
+
+# Commodity Seasonality - General
+[parameters.seasonal_lookback_years]
+type = "integer"
+min = 5
+max = 20
+step = 5
+default = 10
+description = "Years to calculate seasonal patterns"
+
+[parameters.seasonal_confidence]
+type = "float"
+min = 0.5
+max = 0.9
+step = 0.1
+default = 0.7
+description = "Minimum confidence in seasonal pattern"
+
+[parameters.seasonal_strength_min]
+type = "float"
+min = 0.5
+max = 2.0
+step = 0.25
+default = 1.0
+description = "Minimum seasonal strength ratio"
+
+# Natural Gas Seasonality
+[parameters.ng_entry_month]
+type = "integer"
+min = 9
+max = 11
+step = 1
+default = 10
+description = "Natural gas entry month"
+
+[parameters.ng_exit_month]
+type = "integer"
+min = 1
+max = 3
+step = 1
+default = 2
+description = "Natural gas exit month"
+
+[parameters.ng_weather_filter]
+type = "boolean"
+default = false
+description = "Use weather forecast filter"
+
+# Grains Seasonality
+[parameters.grains_planting_entry]
+type = "integer"
+min = 3
+max = 5
+step = 1
+default = 4
+description = "Planting season entry month"
+
+[parameters.grains_harvest_exit]
+type = "integer"
+min = 8
+max = 10
+step = 1
+default = 9
+description = "Harvest season exit month"
+
+[parameters.grains_crop_report_filter]
+type = "boolean"
+default = true
+description = "Consider USDA crop reports"
+
+# Position Sizing
+[parameters.position_size_pct]
+type = "float"
+min = 0.05
+max = 0.25
+step = 0.05
+default = 0.1
+description = "Position size as portfolio percentage"
+
+[parameters.max_positions]
+type = "integer"
+min = 1
+max = 5
+step = 1
+default = 2
+description = "Maximum concurrent seasonal positions"
+
+# Risk Management
+[parameters.stop_loss_pct]
+type = "float"
+min = 0.05
+max = 0.2
+step = 0.025
+default = 0.1
+description = "Stop loss as percentage"
+
+[parameters.early_exit_momentum]
+type = "boolean"
+default = true
+description = "Exit early on adverse momentum"
+
+[parameters.momentum_exit_threshold]
+type = "float"
+min = -0.15
+max = -0.05
+step = 0.025
+default = -0.1
+description = "Momentum threshold for early exit"
+
+

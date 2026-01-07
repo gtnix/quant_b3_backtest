@@ -6,9 +6,10 @@ import { useEffect, useState } from 'react';
 import { 
   Trophy, TrendingUp, Shield, BarChart3, Clock, 
   GitBranch, Hash, Globe, ChevronDown, RefreshCw,
-  CheckCircle2, XCircle, Filter, LineChart
+  CheckCircle2, XCircle, Filter, LineChart, Boxes
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
+import { useStrategyStore } from '../stores/strategyStore';
 import type { HallOfFameEntry } from '../stores/ompStore';
 
 // =============================================================================
@@ -17,11 +18,18 @@ import type { HallOfFameEntry } from '../stores/ompStore';
 
 interface FilterState {
   market: 'all' | 'br' | 'us';
+  family: string;
   sortBy: 'sharpe' | 'date' | 'pbo' | 'dsr';
   limit: number;
 }
 
 function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: FilterState) => void }) {
+  const { families, fetchFamilies } = useStrategyStore();
+  
+  useEffect(() => {
+    if (families.length === 0) fetchFamilies();
+  }, [families.length, fetchFamilies]);
+  
   return (
     <div className="flex flex-wrap items-center gap-4 p-4 bg-slate-800/50 rounded-xl border border-slate-700">
       <div className="flex items-center gap-2">
@@ -47,6 +55,22 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
             </button>
           ))}
         </div>
+      </div>
+      
+      {/* Filtro de Família de Estratégia */}
+      <div className="flex items-center gap-2">
+        <Boxes className="w-3 h-3 text-slate-500" />
+        <span className="text-xs text-slate-500">Família:</span>
+        <select
+          value={filter.family}
+          onChange={e => setFilter({ ...filter, family: e.target.value })}
+          className="px-3 py-1 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-amber-500"
+        >
+          <option value="">Todas Famílias</option>
+          {families.map(f => (
+            <option key={f.slug} value={f.slug}>{f.name}</option>
+          ))}
+        </select>
       </div>
       
       {/* Ordenação */}
@@ -332,6 +356,7 @@ export function HallOfFame() {
   
   const [filter, setFilter] = useState<FilterState>({
     market: 'all',
+    family: '',
     sortBy: 'sharpe',
     limit: 50,
   });

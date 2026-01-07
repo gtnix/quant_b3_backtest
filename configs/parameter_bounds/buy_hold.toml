@@ -1,0 +1,168 @@
+# =============================================================================
+# Parameter Bounds - Buy and Hold Family
+# =============================================================================
+
+[metadata]
+family = "buy_hold"
+version = "1.0.0"
+description = "Parameter bounds for buy and hold passive strategies"
+
+# Index Tracking
+[parameters.index_selection]
+type = "enum"
+values = ["ibov", "sp500", "ibrx50", "ibrx100", "small_cap"]
+default = "ibov"
+description = "Index to track"
+
+[parameters.tracking_method]
+type = "enum"
+values = ["full_replication", "sampling", "etf"]
+default = "sampling"
+description = "Index tracking method"
+
+[parameters.sampling_stocks]
+type = "integer"
+min = 10
+max = 50
+step = 10
+default = 30
+description = "Number of stocks for sampling method"
+
+# Rebalancing
+[parameters.rebalance_frequency]
+type = "enum"
+values = ["monthly", "quarterly", "semi_annual", "annual"]
+default = "quarterly"
+description = "Rebalancing frequency"
+
+[parameters.rebalance_threshold]
+type = "float"
+min = 0.01
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Drift threshold to trigger rebalancing"
+
+# Dividend Growth Parameters
+[parameters.min_dividend_yield]
+type = "float"
+min = 0.01
+max = 0.06
+step = 0.01
+default = 0.03
+description = "Minimum dividend yield"
+
+[parameters.min_dividend_growth]
+type = "float"
+min = 0.0
+max = 0.15
+step = 0.025
+default = 0.05
+description = "Minimum 5-year dividend growth rate"
+
+[parameters.max_payout_ratio]
+type = "float"
+min = 0.5
+max = 0.9
+step = 0.1
+default = 0.7
+description = "Maximum payout ratio"
+
+[parameters.dividend_consistency_years]
+type = "integer"
+min = 3
+max = 10
+step = 1
+default = 5
+description = "Years of consistent dividends required"
+
+[parameters.exclude_reits]
+type = "boolean"
+default = false
+description = "Exclude REITs from dividend selection"
+
+# Quality Filters for Dividend
+[parameters.min_market_cap]
+type = "float"
+min = 100000000
+max = 5000000000
+step = 100000000
+default = 500000000
+description = "Minimum market cap in BRL"
+
+[parameters.max_debt_equity]
+type = "float"
+min = 0.5
+max = 2.0
+step = 0.25
+default = 1.0
+description = "Maximum debt/equity ratio"
+
+[parameters.min_roe]
+type = "float"
+min = 0.05
+max = 0.2
+step = 0.025
+default = 0.1
+description = "Minimum return on equity"
+
+# Portfolio Construction
+[parameters.num_stocks]
+type = "integer"
+min = 10
+max = 40
+step = 5
+default = 20
+description = "Number of stocks in portfolio"
+
+[parameters.weighting_method]
+type = "enum"
+values = ["equal", "market_cap", "dividend_weighted"]
+default = "equal"
+description = "Stock weighting method"
+
+[parameters.max_stock_weight]
+type = "float"
+min = 0.03
+max = 0.15
+step = 0.02
+default = 0.1
+description = "Maximum weight per stock"
+
+[parameters.max_sector_weight]
+type = "float"
+min = 0.2
+max = 0.4
+step = 0.05
+default = 0.25
+description = "Maximum sector weight"
+
+# Transaction Costs
+[parameters.min_trade_size]
+type = "float"
+min = 1000
+max = 10000
+step = 1000
+default = 5000
+description = "Minimum trade size in BRL"
+
+[parameters.tax_efficiency]
+type = "boolean"
+default = true
+description = "Consider tax efficiency in trades"
+
+# Risk Management
+[parameters.cash_buffer]
+type = "float"
+min = 0.0
+max = 0.1
+step = 0.02
+default = 0.02
+description = "Cash buffer percentage"
+
+[parameters.avoid_forced_selling]
+type = "boolean"
+default = true
+description = "Avoid selling for minor rebalancing"
+
+

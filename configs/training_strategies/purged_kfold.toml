@@ -1,0 +1,35 @@
+# =============================================================================
+# Training Strategy: Purged K-Fold Cross-Validation
+# =============================================================================
+# Standard robust validation with embargo periods to prevent data leakage.
+# Recommended for most use cases.
+# =============================================================================
+
+[strategy]
+id = "purged_kfold"
+name = "Purged K-Fold"
+description = "Standard cross-validation with purge periods to prevent lookahead bias"
+
+[validation]
+method = "purged_kfold"
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.60
+wfa_purge_days = 5
+train_test_split = 0.65
+pbo_enabled = true
+pbo_num_permutations = 1000
+pbo_significance_level = 0.05
+
+[requirements]
+min_data_years = 2
+min_trades_is = 50
+min_trades_oos = 25
+max_pbo = 0.30
+max_degradation_is_to_oos = 0.40
+
+[complexity]
+tier = "tier2_medium"
+estimated_runtime_multiplier = 1.0
+
+

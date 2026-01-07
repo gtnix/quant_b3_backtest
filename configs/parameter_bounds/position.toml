@@ -1,0 +1,93 @@
+# =============================================================================
+# Parameter Bounds: Position Trading Family
+# =============================================================================
+# Long-term trend following with multi-week to multi-month holding.
+# =============================================================================
+
+[bounds]
+family = "position"
+description = "Long-term trend following with weeks to months holding periods"
+
+# -----------------------------------------------------------------------------
+# Moving Average Parameters (Long-term)
+# -----------------------------------------------------------------------------
+[bounds.ma_periods]
+fast = { min = 20, max = 100, step = 10, default = 50 }
+slow = { min = 100, max = 300, step = 50, default = 200 }
+type = { options = ["SMA", "EMA"], default = "EMA" }
+
+[bounds.ma_periods.constraints]
+fast_less_than_slow = true
+min_gap = 50
+
+# -----------------------------------------------------------------------------
+# ADX Trend Strength
+# -----------------------------------------------------------------------------
+[bounds.adx]
+period = { min = 14, max = 28, step = 7, default = 14 }
+threshold = { min = 20, max = 30, step = 5, default = 25 }
+
+# -----------------------------------------------------------------------------
+# Donchian Channel Parameters
+# -----------------------------------------------------------------------------
+[bounds.donchian]
+entry_period = { min = 20, max = 55, step = 5, default = 55 }
+exit_period = { min = 10, max = 30, step = 5, default = 20 }
+
+# -----------------------------------------------------------------------------
+# ATR Parameters (Wider stops for position trading)
+# -----------------------------------------------------------------------------
+[bounds.atr]
+period = { min = 14, max = 28, step = 7, default = 20 }
+stop_multiplier = { min = 3.0, max = 6.0, step = 0.5, default = 4.0 }
+target_multiplier = { min = 4.0, max = 8.0, step = 1.0, default = 6.0 }
+
+# -----------------------------------------------------------------------------
+# Timeframe Configuration
+# -----------------------------------------------------------------------------
+[bounds.timeframe]
+bar_interval = { options = ["1D", "1W"], default = "1D" }
+data_window_years = { min = 3, max = 10, step = 1, default = 5 }
+lookback_bars = { min = 100, max = 504, step = 50, default = 252 }
+min_history_bars = { min = 252, max = 756, step = 126, default = 504 }
+
+# -----------------------------------------------------------------------------
+# Holding Period
+# -----------------------------------------------------------------------------
+[bounds.holding]
+period_min_weeks = { min = 2, max = 8, step = 2, default = 4 }
+period_max_weeks = { min = 12, max = 52, step = 4, default = 26 }
+
+# -----------------------------------------------------------------------------
+# Trailing Stop
+# -----------------------------------------------------------------------------
+[bounds.trailing_stop]
+enabled = { options = [true, false], default = true }
+activation_pct = { min = 0.05, max = 0.15, step = 0.025, default = 0.10 }
+atr_multiplier = { min = 2.5, max = 4.5, step = 0.5, default = 3.0 }
+
+# -----------------------------------------------------------------------------
+# Position Sizing
+# -----------------------------------------------------------------------------
+[bounds.position_sizing]
+risk_per_trade_pct = { min = 0.5, max = 1.5, step = 0.25, default = 1.0 }
+max_position_pct = { min = 10.0, max = 25.0, step = 5.0, default = 20.0 }
+max_positions = { min = 3, max = 10, step = 1, default = 5 }
+
+# -----------------------------------------------------------------------------
+# Validation Parameters
+# -----------------------------------------------------------------------------
+[bounds.validation]
+train_test_split = { min = 0.55, max = 0.65, step = 0.05, default = 0.60 }
+wfa_folds = { min = 5, max = 15, step = 2, default = 10 }
+min_trades_total = { min = 20, max = 60, step = 10, default = 40 }
+
+# -----------------------------------------------------------------------------
+# Complexity Classification
+# -----------------------------------------------------------------------------
+[complexity]
+tier = "tier2_medium"
+typical_parameters = 12
+evaluation_time_ms = 150
+
+

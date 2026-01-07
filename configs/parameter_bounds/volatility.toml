@@ -1,0 +1,208 @@
+# =============================================================================
+# Parameter Bounds - Volatility Trading Family
+# =============================================================================
+
+[metadata]
+family = "volatility"
+version = "1.0.0"
+description = "Parameter bounds for volatility trading strategies"
+
+# VIX Mean Reversion Parameters
+[parameters.vix_threshold_high]
+type = "integer"
+min = 20
+max = 40
+step = 5
+default = 30
+description = "VIX level for long equity signal"
+
+[parameters.vix_threshold_low]
+type = "integer"
+min = 10
+max = 20
+step = 2
+default = 15
+description = "VIX level for reduced exposure"
+
+[parameters.vix_mean_lookback]
+type = "integer"
+min = 20
+max = 126
+step = 21
+default = 63
+description = "Lookback for VIX mean calculation"
+
+[parameters.vix_percentile_lookback]
+type = "integer"
+min = 126
+max = 504
+step = 63
+default = 252
+description = "Lookback for VIX percentile"
+
+[parameters.vix_entry_percentile]
+type = "integer"
+min = 70
+max = 95
+step = 5
+default = 85
+description = "VIX percentile for entry"
+
+[parameters.vix_exit_percentile]
+type = "integer"
+min = 30
+max = 60
+step = 10
+default = 50
+description = "VIX percentile for exit"
+
+# Term Structure
+[parameters.term_structure_signal]
+type = "boolean"
+default = true
+description = "Use VIX term structure as signal"
+
+[parameters.contango_threshold]
+type = "float"
+min = 0.0
+max = 0.1
+step = 0.02
+default = 0.05
+description = "Contango threshold for bullish signal"
+
+[parameters.backwardation_threshold]
+type = "float"
+min = -0.1
+max = 0.0
+step = 0.02
+default = -0.03
+description = "Backwardation threshold for bearish"
+
+# ATR Breakout Parameters
+[parameters.atr_period]
+type = "integer"
+min = 10
+max = 30
+step = 5
+default = 14
+description = "ATR calculation period"
+
+[parameters.atr_percentile]
+type = "integer"
+min = 70
+max = 95
+step = 5
+default = 80
+description = "ATR percentile for volatility expansion"
+
+[parameters.atr_lookback]
+type = "integer"
+min = 60
+max = 252
+step = 21
+default = 126
+description = "Lookback for ATR percentile"
+
+# Bollinger Band Width Breakout
+[parameters.bb_period]
+type = "integer"
+min = 10
+max = 30
+step = 5
+default = 20
+description = "Bollinger Band period"
+
+[parameters.bb_std]
+type = "float"
+min = 1.5
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Bollinger Band standard deviation"
+
+[parameters.bb_width_percentile]
+type = "integer"
+min = 5
+max = 25
+step = 5
+default = 10
+description = "BB width percentile for squeeze"
+
+[parameters.bb_width_lookback]
+type = "integer"
+min = 60
+max = 252
+step = 21
+default = 126
+description = "Lookback for BB width percentile"
+
+# Realized Volatility
+[parameters.realized_vol_period]
+type = "integer"
+min = 10
+max = 30
+step = 5
+default = 20
+description = "Period for realized volatility"
+
+[parameters.vol_ratio_entry]
+type = "float"
+min = 1.2
+max = 2.0
+step = 0.2
+default = 1.5
+description = "Implied/realized vol ratio for entry"
+
+# Position Management
+[parameters.position_size_pct]
+type = "float"
+min = 0.02
+max = 0.15
+step = 0.01
+default = 0.05
+description = "Position size as portfolio percentage"
+
+[parameters.scale_by_volatility]
+type = "boolean"
+default = true
+description = "Scale position by inverse volatility"
+
+[parameters.target_volatility]
+type = "float"
+min = 0.1
+max = 0.25
+step = 0.05
+default = 0.15
+description = "Target portfolio volatility"
+
+# Risk Management
+[parameters.stop_loss_atr_mult]
+type = "float"
+min = 1.0
+max = 4.0
+step = 0.5
+default = 2.0
+description = "Stop loss as ATR multiplier"
+
+[parameters.max_holding_days]
+type = "integer"
+min = 5
+max = 30
+step = 5
+default = 15
+description = "Maximum holding period"
+
+[parameters.vix_spike_exit]
+type = "boolean"
+default = true
+description = "Exit on extreme VIX spike"
+
+[parameters.vix_spike_threshold]
+type = "integer"
+min = 35
+max = 60
+step = 5
+default = 45
+description = "VIX level for spike exit"
+
+

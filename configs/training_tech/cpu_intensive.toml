@@ -1,0 +1,32 @@
+# =============================================================================
+# Training Tech: CPU Intensive
+# =============================================================================
+# Heavy computation for complex strategies.
+# Requires dedicated hardware.
+# =============================================================================
+
+[tech]
+id = "cpu_intensive"
+name = "CPU Intensive"
+description = "High-performance computation for complex multi-asset strategies"
+
+[resources]
+workers = 16
+max_memory_gb = 16
+timeout_minutes = 360
+
+[evolution]
+population_size = 300
+max_generations = 200
+convergence_generations = 20
+
+[allowed_complexity]
+tiers = ["tier1_fast", "tier2_medium", "tier3_slow"]
+max_parameters_to_optimize = 15
+max_universe_size = 200
+
+[scheduling]
+priority = "high"
+preemptible = false
+
+

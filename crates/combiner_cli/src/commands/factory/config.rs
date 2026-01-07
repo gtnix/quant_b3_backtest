@@ -42,6 +42,11 @@ pub struct CampaignConfig {
     /// Output configuration.
     #[serde(default)]
     pub output: OutputConfig,
+    /// Universe configuration for Parameter Universe System.
+    /// Controls the 4 axes: robustness, training strategy, training tech, training model.
+    /// Optional for backward compatibility - existing TOMLs without this section continue to work.
+    #[serde(default)]
+    pub universe: Option<UniverseConfigRef>,
 }
 
 /// Campaign metadata.
@@ -360,6 +365,85 @@ fn default_artifact_format() -> String {
     "legacy".to_string()
 }
 
+// =============================================================================
+// UNIVERSE CONFIG (Parameter Universe System)
+// =============================================================================
+
+/// Reference to universe configuration for the Parameter Universe System.
+/// Controls the 4 axes that restrict strategy generation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UniverseConfigRef {
+    /// Robustness profile name (muito_conservador, conservador, moderado, arrojado, muito_arrojado).
+    /// If not set, falls back to risk_profile.name or "moderado".
+    #[serde(default)]
+    pub robustness_profile: Option<String>,
+    
+    /// Training strategy name (purged_kfold, walk_forward, anchored, expanding_window, monte_carlo).
+    #[serde(default = "default_training_strategy")]
+    pub training_strategy: String,
+    
+    /// Training tech name (cpu_fast, cpu_parallel, cpu_intensive, distributed).
+    #[serde(default = "default_training_tech")]
+    pub training_tech: String,
+    
+    /// Training model / strategy family (swing, momentum, position, etc).
+    /// Can be a single string or array of strings.
+    #[serde(default)]
+    pub training_model: TrainingModelRef,
+    
+    /// Optional overrides that can further restrict the universe.
+    #[serde(default)]
+    pub overrides: Option<UniverseOverrides>,
+}
+
+fn default_training_strategy() -> String {
+    "purged_kfold".to_string()
+}
+
+fn default_training_tech() -> String {
+    "cpu_parallel".to_string()
+}
+
+/// Training model reference - can be single or multiple families.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TrainingModelRef {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl Default for TrainingModelRef {
+    fn default() -> Self {
+        Self::Multiple(vec!["swing".to_string(), "momentum".to_string()])
+    }
+}
+
+impl TrainingModelRef {
+    /// Get all families as a vector of strings.
+    pub fn families(&self) -> Vec<&str> {
+        match self {
+            Self::Single(s) => vec![s.as_str()],
+            Self::Multiple(v) => v.iter().map(|s| s.as_str()).collect(),
+        }
+    }
+}
+
+/// Optional overrides for universe restrictions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UniverseOverrides {
+    /// Maximum parameters to optimize (overrides training_tech).
+    #[serde(default)]
+    pub max_parameters: Option<usize>,
+    
+    /// Allowed indicators (restricts to this list).
+    #[serde(default)]
+    pub allowed_indicators: Option<Vec<String>>,
+    
+    /// Maximum data window in years.
+    #[serde(default)]
+    pub max_data_window_years: Option<u32>,
+}
+
 impl Default for OutputConfig {
     fn default() -> Self {
         Self {
@@ -585,11 +669,34 @@ mod tests {
             data_integrity: DataIntegrityConfig::default(),
             risk_profile: RiskProfileConfig::default(),
             output: OutputConfig::default(),
+            universe: None,
         };
 
         let config2 = config1.clone();
 
         assert_eq!(config1.config_hash(), config2.config_hash());
+    }
+    
+    #[test]
+    fn test_universe_config_defaults() {
+        let universe = UniverseConfigRef::default();
+        assert_eq!(universe.training_strategy, "purged_kfold");
+        assert_eq!(universe.training_tech, "cpu_parallel");
+        assert!(matches!(universe.training_model, TrainingModelRef::Multiple(_)));
+    }
+    
+    #[test]
+    fn test_backward_compatibility_no_universe() {
+        // TOML without [universe] section should parse successfully
+        let toml_str = r#"
+[campaign]
+name = "test"
+
+[dataset]
+market = "BR"
+"#;
+        let config: CampaignConfig = toml::from_str(toml_str).expect("Should parse without universe");
+        assert!(config.universe.is_none());
     }
 
     #[test]

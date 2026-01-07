@@ -51,6 +51,20 @@ enum Commands {
         #[arg(long, default_value = "10")]
         top_k: usize,
 
+        // ========== Strategy Selection (TPM) ==========
+
+        /// Strategy template slug to use (e.g., swing_momentum_ma_crossover_moderate)
+        #[arg(long)]
+        strategy: Option<String>,
+
+        /// Strategy catalog slug (e.g., quick_test, institutional, all)
+        #[arg(long)]
+        catalog: Option<String>,
+
+        /// Strategy family slug (e.g., swing, pair, momentum)
+        #[arg(long)]
+        family: Option<String>,
+
         // ========== Execution Model Overrides ==========
 
         /// Execution delay in bars (0=same bar, 1=next bar open)
@@ -79,6 +93,29 @@ enum Commands {
         /// Bypass all costs for debugging (NOT for production).
         #[arg(long)]
         bypass_costs: bool,
+    },
+
+    /// List available strategy templates (TPM catalog)
+    Strategies {
+        /// Filter by family slug (e.g., swing, pair, momentum)
+        #[arg(long)]
+        family: Option<String>,
+
+        /// Filter by timeframe (intraday, swing, position, long_term)
+        #[arg(long)]
+        timeframe: Option<String>,
+
+        /// Filter by risk profile (conservative, moderate, aggressive)
+        #[arg(long)]
+        risk: Option<String>,
+
+        /// Show only enabled strategies
+        #[arg(long)]
+        enabled_only: bool,
+
+        /// Output format: table, json, csv
+        #[arg(short, long, default_value = "table")]
+        format: String,
     },
 
     /// Check experiment status
@@ -356,6 +393,9 @@ fn main() -> Result<()> {
             dry_run,
             ultra,
             top_k,
+            strategy,
+            catalog,
+            family,
             execution_delay,
             slippage_bps,
             fee_tier,
@@ -363,6 +403,17 @@ fn main() -> Result<()> {
             min_stress_pass,
             bypass_costs,
         } => {
+            // Log strategy selection if provided
+            if let Some(ref s) = strategy {
+                tracing::info!("Strategy template: {}", s);
+            }
+            if let Some(ref c) = catalog {
+                tracing::info!("Strategy catalog: {}", c);
+            }
+            if let Some(ref f) = family {
+                tracing::info!("Strategy family: {}", f);
+            }
+            
             let exec_overrides = ExecutionOverrides {
                 delay_bars: execution_delay,
                 slippage_bps,
@@ -380,6 +431,54 @@ fn main() -> Result<()> {
                 top_k,
                 exec_overrides,
             )
+        }
+
+        Commands::Strategies {
+            family,
+            timeframe,
+            risk,
+            enabled_only,
+            format,
+        } => {
+            // For now, print a placeholder message
+            // TODO: Integrate with database to fetch actual strategy templates
+            println!("Strategy Catalog (TPM)");
+            println!("======================");
+            println!("");
+            if let Some(ref f) = family {
+                println!("Filter: family={}", f);
+            }
+            if let Some(ref t) = timeframe {
+                println!("Filter: timeframe={}", t);
+            }
+            if let Some(ref r) = risk {
+                println!("Filter: risk_profile={}", r);
+            }
+            if enabled_only {
+                println!("Filter: enabled_only=true");
+            }
+            println!("Format: {}", format);
+            println!("");
+            println!("Available strategy families:");
+            println!("  - intraday     (22 strategies)");
+            println!("  - swing        (12 strategies)");
+            println!("  - position     (6 strategies)");
+            println!("  - pair         (12 strategies)");
+            println!("  - portfolio    (14 strategies)");
+            println!("  - momentum     (8 strategies)");
+            println!("  - mean_reversion (8 strategies)");
+            println!("  - breakout     (6 strategies)");
+            println!("  - sector_rotation (4 strategies)");
+            println!("  - factor       (8 strategies)");
+            println!("  - seasonal     (4 strategies)");
+            println!("  - volatility   (4 strategies)");
+            println!("  - event_driven (4 strategies)");
+            println!("  - buy_hold     (4 strategies)");
+            println!("");
+            println!("Total: 116 strategy templates");
+            println!("");
+            println!("Use --family <name> to filter by family");
+            Ok(())
         }
 
         Commands::Status { experiment_id } => commands::status::execute(&experiment_id),

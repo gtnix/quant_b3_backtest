@@ -17,6 +17,7 @@ use backtester_intelligence::monitoring::{
 };
 use backtester_intelligence::filters::Market;
 use combiner_runner::{CliExecutor, ValidationCache};
+use backtester_strategy::universe::{UniverseLoader, UniverseValidator, load_universe_restrictions};
 
 /// Compression pipeline for OBFS writes (lazily initialized).
 static OBFS_PIPELINE: std::sync::OnceLock<obfs::CompressionPipeline> = std::sync::OnceLock::new();
@@ -432,6 +433,82 @@ async fn execute_single_run(
 
     // Set execution config
     evo_config.stress_testing_enabled = config.budget.stress_enabled;
+
+    // === PARAMETER UNIVERSE SYSTEM ===
+    // Apply universe restrictions if configured (optional, backward compatible)
+    if let Some(ref universe) = config.universe {
+        // Load universe configs from standard paths
+        let mut loader = UniverseLoader::new("configs/");
+        if let Err(e) = loader.load_all() {
+            info!("Universe configs not fully loaded (using defaults): {}", e);
+        }
+
+        // Load restrictions from risk profile if available
+        let restrictions = if let Some(ref profile_name) = config.risk_profile.name {
+            let profile_path = format!("configs/risk_profiles/{}.toml", profile_name);
+            if std::path::Path::new(&profile_path).exists() {
+                match std::fs::read_to_string(&profile_path) {
+                    Ok(content) => load_universe_restrictions(&content).ok().flatten(),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Validate universe configuration
+        let validator = UniverseValidator::new(&loader);
+        
+        // Build universe config from campaign ref
+        let universe_config = backtester_strategy::universe::UniverseConfig {
+            robustness_profile: universe.robustness_profile.clone()
+                .or_else(|| config.risk_profile.name.clone())
+                .unwrap_or_else(|| "moderado".to_string()),
+            training_strategy: universe.training_strategy.clone(),
+            training_tech: universe.training_tech.clone(),
+            training_model: match &universe.training_model {
+                super::config::TrainingModelRef::Single(s) => 
+                    backtester_strategy::universe::TrainingModel::Single(s.clone()),
+                super::config::TrainingModelRef::Multiple(v) => 
+                    backtester_strategy::universe::TrainingModel::Multiple(v.clone()),
+            },
+            overrides: universe.overrides.as_ref().map(|o| {
+                backtester_strategy::universe::UniverseOverrides {
+                    max_parameters: o.max_parameters,
+                    allowed_indicators: o.allowed_indicators.clone(),
+                    max_data_window_years: o.max_data_window_years,
+                }
+            }),
+        };
+
+        // Validate compatibility between axes
+        if let Err(e) = validator.validate(&universe_config, restrictions.as_ref()) {
+            return Err(anyhow::anyhow!(
+                "Universe validation failed: {}. Check compatibility between robustness profile, \
+                training strategy, training tech, and training model.", e
+            ));
+        }
+
+        // Apply effective limits (most restrictive wins)
+        let limits = validator.get_effective_limits(&universe_config, restrictions.as_ref());
+        
+        // Constrain evolution config to universe limits
+        if limits.population_size > 0 {
+            evo_config.population_size = evo_config.population_size.min(limits.population_size);
+        }
+        if limits.max_generations > 0 {
+            evo_config.max_generations = evo_config.max_generations.min(limits.max_generations);
+        }
+
+        info!(
+            "Universe restrictions applied: pop={}, gen={}, families={:?}",
+            evo_config.population_size,
+            evo_config.max_generations,
+            universe_config.training_model.families()
+        );
+    }
 
     // Create output directory
     let output_dir = format!("output/scg/{}", run_id);

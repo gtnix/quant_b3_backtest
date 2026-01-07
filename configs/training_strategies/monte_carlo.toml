@@ -1,0 +1,41 @@
+# =============================================================================
+# Training Strategy: Monte Carlo Stress Testing
+# =============================================================================
+# Rigorous stress testing with permutation analysis.
+# For production-ready strategies requiring maximum confidence.
+# =============================================================================
+
+[strategy]
+id = "monte_carlo"
+name = "Monte Carlo Stress Testing"
+description = "Extensive permutation testing and stress scenarios for production validation"
+
+[validation]
+method = "monte_carlo"
+wfa_enabled = true
+wfa_num_folds = 10
+wfa_is_ratio = 0.55
+wfa_purge_days = 7
+train_test_split = 0.60
+pbo_enabled = true
+pbo_num_permutations = 2000
+pbo_significance_level = 0.01
+
+[stress_testing]
+enabled = true
+scenarios = ["vol_spike", "drawdown", "liquidity_crisis", "correlation_break", "regime_shift"]
+min_scenarios_passed = 4
+monte_carlo_runs = 1000
+
+[requirements]
+min_data_years = 5
+min_trades_is = 60
+min_trades_oos = 30
+max_pbo = 0.15
+max_degradation_is_to_oos = 0.30
+
+[complexity]
+tier = "tier3_slow"
+estimated_runtime_multiplier = 3.0
+
+

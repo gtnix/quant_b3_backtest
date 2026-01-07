@@ -1,0 +1,182 @@
+# =============================================================================
+# Parameter Bounds - Event-Driven Family
+# =============================================================================
+
+[metadata]
+family = "event_driven"
+version = "1.0.0"
+description = "Parameter bounds for event-driven trading strategies"
+
+# Earnings Announcement - Pre
+[parameters.earnings_pre_days_before]
+type = "integer"
+min = 3
+max = 15
+step = 2
+default = 5
+description = "Days before earnings to enter"
+
+[parameters.earnings_pre_exit_before]
+type = "integer"
+min = 0
+max = 2
+step = 1
+default = 1
+description = "Days before announcement to exit"
+
+[parameters.earnings_pre_iv_filter]
+type = "boolean"
+default = true
+description = "Filter by implied volatility"
+
+[parameters.earnings_pre_iv_percentile]
+type = "integer"
+min = 50
+max = 90
+step = 10
+default = 70
+description = "IV percentile for entry"
+
+[parameters.earnings_pre_momentum_filter]
+type = "boolean"
+default = true
+description = "Require positive pre-earnings momentum"
+
+# Earnings Announcement - Post
+[parameters.earnings_post_entry_delay]
+type = "integer"
+min = 0
+max = 3
+step = 1
+default = 0
+description = "Days after announcement to enter"
+
+[parameters.earnings_post_holding_days]
+type = "integer"
+min = 1
+max = 10
+step = 1
+default = 3
+description = "Days to hold post-earnings"
+
+[parameters.earnings_surprise_threshold]
+type = "float"
+min = 0.01
+max = 0.2
+step = 0.01
+default = 0.05
+description = "Minimum earnings surprise for entry"
+
+[parameters.earnings_direction]
+type = "enum"
+values = ["positive", "negative", "both"]
+default = "positive"
+description = "Earnings surprise direction to trade"
+
+[parameters.gap_filter]
+type = "boolean"
+default = true
+description = "Filter by post-earnings gap"
+
+[parameters.gap_threshold]
+type = "float"
+min = 0.02
+max = 0.1
+step = 0.01
+default = 0.03
+description = "Minimum gap for entry"
+
+# M&A Arbitrage
+[parameters.ma_min_spread]
+type = "float"
+min = 0.02
+max = 0.15
+step = 0.01
+default = 0.05
+description = "Minimum deal spread for entry"
+
+[parameters.ma_max_spread]
+type = "float"
+min = 0.15
+max = 0.5
+step = 0.05
+default = 0.25
+description = "Maximum deal spread (risk filter)"
+
+[parameters.ma_deal_type]
+type = "enum"
+values = ["cash", "stock", "mixed", "all"]
+default = "all"
+description = "Types of deals to consider"
+
+[parameters.ma_completion_prob_min]
+type = "float"
+min = 0.5
+max = 0.9
+step = 0.1
+default = 0.7
+description = "Minimum estimated completion probability"
+
+[parameters.ma_days_to_close_max]
+type = "integer"
+min = 30
+max = 365
+step = 30
+default = 180
+description = "Maximum days to deal close"
+
+[parameters.ma_regulatory_filter]
+type = "boolean"
+default = true
+description = "Filter out regulatory risk deals"
+
+# General Event Parameters
+[parameters.event_calendar_source]
+type = "enum"
+values = ["internal", "refinitiv", "bloomberg"]
+default = "internal"
+description = "Source for event calendar"
+
+[parameters.min_market_cap]
+type = "float"
+min = 100000000
+max = 5000000000
+step = 100000000
+default = 500000000
+description = "Minimum market cap for events"
+
+# Position Sizing
+[parameters.position_size_pct]
+type = "float"
+min = 0.02
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Position size as portfolio percentage"
+
+[parameters.max_concurrent_events]
+type = "integer"
+min = 3
+max = 20
+step = 1
+default = 10
+description = "Maximum concurrent event positions"
+
+# Risk Management
+[parameters.stop_loss_pct]
+type = "float"
+min = 0.03
+max = 0.15
+step = 0.01
+default = 0.08
+description = "Stop loss as percentage"
+
+[parameters.time_stop_days]
+type = "integer"
+min = 5
+max = 30
+step = 5
+default = 10
+description = "Time-based stop in days"
+
+

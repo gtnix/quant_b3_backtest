@@ -1,0 +1,203 @@
+# =============================================================================
+# Parameter Bounds - Intraday Family
+# =============================================================================
+
+[metadata]
+family = "intraday"
+version = "1.0.0"
+description = "Parameter bounds for intraday trading strategies (1h bars)"
+
+# ORB Breakout Parameters
+[parameters.orb_range_minutes]
+type = "integer"
+min = 30
+max = 90
+step = 15
+default = 60
+description = "Opening range period in minutes"
+
+[parameters.orb_breakout_threshold]
+type = "float"
+min = 0.005
+max = 0.03
+step = 0.005
+default = 0.01
+description = "Breakout threshold as percentage"
+
+[parameters.orb_volume_multiplier]
+type = "float"
+min = 1.0
+max = 3.0
+step = 0.25
+default = 1.5
+description = "Volume confirmation multiplier"
+
+# VWAP Parameters
+[parameters.vwap_deviation_bands]
+type = "float"
+min = 1.0
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Standard deviation bands around VWAP"
+
+[parameters.vwap_entry_threshold]
+type = "float"
+min = 0.005
+max = 0.02
+step = 0.005
+default = 0.01
+description = "Entry threshold from VWAP"
+
+# RSI Intraday
+[parameters.rsi_period]
+type = "integer"
+min = 7
+max = 21
+step = 2
+default = 14
+description = "RSI calculation period"
+
+[parameters.rsi_oversold]
+type = "integer"
+min = 20
+max = 35
+step = 5
+default = 30
+description = "RSI oversold threshold"
+
+[parameters.rsi_overbought]
+type = "integer"
+min = 65
+max = 80
+step = 5
+default = 70
+description = "RSI overbought threshold"
+
+# Bollinger Bands Intraday
+[parameters.bb_period]
+type = "integer"
+min = 10
+max = 30
+step = 5
+default = 20
+description = "Bollinger Bands period"
+
+[parameters.bb_std_dev]
+type = "float"
+min = 1.5
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Bollinger Bands standard deviation"
+
+# MACD Intraday
+[parameters.macd_fast]
+type = "integer"
+min = 8
+max = 16
+step = 2
+default = 12
+description = "MACD fast period"
+
+[parameters.macd_slow]
+type = "integer"
+min = 20
+max = 30
+step = 2
+default = 26
+description = "MACD slow period"
+
+[parameters.macd_signal]
+type = "integer"
+min = 7
+max = 12
+step = 1
+default = 9
+description = "MACD signal period"
+
+# ADX Intraday
+[parameters.adx_period]
+type = "integer"
+min = 10
+max = 20
+step = 2
+default = 14
+description = "ADX period"
+
+[parameters.adx_threshold]
+type = "integer"
+min = 20
+max = 35
+step = 5
+default = 25
+description = "ADX trend strength threshold"
+
+# Gap Trading
+[parameters.gap_size_threshold]
+type = "float"
+min = 0.01
+max = 0.05
+step = 0.005
+default = 0.02
+description = "Minimum gap size as percentage"
+
+[parameters.gap_fill_target]
+type = "float"
+min = 0.3
+max = 0.8
+step = 0.1
+default = 0.5
+description = "Gap fill target as fraction"
+
+# Volume Profile
+[parameters.volume_profile_lookback]
+type = "integer"
+min = 10
+max = 50
+step = 5
+default = 20
+description = "Volume profile lookback bars"
+
+[parameters.poc_threshold]
+type = "float"
+min = 0.005
+max = 0.02
+step = 0.005
+default = 0.01
+description = "Point of Control entry threshold"
+
+# Risk Management Intraday
+[parameters.stop_loss_atr_mult]
+type = "float"
+min = 1.0
+max = 3.0
+step = 0.25
+default = 1.5
+description = "Stop loss as ATR multiplier"
+
+[parameters.take_profit_atr_mult]
+type = "float"
+min = 1.5
+max = 4.0
+step = 0.5
+default = 2.5
+description = "Take profit as ATR multiplier"
+
+[parameters.max_holding_hours]
+type = "integer"
+min = 2
+max = 8
+step = 1
+default = 6
+description = "Maximum holding period in hours"
+
+[parameters.position_size_pct]
+type = "float"
+min = 0.01
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Position size as portfolio percentage"
+
+

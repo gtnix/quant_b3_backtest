@@ -131,6 +131,7 @@ impl ExperimentPersistence {
             enable_blake3: true,
             enable_xxh3: true,
             max_file_size: 1024 * 1024 * 1024, // 1 GB
+            lmdb_map_size: 10 * 1024 * 1024 * 1024, // 10 GB
         };
         let obfs_instance = obfs::Obfs::with_config(config);
         if let Err(e) = obfs_instance.initialize() {

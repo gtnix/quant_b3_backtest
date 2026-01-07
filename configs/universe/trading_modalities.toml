@@ -1,0 +1,486 @@
+# =============================================================================
+# Trading Modalities - Universe-Only System
+# =============================================================================
+# Maps the 15 strategy families to trading modalities, hypotheses, and 
+# business characteristics.
+# =============================================================================
+
+[metadata]
+version = "1.0.0"
+last_updated = "2026-01-06"
+total_families = 15
+description = "Trading modality definitions for all strategy families"
+
+# =============================================================================
+# FAMILY DEFINITIONS
+# =============================================================================
+
+[families.intraday]
+id = "intraday"
+label = "Intraday Trading"
+description = "Estratégias executadas dentro de um único dia usando barras de 1 hora"
+icon = "⚡"
+color = "#FF6B6B"
+
+# Trading characteristics
+timeframe = "1h"
+holding_period = { min_hours = 1, max_hours = 8 }
+data_frequency = "hourly"
+data_window_months = 6
+
+# Market hypothesis
+hypotheses = ["breakout", "momentum", "mean_reversion"]
+position_type = "directional"
+
+# Complexity and resources
+complexity_tier = "tier1_fast"
+typical_trades_per_year = 200
+
+# Risk profile compatibility
+compatible_risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+
+# Sub-strategies
+variants = [
+    "orb_breakout",
+    "vwap_trading",
+    "mean_reversion_rsi",
+    "mean_reversion_bb",
+    "momentum_macd",
+    "momentum_adx",
+    "gap_trading",
+    "volume_profile",
+    "news_based"
+]
+
+[families.swing]
+id = "swing"
+label = "Swing Trading"
+description = "Captura movimentos de preço de curto a médio prazo, durando de 2 a 10 dias"
+icon = "📈"
+color = "#4ECDC4"
+
+timeframe = "daily"
+holding_period = { min_days = 2, max_days = 10 }
+data_frequency = "daily"
+data_window_years = 2
+
+hypotheses = ["momentum", "mean_reversion", "breakout"]
+position_type = "directional"
+
+complexity_tier = "tier1_fast"
+typical_trades_per_year = 50
+
+compatible_risk_profiles = ["conservador", "moderado", "arrojado", "muito_arrojado"]
+
+variants = [
+    "momentum_ma_crossover",
+    "momentum_macd",
+    "mean_reversion_bb",
+    "mean_reversion_rsi",
+    "breakout_channel",
+    "breakout_volume"
+]
+
+[families.position]
+id = "position"
+label = "Position Trading"
+description = "Mantém posições por semanas ou meses baseando-se em tendências de longo prazo"
+icon = "🎯"
+color = "#45B7D1"
+
+timeframe = "daily"
+holding_period = { min_weeks = 2, max_weeks = 12 }
+data_frequency = "daily"
+data_window_years = 5
+
+hypotheses = ["momentum", "value", "quality"]
+position_type = "directional"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 12
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado", "arrojado"]
+
+variants = [
+    "trend_following_ma",
+    "trend_following_adx",
+    "fundamental_value",
+    "fundamental_quality"
+]
+
+[families.pair]
+id = "pair"
+label = "Pair Trading"
+description = "Explora a diferença de preço entre dois ativos correlacionados"
+icon = "🔗"
+color = "#96CEB4"
+
+timeframe = "daily"
+holding_period = { min_days = 5, max_days = 30 }
+data_frequency = "daily"
+data_window_years = 3
+
+hypotheses = ["stat_arb"]
+position_type = "market_neutral"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 40
+
+compatible_risk_profiles = ["conservador", "moderado", "arrojado"]
+
+variants = [
+    "cointegration",
+    "cointegration_short",
+    "distance",
+    "distance_short",
+    "stat_arb_multi",
+    "stat_arb_diversified"
+]
+
+[families.portfolio]
+id = "portfolio"
+label = "Portfolio Trading"
+description = "Gerencia um portfólio de múltiplos ativos com base em regras de alocação"
+icon = "📊"
+color = "#DDA0DD"
+
+timeframe = "daily"
+holding_period = { min_weeks = 1, max_months = 12 }
+data_frequency = "daily"
+data_window_years = 5
+
+hypotheses = ["diversification", "risk_management", "optimization"]
+position_type = "portfolio"
+
+complexity_tier = "tier3_slow"
+typical_trades_per_year = 24
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado", "arrojado"]
+
+variants = [
+    "equal_weight",
+    "risk_parity",
+    "risk_parity_leveraged",
+    "min_variance",
+    "min_variance_long_short",
+    "max_sharpe"
+]
+
+[families.momentum]
+id = "momentum"
+label = "Momentum Strategies"
+description = "Segue a tendência, comprando ativos que estão subindo"
+icon = "🚀"
+color = "#FF9F43"
+
+timeframe = "daily"
+holding_period = { min_months = 1, max_months = 6 }
+data_frequency = "daily"
+data_window_years = 3
+
+hypotheses = ["momentum"]
+position_type = "directional"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 24
+
+compatible_risk_profiles = ["conservador", "moderado", "arrojado", "muito_arrojado"]
+
+variants = [
+    "cross_sectional",
+    "cross_sectional_multi",
+    "time_series",
+    "time_series_dual_ma",
+    "time_series_adaptive"
+]
+
+[families.mean_reversion]
+id = "mean_reversion"
+label = "Mean Reversion"
+description = "Aposta que os preços retornarão à sua média histórica"
+icon = "↩️"
+color = "#54A0FF"
+
+timeframe = "daily"
+holding_period = { min_days = 2, max_days = 10 }
+data_frequency = "daily"
+data_window_years = 2
+
+hypotheses = ["mean_reversion"]
+position_type = "directional"
+
+complexity_tier = "tier1_fast"
+typical_trades_per_year = 60
+
+compatible_risk_profiles = ["conservador", "moderado", "arrojado"]
+
+variants = [
+    "bollinger_bands",
+    "bollinger_bands_filtered",
+    "rsi",
+    "rsi_filtered"
+]
+
+[families.breakout]
+id = "breakout"
+label = "Breakout Strategies"
+description = "Entra no mercado após o rompimento de níveis de suporte ou resistência"
+icon = "💥"
+color = "#5F27CD"
+
+timeframe = "daily"
+holding_period = { min_days = 5, max_days = 30 }
+data_frequency = "daily"
+data_window_years = 3
+
+hypotheses = ["breakout"]
+position_type = "directional"
+
+complexity_tier = "tier1_fast"
+typical_trades_per_year = 30
+
+compatible_risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+
+variants = [
+    "donchian",
+    "donchian_dual",
+    "volatility_expansion"
+]
+
+[families.sector_rotation]
+id = "sector_rotation"
+label = "Sector Rotation"
+description = "Rotaciona o capital entre diferentes setores da economia"
+icon = "🔄"
+color = "#00D2D3"
+
+timeframe = "daily"
+holding_period = { min_weeks = 4, max_months = 6 }
+data_frequency = "daily"
+data_window_years = 10
+
+hypotheses = ["macro", "momentum"]
+position_type = "portfolio"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 12
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado"]
+
+variants = [
+    "business_cycle",
+    "business_cycle_defensive",
+    "relative_strength"
+]
+
+[families.factor]
+id = "factor"
+label = "Factor Investing"
+description = "Investe em ativos com base em fatores quantificáveis"
+icon = "🧮"
+color = "#EE5A24"
+
+timeframe = "daily"
+holding_period = { min_months = 3, max_months = 12 }
+data_frequency = "daily"
+data_window_years = 10
+
+hypotheses = ["value", "quality", "low_vol", "multi_factor"]
+position_type = "portfolio"
+
+complexity_tier = "tier3_slow"
+typical_trades_per_year = 4
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado"]
+
+variants = [
+    "value_pe",
+    "value_pb",
+    "quality_roe",
+    "quality_multi",
+    "low_volatility",
+    "multi_factor"
+]
+
+[families.seasonal]
+id = "seasonal"
+label = "Seasonal Trading"
+description = "Explora padrões de mercado que se repetem em certas épocas do ano"
+icon = "📅"
+color = "#A3CB38"
+
+timeframe = "daily"
+holding_period = { min_weeks = 2, max_months = 6 }
+data_frequency = "daily"
+data_window_years = 15
+
+hypotheses = ["seasonal"]
+position_type = "directional"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 4
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado"]
+
+variants = [
+    "january_effect",
+    "sell_in_may",
+    "commodity_ng",
+    "commodity_grains"
+]
+
+[families.volatility]
+id = "volatility"
+label = "Volatility Trading"
+description = "Opera com base nas mudanças da volatilidade do mercado"
+icon = "🌊"
+color = "#6C5CE7"
+
+timeframe = "daily"
+holding_period = { min_days = 3, max_days = 20 }
+data_frequency = "daily"
+data_window_years = 5
+
+hypotheses = ["mean_reversion", "breakout"]
+position_type = "directional"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 30
+
+compatible_risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+
+variants = [
+    "vix_mean_reversion",
+    "atr_breakout",
+    "bb_width_breakout"
+]
+
+[families.event_driven]
+id = "event_driven"
+label = "Event-Driven"
+description = "Reage a eventos corporativos específicos como earnings e M&A"
+icon = "📢"
+color = "#FD79A8"
+
+timeframe = "daily"
+holding_period = { min_days = 1, max_days = 30 }
+data_frequency = "daily"
+data_window_years = 5
+
+hypotheses = ["event"]
+position_type = "directional"
+
+complexity_tier = "tier2_medium"
+typical_trades_per_year = 20
+
+compatible_risk_profiles = ["moderado", "arrojado"]
+
+variants = [
+    "earnings_pre",
+    "earnings_post",
+    "ma_arbitrage"
+]
+
+[families.buy_hold]
+id = "buy_hold"
+label = "Buy and Hold"
+description = "Estratégia passiva de investimento de longo prazo"
+icon = "🏦"
+color = "#00CEC9"
+
+timeframe = "daily"
+holding_period = { min_years = 1, max_years = 30 }
+data_frequency = "daily"
+data_window_years = 20
+
+hypotheses = ["passive", "income"]
+position_type = "portfolio"
+
+complexity_tier = "tier1_fast"
+typical_trades_per_year = 4
+
+compatible_risk_profiles = ["muito_conservador", "conservador", "moderado"]
+
+variants = [
+    "index",
+    "dividend_growth"
+]
+
+[families.multi_strategy]
+id = "multi_strategy"
+label = "Multi-Strategy"
+description = "Combina dinamicamente múltiplas estratégias com base no regime de mercado"
+icon = "🎭"
+color = "#636E72"
+
+timeframe = "daily"
+holding_period = { min_days = 5, max_months = 6 }
+data_frequency = "daily"
+data_window_years = 5
+
+hypotheses = ["adaptive"]
+position_type = "portfolio"
+
+complexity_tier = "tier3_slow"
+typical_trades_per_year = 40
+
+compatible_risk_profiles = ["conservador", "moderado", "arrojado"]
+
+variants = [
+    "momentum_mean_reversion"
+]
+
+# =============================================================================
+# MODALITY GROUPINGS
+# =============================================================================
+
+[modalities.by_position_type]
+directional = ["intraday", "swing", "position", "momentum", "mean_reversion", "breakout", "seasonal", "volatility", "event_driven"]
+market_neutral = ["pair"]
+portfolio = ["portfolio", "sector_rotation", "factor", "buy_hold", "multi_strategy"]
+
+[modalities.by_holding_horizon]
+ultra_short = ["intraday"]  # Hours
+short = ["swing", "mean_reversion"]  # Days
+medium = ["position", "pair", "momentum", "breakout", "volatility", "event_driven"]  # Weeks
+long = ["portfolio", "sector_rotation", "factor", "seasonal", "buy_hold", "multi_strategy"]  # Months+
+
+[modalities.by_hypothesis]
+trend_following = ["swing", "position", "momentum", "breakout"]
+contrarian = ["mean_reversion", "volatility"]
+statistical = ["pair"]
+fundamental = ["factor", "buy_hold"]
+tactical = ["sector_rotation", "seasonal", "event_driven"]
+hybrid = ["multi_strategy", "portfolio"]
+opportunistic = ["intraday"]
+
+[modalities.by_complexity]
+simple = ["intraday", "swing", "mean_reversion", "breakout", "buy_hold"]
+moderate = ["position", "pair", "momentum", "sector_rotation", "seasonal", "volatility", "event_driven"]
+complex = ["portfolio", "factor", "multi_strategy"]
+
+[modalities.by_data_requirement]
+price_only = ["intraday", "swing", "mean_reversion", "breakout", "momentum"]
+price_volume = ["intraday", "pair", "volatility"]
+fundamental = ["position", "factor", "buy_hold"]
+economic = ["sector_rotation", "seasonal"]
+all_data = ["portfolio", "multi_strategy", "event_driven"]
+
+# =============================================================================
+# FAMILY COMPATIBILITY MATRIX
+# =============================================================================
+# Which families can be combined in multi-strategy approaches
+
+[compatibility.combinable]
+# Families that work well together
+momentum_mean_reversion = ["momentum", "mean_reversion"]
+trend_range = ["swing", "breakout", "mean_reversion"]
+factor_portfolio = ["factor", "portfolio"]
+tactical_core = ["buy_hold", "sector_rotation"]
+
+[compatibility.exclusive]
+# Families that should NOT be combined
+intraday = ["position", "factor", "buy_hold", "seasonal"]  # Timeframe conflict
+buy_hold = ["intraday", "swing"]  # Philosophy conflict
+
+

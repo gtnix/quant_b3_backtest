@@ -1,0 +1,32 @@
+# =============================================================================
+# Training Tech: CPU Fast
+# =============================================================================
+# Quick exploration for development and testing.
+# Low resource usage, suitable for laptops.
+# =============================================================================
+
+[tech]
+id = "cpu_fast"
+name = "CPU Fast"
+description = "Quick evaluation for development and prototyping"
+
+[resources]
+workers = 4
+max_memory_gb = 4
+timeout_minutes = 30
+
+[evolution]
+population_size = 100
+max_generations = 50
+convergence_generations = 10
+
+[allowed_complexity]
+tiers = ["tier1_fast"]
+max_parameters_to_optimize = 6
+max_universe_size = 50
+
+[scheduling]
+priority = "low"
+preemptible = true
+
+

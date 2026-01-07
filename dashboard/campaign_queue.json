@@ -1,28 +1,28 @@
 {
   "version": "1.0",
-  "updated_at": "2026-01-04T20:35:00.000Z",
+  "updated_at": "2026-01-06T19:00:00.000Z",
   "campaigns": [
     {
-      "id": "camp_5min_br_001",
-      "name": "SCG 5min BR MaxPower",
-      "config_path": "configs/campaigns/scg_5min_maxpower.toml",
+      "id": "camp_maxpower",
+      "name": "SCG MaxPower - All CPUs",
+      "config_path": "configs/scg_maxpower.toml",
       "market": "br",
       "priority": 1,
       "enabled": true,
-      "repeat": false,
-      "tags": ["ibov", "arrojado", "5min"],
-      "created_at": "2026-01-04T20:35:00.000Z"
+      "repeat": true,
+      "tags": ["ibov", "maxpower", "all-cpu"],
+      "created_at": "2026-01-06T19:00:00.000Z"
     },
     {
-      "id": "camp_5min_us_001",
-      "name": "SCG 5min US S&P500",
-      "config_path": "configs/campaigns/scg_5min_us.toml",
-      "market": "us",
+      "id": "camp_1h_moderado",
+      "name": "SCG 1h Moderado",
+      "config_path": "configs/scg_1h_moderado.toml",
+      "market": "br",
       "priority": 2,
-      "enabled": true,
+      "enabled": false,
       "repeat": false,
-      "tags": ["sp500", "arrojado", "5min"],
-      "created_at": "2026-01-04T20:35:00.000Z"
+      "tags": ["ibov", "moderado", "1h"],
+      "created_at": "2026-01-06T18:30:00.000Z"
     }
   ]
 }

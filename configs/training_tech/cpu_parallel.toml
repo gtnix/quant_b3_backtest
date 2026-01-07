@@ -1,0 +1,32 @@
+# =============================================================================
+# Training Tech: CPU Parallel
+# =============================================================================
+# Standard production configuration.
+# Balanced between speed and thoroughness.
+# =============================================================================
+
+[tech]
+id = "cpu_parallel"
+name = "CPU Parallel"
+description = "Standard parallel processing for production use"
+
+[resources]
+workers = 8
+max_memory_gb = 8
+timeout_minutes = 120
+
+[evolution]
+population_size = 150
+max_generations = 100
+convergence_generations = 15
+
+[allowed_complexity]
+tiers = ["tier1_fast", "tier2_medium"]
+max_parameters_to_optimize = 10
+max_universe_size = 100
+
+[scheduling]
+priority = "normal"
+preemptible = false
+
+

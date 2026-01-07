@@ -1,0 +1,1564 @@
+# =============================================================================
+# Strategy Registry - Universe-Only System
+# =============================================================================
+# Complete catalog of all 116 valid strategies in the universe.
+# GA can ONLY generate strategies that exist in this registry.
+# =============================================================================
+
+[metadata]
+version = "1.0.0"
+total_strategies = 116
+last_updated = "2026-01-06"
+description = "Complete registry of all valid trading strategies in the universe"
+
+# =============================================================================
+# INTRADAY STRATEGIES (7 base strategies, 22 variations)
+# =============================================================================
+
+[strategies.orb_breakout_conservative]
+family = "intraday"
+variant = "orb_breakout"
+timeframe = "1h"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.orb_breakout_moderate]
+family = "intraday"
+variant = "orb_breakout"
+timeframe = "1h"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.orb_breakout_aggressive]
+family = "intraday"
+variant = "orb_breakout"
+timeframe = "1h"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.vwap_mean_reversion_conservative]
+family = "intraday"
+variant = "vwap"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_hours = 1, max_hours = 4 }
+min_trades_required = 50
+
+[strategies.vwap_mean_reversion_moderate]
+family = "intraday"
+variant = "vwap"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 1, max_hours = 4 }
+min_trades_required = 50
+
+[strategies.vwap_trend_following_moderate]
+family = "intraday"
+variant = "vwap"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.vwap_trend_following_aggressive]
+family = "intraday"
+variant = "vwap"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.intraday_mean_reversion_rsi_conservative]
+family = "intraday"
+variant = "mean_reversion_rsi"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.intraday_mean_reversion_rsi_moderate]
+family = "intraday"
+variant = "mean_reversion_rsi"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.intraday_mean_reversion_bb_conservative]
+family = "intraday"
+variant = "mean_reversion_bb"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.intraday_mean_reversion_bb_moderate]
+family = "intraday"
+variant = "mean_reversion_bb"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 50
+
+[strategies.intraday_momentum_macd_moderate]
+family = "intraday"
+variant = "momentum_macd"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.intraday_momentum_macd_aggressive]
+family = "intraday"
+variant = "momentum_macd"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.intraday_momentum_adx_moderate]
+family = "intraday"
+variant = "momentum_adx"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.intraday_momentum_adx_aggressive]
+family = "intraday"
+variant = "momentum_adx"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_hours = 2, max_hours = 8 }
+min_trades_required = 50
+
+[strategies.gap_fill_conservative]
+family = "intraday"
+variant = "gap_fill"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_hours = 1, max_hours = 4 }
+min_trades_required = 30
+
+[strategies.gap_fill_moderate]
+family = "intraday"
+variant = "gap_fill"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 1, max_hours = 4 }
+min_trades_required = 30
+
+[strategies.gap_continuation_moderate]
+family = "intraday"
+variant = "gap_continuation"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 30
+
+[strategies.gap_continuation_aggressive]
+family = "intraday"
+variant = "gap_continuation"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 30
+
+[strategies.volume_profile_poc_moderate]
+family = "intraday"
+variant = "volume_profile_poc"
+timeframe = "1h"
+hypothesis = "mean_reversion"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 40
+
+[strategies.volume_profile_vah_val_moderate]
+family = "intraday"
+variant = "volume_profile_vah_val"
+timeframe = "1h"
+hypothesis = "breakout"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 2, max_hours = 6 }
+min_trades_required = 40
+
+[strategies.news_based_volatility_moderate]
+family = "intraday"
+variant = "news_based"
+timeframe = "1h"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_hours = 1, max_hours = 6 }
+min_trades_required = 30
+
+# =============================================================================
+# SWING STRATEGIES (3 base x 4 variants = 12 strategies)
+# =============================================================================
+
+[strategies.swing_momentum_ma_crossover_conservative]
+family = "swing"
+variant = "momentum_ma_crossover"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.swing_momentum_ma_crossover_moderate]
+family = "swing"
+variant = "momentum_ma_crossover"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.swing_momentum_macd_moderate]
+family = "swing"
+variant = "momentum_macd"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.swing_momentum_macd_aggressive]
+family = "swing"
+variant = "momentum_macd"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.swing_mean_reversion_bb_conservative]
+family = "swing"
+variant = "mean_reversion_bb"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 3, max_days = 7 }
+min_trades_required = 60
+
+[strategies.swing_mean_reversion_bb_moderate]
+family = "swing"
+variant = "mean_reversion_bb"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 3, max_days = 7 }
+min_trades_required = 60
+
+[strategies.swing_mean_reversion_rsi_conservative]
+family = "swing"
+variant = "mean_reversion_rsi"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 2, max_days = 7 }
+min_trades_required = 60
+
+[strategies.swing_mean_reversion_rsi_moderate]
+family = "swing"
+variant = "mean_reversion_rsi"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 2, max_days = 7 }
+min_trades_required = 60
+
+[strategies.swing_breakout_channel_moderate]
+family = "swing"
+variant = "breakout_channel"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.swing_breakout_channel_aggressive]
+family = "swing"
+variant = "breakout_channel"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.swing_breakout_volume_moderate]
+family = "swing"
+variant = "breakout_volume"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.swing_breakout_volume_aggressive]
+family = "swing"
+variant = "breakout_volume"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+# =============================================================================
+# POSITION STRATEGIES (6 strategies)
+# =============================================================================
+
+[strategies.position_trend_following_ma_conservative]
+family = "position"
+variant = "trend_following_ma"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+holding_period = { min_weeks = 2, max_weeks = 12 }
+min_trades_required = 30
+
+[strategies.position_trend_following_ma_moderate]
+family = "position"
+variant = "trend_following_ma"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+holding_period = { min_weeks = 2, max_weeks = 12 }
+min_trades_required = 30
+
+[strategies.position_trend_following_adx_moderate]
+family = "position"
+variant = "trend_following_adx"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+holding_period = { min_weeks = 2, max_weeks = 12 }
+min_trades_required = 30
+
+[strategies.position_fundamental_value_conservative]
+family = "position"
+variant = "fundamental_value"
+timeframe = "daily"
+hypothesis = "value"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+holding_period = { min_months = 1, max_months = 12 }
+min_trades_required = 20
+
+[strategies.position_fundamental_value_moderate]
+family = "position"
+variant = "fundamental_value"
+timeframe = "daily"
+hypothesis = "value"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+holding_period = { min_months = 1, max_months = 12 }
+min_trades_required = 20
+
+[strategies.position_fundamental_quality_moderate]
+family = "position"
+variant = "fundamental_quality"
+timeframe = "daily"
+hypothesis = "quality"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+holding_period = { min_months = 1, max_months = 12 }
+min_trades_required = 20
+
+# =============================================================================
+# PAIR TRADING STRATEGIES (12 strategies)
+# =============================================================================
+
+[strategies.pair_trading_cointegration_conservative]
+family = "pair"
+variant = "cointegration"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 5, max_days = 30 }
+min_trades_required = 40
+
+[strategies.pair_trading_cointegration_moderate]
+family = "pair"
+variant = "cointegration"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 5, max_days = 30 }
+min_trades_required = 40
+
+[strategies.pair_trading_cointegration_aggressive]
+family = "pair"
+variant = "cointegration"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 5, max_days = 30 }
+min_trades_required = 40
+
+[strategies.pair_trading_cointegration_short_term]
+family = "pair"
+variant = "cointegration_short"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.pair_trading_distance_conservative]
+family = "pair"
+variant = "distance"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 5, max_days = 20 }
+min_trades_required = 40
+
+[strategies.pair_trading_distance_moderate]
+family = "pair"
+variant = "distance"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 5, max_days = 20 }
+min_trades_required = 40
+
+[strategies.pair_trading_distance_aggressive]
+family = "pair"
+variant = "distance"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 5, max_days = 20 }
+min_trades_required = 40
+
+[strategies.pair_trading_distance_short_term]
+family = "pair"
+variant = "distance_short"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 2, max_days = 10 }
+min_trades_required = 60
+
+[strategies.stat_arb_multi_pair_conservative]
+family = "pair"
+variant = "stat_arb_multi"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.stat_arb_multi_pair_moderate]
+family = "pair"
+variant = "stat_arb_multi"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier3_slow"
+risk_profiles = ["moderado", "arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.stat_arb_multi_pair_aggressive]
+family = "pair"
+variant = "stat_arb_multi"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier3_slow"
+risk_profiles = ["arrojado", "muito_arrojado"]
+holding_period = { min_days = 3, max_days = 15 }
+min_trades_required = 50
+
+[strategies.stat_arb_multi_pair_diversified]
+family = "pair"
+variant = "stat_arb_diversified"
+timeframe = "daily"
+hypothesis = "stat_arb"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+holding_period = { min_days = 5, max_days = 20 }
+min_trades_required = 40
+
+# =============================================================================
+# PORTFOLIO STRATEGIES (16 strategies)
+# =============================================================================
+
+[strategies.portfolio_equal_weight_5_assets]
+family = "portfolio"
+variant = "equal_weight"
+timeframe = "daily"
+hypothesis = "diversification"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+num_assets = 5
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_equal_weight_10_assets]
+family = "portfolio"
+variant = "equal_weight"
+timeframe = "daily"
+hypothesis = "diversification"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+num_assets = 10
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_equal_weight_20_assets]
+family = "portfolio"
+variant = "equal_weight"
+timeframe = "daily"
+hypothesis = "diversification"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+num_assets = 20
+rebalance_frequency = "monthly"
+
+[strategies.portfolio_equal_weight_30_assets]
+family = "portfolio"
+variant = "equal_weight"
+timeframe = "daily"
+hypothesis = "diversification"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+num_assets = 30
+rebalance_frequency = "monthly"
+
+[strategies.portfolio_risk_parity_conservative]
+family = "portfolio"
+variant = "risk_parity"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_risk_parity_moderate]
+family = "portfolio"
+variant = "risk_parity"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_risk_parity_aggressive]
+family = "portfolio"
+variant = "risk_parity"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+rebalance_frequency = "daily"
+
+[strategies.portfolio_risk_parity_leveraged]
+family = "portfolio"
+variant = "risk_parity_leveraged"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["arrojado", "muito_arrojado"]
+rebalance_frequency = "daily"
+leverage = 1.5
+
+[strategies.portfolio_min_variance_conservative]
+family = "portfolio"
+variant = "min_variance"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "monthly"
+
+[strategies.portfolio_min_variance_moderate]
+family = "portfolio"
+variant = "min_variance"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_min_variance_long_short]
+family = "portfolio"
+variant = "min_variance_long_short"
+timeframe = "daily"
+hypothesis = "risk_management"
+complexity_tier = "tier4_very_slow"
+risk_profiles = ["arrojado", "muito_arrojado"]
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_max_sharpe_conservative]
+family = "portfolio"
+variant = "max_sharpe"
+timeframe = "daily"
+hypothesis = "optimization"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado"]
+rebalance_frequency = "monthly"
+
+[strategies.portfolio_max_sharpe_moderate]
+family = "portfolio"
+variant = "max_sharpe"
+timeframe = "daily"
+hypothesis = "optimization"
+complexity_tier = "tier3_slow"
+risk_profiles = ["moderado", "arrojado"]
+rebalance_frequency = "weekly"
+
+[strategies.portfolio_max_sharpe_aggressive]
+family = "portfolio"
+variant = "max_sharpe"
+timeframe = "daily"
+hypothesis = "optimization"
+complexity_tier = "tier4_very_slow"
+risk_profiles = ["arrojado", "muito_arrojado"]
+rebalance_frequency = "daily"
+
+# =============================================================================
+# MOMENTUM STRATEGIES (8 strategies)
+# =============================================================================
+
+[strategies.momentum_cross_sectional_3m]
+family = "momentum"
+variant = "cross_sectional"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+lookback_months = 3
+holding_period = { min_months = 1, max_months = 3 }
+min_trades_required = 36
+
+[strategies.momentum_cross_sectional_6m]
+family = "momentum"
+variant = "cross_sectional"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+lookback_months = 6
+holding_period = { min_months = 1, max_months = 3 }
+min_trades_required = 36
+
+[strategies.momentum_cross_sectional_12m]
+family = "momentum"
+variant = "cross_sectional"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+lookback_months = 12
+holding_period = { min_months = 1, max_months = 6 }
+min_trades_required = 24
+
+[strategies.momentum_cross_sectional_multi_period]
+family = "momentum"
+variant = "cross_sectional_multi"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier3_slow"
+risk_profiles = ["moderado", "arrojado"]
+lookback_months = [3, 6, 12]
+holding_period = { min_months = 1, max_months = 3 }
+min_trades_required = 36
+
+[strategies.momentum_time_series_50d]
+family = "momentum"
+variant = "time_series"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+lookback_days = 50
+min_trades_required = 48
+
+[strategies.momentum_time_series_200d]
+family = "momentum"
+variant = "time_series"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+lookback_days = 200
+min_trades_required = 24
+
+[strategies.momentum_time_series_dual_ma]
+family = "momentum"
+variant = "time_series_dual_ma"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+fast_ma = 50
+slow_ma = 200
+min_trades_required = 36
+
+[strategies.momentum_time_series_adaptive]
+family = "momentum"
+variant = "time_series_adaptive"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+adaptive_lookback = true
+min_trades_required = 48
+
+# =============================================================================
+# MEAN REVERSION STRATEGIES (8 strategies)
+# =============================================================================
+
+[strategies.mean_reversion_bb_conservative]
+family = "mean_reversion"
+variant = "bollinger_bands"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+bb_period = 20
+bb_std = 2.5
+min_trades_required = 50
+
+[strategies.mean_reversion_bb_moderate]
+family = "mean_reversion"
+variant = "bollinger_bands"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+bb_period = 20
+bb_std = 2.0
+min_trades_required = 60
+
+[strategies.mean_reversion_bb_aggressive]
+family = "mean_reversion"
+variant = "bollinger_bands"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+bb_period = 15
+bb_std = 1.5
+min_trades_required = 80
+
+[strategies.mean_reversion_bb_trend_filtered]
+family = "mean_reversion"
+variant = "bollinger_bands_filtered"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+bb_period = 20
+bb_std = 2.0
+trend_filter = "ma_200"
+min_trades_required = 50
+
+[strategies.mean_reversion_rsi_conservative]
+family = "mean_reversion"
+variant = "rsi"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+rsi_period = 14
+oversold = 25
+overbought = 75
+min_trades_required = 50
+
+[strategies.mean_reversion_rsi_moderate]
+family = "mean_reversion"
+variant = "rsi"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+rsi_period = 14
+oversold = 30
+overbought = 70
+min_trades_required = 60
+
+[strategies.mean_reversion_rsi_aggressive]
+family = "mean_reversion"
+variant = "rsi"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+rsi_period = 7
+oversold = 35
+overbought = 65
+min_trades_required = 80
+
+[strategies.mean_reversion_rsi_trend_filtered]
+family = "mean_reversion"
+variant = "rsi_filtered"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rsi_period = 14
+oversold = 30
+overbought = 70
+trend_filter = "ma_50"
+min_trades_required = 50
+
+# =============================================================================
+# BREAKOUT STRATEGIES (6 strategies)
+# =============================================================================
+
+[strategies.breakout_donchian_20d]
+family = "breakout"
+variant = "donchian"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+channel_period = 20
+min_trades_required = 40
+
+[strategies.breakout_donchian_55d]
+family = "breakout"
+variant = "donchian"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+channel_period = 55
+min_trades_required = 30
+
+[strategies.breakout_donchian_dual_channel]
+family = "breakout"
+variant = "donchian_dual"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+entry_period = 55
+exit_period = 20
+min_trades_required = 30
+
+[strategies.breakout_volatility_expansion_conservative]
+family = "breakout"
+variant = "volatility_expansion"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["conservador", "moderado"]
+atr_multiplier = 2.5
+min_trades_required = 40
+
+[strategies.breakout_volatility_expansion_moderate]
+family = "breakout"
+variant = "volatility_expansion"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["moderado", "arrojado"]
+atr_multiplier = 2.0
+min_trades_required = 50
+
+[strategies.breakout_volatility_expansion_aggressive]
+family = "breakout"
+variant = "volatility_expansion"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier1_fast"
+risk_profiles = ["arrojado", "muito_arrojado"]
+atr_multiplier = 1.5
+min_trades_required = 60
+
+# =============================================================================
+# SECTOR ROTATION STRATEGIES (4 strategies)
+# =============================================================================
+
+[strategies.sector_rotation_business_cycle]
+family = "sector_rotation"
+variant = "business_cycle"
+timeframe = "daily"
+hypothesis = "macro"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "monthly"
+min_trades_required = 20
+
+[strategies.sector_rotation_business_cycle_defensive]
+family = "sector_rotation"
+variant = "business_cycle_defensive"
+timeframe = "daily"
+hypothesis = "macro"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador"]
+rebalance_frequency = "quarterly"
+min_trades_required = 16
+
+[strategies.sector_rotation_relative_strength_top3]
+family = "sector_rotation"
+variant = "relative_strength"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+top_n = 3
+lookback_days = 63
+min_trades_required = 36
+
+[strategies.sector_rotation_relative_strength_top5]
+family = "sector_rotation"
+variant = "relative_strength"
+timeframe = "daily"
+hypothesis = "momentum"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+top_n = 5
+lookback_days = 63
+min_trades_required = 36
+
+# =============================================================================
+# FACTOR INVESTING STRATEGIES (8 strategies)
+# =============================================================================
+
+[strategies.factor_value_pe_conservative]
+family = "factor"
+variant = "value_pe"
+timeframe = "daily"
+hypothesis = "value"
+complexity_tier = "tier3_slow"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "quarterly"
+min_trades_required = 16
+
+[strategies.factor_value_pb_moderate]
+family = "factor"
+variant = "value_pb"
+timeframe = "daily"
+hypothesis = "value"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rebalance_frequency = "quarterly"
+min_trades_required = 16
+
+[strategies.factor_quality_roe_conservative]
+family = "factor"
+variant = "quality_roe"
+timeframe = "daily"
+hypothesis = "quality"
+complexity_tier = "tier3_slow"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "quarterly"
+min_trades_required = 16
+
+[strategies.factor_quality_multi_metric_moderate]
+family = "factor"
+variant = "quality_multi"
+timeframe = "daily"
+hypothesis = "quality"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rebalance_frequency = "quarterly"
+min_trades_required = 16
+
+[strategies.factor_low_volatility_conservative]
+family = "factor"
+variant = "low_volatility"
+timeframe = "daily"
+hypothesis = "low_vol"
+complexity_tier = "tier3_slow"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+rebalance_frequency = "monthly"
+min_trades_required = 24
+
+[strategies.factor_low_volatility_moderate]
+family = "factor"
+variant = "low_volatility"
+timeframe = "daily"
+hypothesis = "low_vol"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+rebalance_frequency = "monthly"
+min_trades_required = 24
+
+[strategies.factor_multi_factor_balanced]
+family = "factor"
+variant = "multi_factor"
+timeframe = "daily"
+hypothesis = "multi_factor"
+complexity_tier = "tier4_very_slow"
+risk_profiles = ["conservador", "moderado"]
+factors = ["value", "momentum", "quality", "low_vol"]
+rebalance_frequency = "monthly"
+min_trades_required = 24
+
+[strategies.factor_multi_factor_aggressive]
+family = "factor"
+variant = "multi_factor"
+timeframe = "daily"
+hypothesis = "multi_factor"
+complexity_tier = "tier4_very_slow"
+risk_profiles = ["moderado", "arrojado"]
+factors = ["value", "momentum", "quality"]
+factor_weights = [0.3, 0.5, 0.2]
+rebalance_frequency = "monthly"
+min_trades_required = 24
+
+# =============================================================================
+# SEASONAL STRATEGIES (4 strategies)
+# =============================================================================
+
+[strategies.seasonal_calendar_effects_january]
+family = "seasonal"
+variant = "january_effect"
+timeframe = "daily"
+hypothesis = "seasonal"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+entry_month = 12
+exit_month = 1
+min_trades_required = 15
+
+[strategies.seasonal_calendar_effects_sell_in_may]
+family = "seasonal"
+variant = "sell_in_may"
+timeframe = "daily"
+hypothesis = "seasonal"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+entry_month = 11
+exit_month = 5
+min_trades_required = 15
+
+[strategies.seasonal_commodity_natural_gas]
+family = "seasonal"
+variant = "commodity_ng"
+timeframe = "daily"
+hypothesis = "seasonal"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+seasonal_window = "winter"
+min_trades_required = 15
+
+[strategies.seasonal_commodity_grains]
+family = "seasonal"
+variant = "commodity_grains"
+timeframe = "daily"
+hypothesis = "seasonal"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado"]
+seasonal_window = "planting"
+min_trades_required = 15
+
+# =============================================================================
+# VOLATILITY STRATEGIES (4 strategies)
+# =============================================================================
+
+[strategies.volatility_vix_mean_reversion_conservative]
+family = "volatility"
+variant = "vix_mean_reversion"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+vix_threshold_high = 30
+vix_threshold_low = 15
+min_trades_required = 30
+
+[strategies.volatility_vix_mean_reversion_moderate]
+family = "volatility"
+variant = "vix_mean_reversion"
+timeframe = "daily"
+hypothesis = "mean_reversion"
+complexity_tier = "tier2_medium"
+risk_profiles = ["arrojado", "muito_arrojado"]
+vix_threshold_high = 25
+vix_threshold_low = 18
+min_trades_required = 40
+
+[strategies.volatility_breakout_atr_moderate]
+family = "volatility"
+variant = "atr_breakout"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+atr_percentile = 80
+min_trades_required = 40
+
+[strategies.volatility_breakout_bb_width_moderate]
+family = "volatility"
+variant = "bb_width_breakout"
+timeframe = "daily"
+hypothesis = "breakout"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+bb_width_percentile = 10
+min_trades_required = 40
+
+# =============================================================================
+# EVENT-DRIVEN STRATEGIES (4 strategies)
+# =============================================================================
+
+[strategies.event_driven_earnings_pre_announcement]
+family = "event_driven"
+variant = "earnings_pre"
+timeframe = "daily"
+hypothesis = "event"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+days_before = 5
+min_trades_required = 20
+
+[strategies.event_driven_earnings_post_surprise]
+family = "event_driven"
+variant = "earnings_post"
+timeframe = "daily"
+hypothesis = "event"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado", "muito_arrojado"]
+days_after = 3
+surprise_threshold = 0.05
+min_trades_required = 20
+
+[strategies.event_driven_ma_arbitrage_conservative]
+family = "event_driven"
+variant = "ma_arbitrage"
+timeframe = "daily"
+hypothesis = "event"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado"]
+min_spread = 0.05
+min_trades_required = 10
+
+[strategies.event_driven_ma_arbitrage_moderate]
+family = "event_driven"
+variant = "ma_arbitrage"
+timeframe = "daily"
+hypothesis = "event"
+complexity_tier = "tier2_medium"
+risk_profiles = ["moderado", "arrojado"]
+min_spread = 0.03
+min_trades_required = 15
+
+# =============================================================================
+# BUY AND HOLD STRATEGIES (4 strategies)
+# =============================================================================
+
+[strategies.buy_hold_index_ibov]
+family = "buy_hold"
+variant = "index"
+timeframe = "daily"
+hypothesis = "passive"
+complexity_tier = "tier1_fast"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+index = "^BVSP"
+rebalance_frequency = "quarterly"
+
+[strategies.buy_hold_index_sp500]
+family = "buy_hold"
+variant = "index"
+timeframe = "daily"
+hypothesis = "passive"
+complexity_tier = "tier1_fast"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+index = "^GSPC"
+rebalance_frequency = "quarterly"
+
+[strategies.buy_hold_dividend_growth_conservative]
+family = "buy_hold"
+variant = "dividend_growth"
+timeframe = "daily"
+hypothesis = "income"
+complexity_tier = "tier2_medium"
+risk_profiles = ["muito_conservador", "conservador", "moderado"]
+min_dividend_yield = 0.03
+min_dividend_growth = 0.05
+rebalance_frequency = "yearly"
+
+[strategies.buy_hold_dividend_growth_moderate]
+family = "buy_hold"
+variant = "dividend_growth"
+timeframe = "daily"
+hypothesis = "income"
+complexity_tier = "tier2_medium"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+min_dividend_yield = 0.02
+min_dividend_growth = 0.08
+rebalance_frequency = "semi_yearly"
+
+# =============================================================================
+# MULTI-STRATEGY (1 strategy)
+# =============================================================================
+
+[strategies.multi_strategy_momentum_mean_reversion]
+family = "multi_strategy"
+variant = "momentum_mean_reversion"
+timeframe = "daily"
+hypothesis = "adaptive"
+complexity_tier = "tier3_slow"
+risk_profiles = ["conservador", "moderado", "arrojado"]
+regime_indicator = "vix_percentile"
+momentum_weight = 0.6
+mean_reversion_weight = 0.4
+min_trades_required = 50
+
+# =============================================================================
+# INDEX: Family → Strategies Mapping
+# =============================================================================
+
+[index.by_family]
+intraday = [
+    "orb_breakout_conservative", "orb_breakout_moderate", "orb_breakout_aggressive",
+    "vwap_mean_reversion_conservative", "vwap_mean_reversion_moderate",
+    "vwap_trend_following_moderate", "vwap_trend_following_aggressive",
+    "intraday_mean_reversion_rsi_conservative", "intraday_mean_reversion_rsi_moderate",
+    "intraday_mean_reversion_bb_conservative", "intraday_mean_reversion_bb_moderate",
+    "intraday_momentum_macd_moderate", "intraday_momentum_macd_aggressive",
+    "intraday_momentum_adx_moderate", "intraday_momentum_adx_aggressive",
+    "gap_fill_conservative", "gap_fill_moderate",
+    "gap_continuation_moderate", "gap_continuation_aggressive",
+    "volume_profile_poc_moderate", "volume_profile_vah_val_moderate",
+    "news_based_volatility_moderate"
+]
+
+swing = [
+    "swing_momentum_ma_crossover_conservative", "swing_momentum_ma_crossover_moderate",
+    "swing_momentum_macd_moderate", "swing_momentum_macd_aggressive",
+    "swing_mean_reversion_bb_conservative", "swing_mean_reversion_bb_moderate",
+    "swing_mean_reversion_rsi_conservative", "swing_mean_reversion_rsi_moderate",
+    "swing_breakout_channel_moderate", "swing_breakout_channel_aggressive",
+    "swing_breakout_volume_moderate", "swing_breakout_volume_aggressive"
+]
+
+position = [
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_trend_following_adx_moderate",
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "position_fundamental_quality_moderate"
+]
+
+pair = [
+    "pair_trading_cointegration_conservative", "pair_trading_cointegration_moderate",
+    "pair_trading_cointegration_aggressive", "pair_trading_cointegration_short_term",
+    "pair_trading_distance_conservative", "pair_trading_distance_moderate",
+    "pair_trading_distance_aggressive", "pair_trading_distance_short_term",
+    "stat_arb_multi_pair_conservative", "stat_arb_multi_pair_moderate",
+    "stat_arb_multi_pair_aggressive", "stat_arb_multi_pair_diversified"
+]
+
+portfolio = [
+    "portfolio_equal_weight_5_assets", "portfolio_equal_weight_10_assets",
+    "portfolio_equal_weight_20_assets", "portfolio_equal_weight_30_assets",
+    "portfolio_risk_parity_conservative", "portfolio_risk_parity_moderate",
+    "portfolio_risk_parity_aggressive", "portfolio_risk_parity_leveraged",
+    "portfolio_min_variance_conservative", "portfolio_min_variance_moderate",
+    "portfolio_min_variance_long_short",
+    "portfolio_max_sharpe_conservative", "portfolio_max_sharpe_moderate",
+    "portfolio_max_sharpe_aggressive"
+]
+
+momentum = [
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m",
+    "momentum_cross_sectional_12m", "momentum_cross_sectional_multi_period",
+    "momentum_time_series_50d", "momentum_time_series_200d",
+    "momentum_time_series_dual_ma", "momentum_time_series_adaptive"
+]
+
+mean_reversion = [
+    "mean_reversion_bb_conservative", "mean_reversion_bb_moderate",
+    "mean_reversion_bb_aggressive", "mean_reversion_bb_trend_filtered",
+    "mean_reversion_rsi_conservative", "mean_reversion_rsi_moderate",
+    "mean_reversion_rsi_aggressive", "mean_reversion_rsi_trend_filtered"
+]
+
+breakout = [
+    "breakout_donchian_20d", "breakout_donchian_55d", "breakout_donchian_dual_channel",
+    "breakout_volatility_expansion_conservative", "breakout_volatility_expansion_moderate",
+    "breakout_volatility_expansion_aggressive"
+]
+
+sector_rotation = [
+    "sector_rotation_business_cycle", "sector_rotation_business_cycle_defensive",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5"
+]
+
+factor = [
+    "factor_value_pe_conservative", "factor_value_pb_moderate",
+    "factor_quality_roe_conservative", "factor_quality_multi_metric_moderate",
+    "factor_low_volatility_conservative", "factor_low_volatility_moderate",
+    "factor_multi_factor_balanced", "factor_multi_factor_aggressive"
+]
+
+seasonal = [
+    "seasonal_calendar_effects_january", "seasonal_calendar_effects_sell_in_may",
+    "seasonal_commodity_natural_gas", "seasonal_commodity_grains"
+]
+
+volatility = [
+    "volatility_vix_mean_reversion_conservative", "volatility_vix_mean_reversion_moderate",
+    "volatility_breakout_atr_moderate", "volatility_breakout_bb_width_moderate"
+]
+
+event_driven = [
+    "event_driven_earnings_pre_announcement", "event_driven_earnings_post_surprise",
+    "event_driven_ma_arbitrage_conservative", "event_driven_ma_arbitrage_moderate"
+]
+
+buy_hold = [
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative", "buy_hold_dividend_growth_moderate"
+]
+
+multi_strategy = [
+    "multi_strategy_momentum_mean_reversion"
+]
+
+[index.by_timeframe]
+intraday_1h = [
+    "orb_breakout_conservative", "orb_breakout_moderate", "orb_breakout_aggressive",
+    "vwap_mean_reversion_conservative", "vwap_mean_reversion_moderate",
+    "vwap_trend_following_moderate", "vwap_trend_following_aggressive",
+    "intraday_mean_reversion_rsi_conservative", "intraday_mean_reversion_rsi_moderate",
+    "intraday_mean_reversion_bb_conservative", "intraday_mean_reversion_bb_moderate",
+    "intraday_momentum_macd_moderate", "intraday_momentum_macd_aggressive",
+    "intraday_momentum_adx_moderate", "intraday_momentum_adx_aggressive",
+    "gap_fill_conservative", "gap_fill_moderate",
+    "gap_continuation_moderate", "gap_continuation_aggressive",
+    "volume_profile_poc_moderate", "volume_profile_vah_val_moderate",
+    "news_based_volatility_moderate"
+]
+
+daily_short = [
+    "swing_momentum_ma_crossover_conservative", "swing_momentum_ma_crossover_moderate",
+    "swing_momentum_macd_moderate", "swing_momentum_macd_aggressive",
+    "swing_mean_reversion_bb_conservative", "swing_mean_reversion_bb_moderate",
+    "swing_mean_reversion_rsi_conservative", "swing_mean_reversion_rsi_moderate",
+    "swing_breakout_channel_moderate", "swing_breakout_channel_aggressive",
+    "swing_breakout_volume_moderate", "swing_breakout_volume_aggressive",
+    "mean_reversion_bb_conservative", "mean_reversion_bb_moderate",
+    "mean_reversion_bb_aggressive", "mean_reversion_bb_trend_filtered",
+    "mean_reversion_rsi_conservative", "mean_reversion_rsi_moderate",
+    "mean_reversion_rsi_aggressive", "mean_reversion_rsi_trend_filtered",
+    "breakout_donchian_20d", "breakout_donchian_55d", "breakout_donchian_dual_channel",
+    "breakout_volatility_expansion_conservative", "breakout_volatility_expansion_moderate",
+    "breakout_volatility_expansion_aggressive"
+]
+
+daily_medium = [
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_trend_following_adx_moderate",
+    "pair_trading_cointegration_conservative", "pair_trading_cointegration_moderate",
+    "pair_trading_cointegration_aggressive", "pair_trading_cointegration_short_term",
+    "pair_trading_distance_conservative", "pair_trading_distance_moderate",
+    "pair_trading_distance_aggressive", "pair_trading_distance_short_term",
+    "stat_arb_multi_pair_conservative", "stat_arb_multi_pair_moderate",
+    "stat_arb_multi_pair_aggressive", "stat_arb_multi_pair_diversified",
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5",
+    "volatility_vix_mean_reversion_conservative", "volatility_vix_mean_reversion_moderate",
+    "volatility_breakout_atr_moderate", "volatility_breakout_bb_width_moderate",
+    "event_driven_earnings_pre_announcement", "event_driven_earnings_post_surprise",
+    "event_driven_ma_arbitrage_conservative", "event_driven_ma_arbitrage_moderate"
+]
+
+daily_long = [
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "position_fundamental_quality_moderate",
+    "portfolio_equal_weight_5_assets", "portfolio_equal_weight_10_assets",
+    "portfolio_equal_weight_20_assets", "portfolio_equal_weight_30_assets",
+    "portfolio_risk_parity_conservative", "portfolio_risk_parity_moderate",
+    "portfolio_risk_parity_aggressive", "portfolio_risk_parity_leveraged",
+    "portfolio_min_variance_conservative", "portfolio_min_variance_moderate",
+    "portfolio_min_variance_long_short",
+    "portfolio_max_sharpe_conservative", "portfolio_max_sharpe_moderate",
+    "portfolio_max_sharpe_aggressive",
+    "momentum_cross_sectional_12m", "momentum_cross_sectional_multi_period",
+    "momentum_time_series_50d", "momentum_time_series_200d",
+    "momentum_time_series_dual_ma", "momentum_time_series_adaptive",
+    "sector_rotation_business_cycle", "sector_rotation_business_cycle_defensive",
+    "factor_value_pe_conservative", "factor_value_pb_moderate",
+    "factor_quality_roe_conservative", "factor_quality_multi_metric_moderate",
+    "factor_low_volatility_conservative", "factor_low_volatility_moderate",
+    "factor_multi_factor_balanced", "factor_multi_factor_aggressive",
+    "seasonal_calendar_effects_january", "seasonal_calendar_effects_sell_in_may",
+    "seasonal_commodity_natural_gas", "seasonal_commodity_grains",
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative", "buy_hold_dividend_growth_moderate",
+    "multi_strategy_momentum_mean_reversion"
+]
+
+[index.by_hypothesis]
+momentum = [
+    "vwap_trend_following_moderate", "vwap_trend_following_aggressive",
+    "intraday_momentum_macd_moderate", "intraday_momentum_macd_aggressive",
+    "intraday_momentum_adx_moderate", "intraday_momentum_adx_aggressive",
+    "gap_continuation_moderate", "gap_continuation_aggressive",
+    "swing_momentum_ma_crossover_conservative", "swing_momentum_ma_crossover_moderate",
+    "swing_momentum_macd_moderate", "swing_momentum_macd_aggressive",
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_trend_following_adx_moderate",
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m",
+    "momentum_cross_sectional_12m", "momentum_cross_sectional_multi_period",
+    "momentum_time_series_50d", "momentum_time_series_200d",
+    "momentum_time_series_dual_ma", "momentum_time_series_adaptive",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5"
+]
+
+mean_reversion = [
+    "vwap_mean_reversion_conservative", "vwap_mean_reversion_moderate",
+    "intraday_mean_reversion_rsi_conservative", "intraday_mean_reversion_rsi_moderate",
+    "intraday_mean_reversion_bb_conservative", "intraday_mean_reversion_bb_moderate",
+    "gap_fill_conservative", "gap_fill_moderate",
+    "swing_mean_reversion_bb_conservative", "swing_mean_reversion_bb_moderate",
+    "swing_mean_reversion_rsi_conservative", "swing_mean_reversion_rsi_moderate",
+    "mean_reversion_bb_conservative", "mean_reversion_bb_moderate",
+    "mean_reversion_bb_aggressive", "mean_reversion_bb_trend_filtered",
+    "mean_reversion_rsi_conservative", "mean_reversion_rsi_moderate",
+    "mean_reversion_rsi_aggressive", "mean_reversion_rsi_trend_filtered",
+    "volatility_vix_mean_reversion_conservative", "volatility_vix_mean_reversion_moderate"
+]
+
+breakout = [
+    "orb_breakout_conservative", "orb_breakout_moderate", "orb_breakout_aggressive",
+    "volume_profile_vah_val_moderate",
+    "swing_breakout_channel_moderate", "swing_breakout_channel_aggressive",
+    "swing_breakout_volume_moderate", "swing_breakout_volume_aggressive",
+    "breakout_donchian_20d", "breakout_donchian_55d", "breakout_donchian_dual_channel",
+    "breakout_volatility_expansion_conservative", "breakout_volatility_expansion_moderate",
+    "breakout_volatility_expansion_aggressive",
+    "volatility_breakout_atr_moderate", "volatility_breakout_bb_width_moderate"
+]
+
+stat_arb = [
+    "pair_trading_cointegration_conservative", "pair_trading_cointegration_moderate",
+    "pair_trading_cointegration_aggressive", "pair_trading_cointegration_short_term",
+    "pair_trading_distance_conservative", "pair_trading_distance_moderate",
+    "pair_trading_distance_aggressive", "pair_trading_distance_short_term",
+    "stat_arb_multi_pair_conservative", "stat_arb_multi_pair_moderate",
+    "stat_arb_multi_pair_aggressive", "stat_arb_multi_pair_diversified"
+]
+
+value = [
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "factor_value_pe_conservative", "factor_value_pb_moderate"
+]
+
+quality = [
+    "position_fundamental_quality_moderate",
+    "factor_quality_roe_conservative", "factor_quality_multi_metric_moderate"
+]
+
+[index.by_risk_profile]
+muito_conservador = [
+    "position_trend_following_ma_conservative",
+    "position_fundamental_value_conservative",
+    "portfolio_equal_weight_5_assets", "portfolio_equal_weight_10_assets",
+    "portfolio_risk_parity_conservative", "portfolio_min_variance_conservative",
+    "momentum_time_series_200d",
+    "sector_rotation_business_cycle", "sector_rotation_business_cycle_defensive",
+    "sector_rotation_relative_strength_top5",
+    "factor_value_pe_conservative", "factor_quality_roe_conservative",
+    "factor_low_volatility_conservative",
+    "seasonal_calendar_effects_january", "seasonal_calendar_effects_sell_in_may",
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative"
+]
+
+conservador = [
+    "orb_breakout_conservative", "vwap_mean_reversion_conservative",
+    "intraday_mean_reversion_rsi_conservative", "intraday_mean_reversion_bb_conservative",
+    "gap_fill_conservative",
+    "swing_momentum_ma_crossover_conservative", "swing_mean_reversion_bb_conservative",
+    "swing_mean_reversion_rsi_conservative",
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "pair_trading_cointegration_conservative", "pair_trading_distance_conservative",
+    "stat_arb_multi_pair_conservative",
+    "portfolio_equal_weight_5_assets", "portfolio_equal_weight_10_assets",
+    "portfolio_equal_weight_20_assets", "portfolio_equal_weight_30_assets",
+    "portfolio_risk_parity_conservative", "portfolio_risk_parity_moderate",
+    "portfolio_min_variance_conservative", "portfolio_min_variance_moderate",
+    "portfolio_max_sharpe_conservative",
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m", "momentum_cross_sectional_12m",
+    "momentum_time_series_50d", "momentum_time_series_200d", "momentum_time_series_dual_ma",
+    "mean_reversion_bb_conservative", "mean_reversion_rsi_conservative",
+    "breakout_donchian_55d", "breakout_donchian_dual_channel", "breakout_volatility_expansion_conservative",
+    "sector_rotation_business_cycle", "sector_rotation_business_cycle_defensive",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5",
+    "factor_value_pe_conservative", "factor_value_pb_moderate",
+    "factor_quality_roe_conservative", "factor_quality_multi_metric_moderate",
+    "factor_low_volatility_conservative", "factor_low_volatility_moderate",
+    "factor_multi_factor_balanced",
+    "seasonal_calendar_effects_january", "seasonal_calendar_effects_sell_in_may",
+    "seasonal_commodity_grains",
+    "event_driven_ma_arbitrage_conservative",
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative", "buy_hold_dividend_growth_moderate",
+    "multi_strategy_momentum_mean_reversion"
+]
+
+

@@ -1,0 +1,291 @@
+# =============================================================================
+# Timeframe Profiles - Universe-Only System
+# =============================================================================
+# Defines timeframe-based strategy profiles (Options B + C from plan)
+# B = per_timeframe: Distinct strategies by timeframe
+# C = adaptive: Timeframe adapts based on market conditions
+# =============================================================================
+
+[metadata]
+version = "1.0.0"
+last_updated = "2026-01-06"
+description = "Timeframe profiles for strategy selection and adaptation"
+
+# =============================================================================
+# PROFILE: Per-Timeframe (Option B)
+# =============================================================================
+# Assigns specific strategy families to each timeframe category.
+# Users select a timeframe and only see strategies in that category.
+
+[profiles.per_timeframe]
+description = "Estratégias distintas por timeframe - cada horizonte tem famílias específicas"
+mode = "static"
+
+[profiles.per_timeframe.intraday]
+label = "Intraday (1h bars)"
+holding_period = "1-8 hours"
+data_requirement = "1h OHLCV"
+data_window_months = 6
+families = ["intraday"]
+hypotheses = ["breakout", "momentum", "mean_reversion"]
+complexity_tiers = ["tier1_fast", "tier2_medium"]
+strategies = [
+    "orb_breakout_conservative", "orb_breakout_moderate", "orb_breakout_aggressive",
+    "vwap_mean_reversion_conservative", "vwap_mean_reversion_moderate",
+    "vwap_trend_following_moderate", "vwap_trend_following_aggressive",
+    "intraday_mean_reversion_rsi_conservative", "intraday_mean_reversion_rsi_moderate",
+    "intraday_mean_reversion_bb_conservative", "intraday_mean_reversion_bb_moderate",
+    "intraday_momentum_macd_moderate", "intraday_momentum_macd_aggressive",
+    "intraday_momentum_adx_moderate", "intraday_momentum_adx_aggressive",
+    "gap_fill_conservative", "gap_fill_moderate",
+    "gap_continuation_moderate", "gap_continuation_aggressive",
+    "volume_profile_poc_moderate", "volume_profile_vah_val_moderate",
+    "news_based_volatility_moderate"
+]
+min_trades_is = 50
+min_trades_oos = 25
+train_test_split = 0.70
+wfa_enabled = false
+
+[profiles.per_timeframe.swing]
+label = "Swing Trading (2-10 days)"
+holding_period = "2-10 days"
+data_requirement = "Daily OHLCV"
+data_window_years = 2
+families = ["swing", "mean_reversion", "breakout"]
+hypotheses = ["momentum", "mean_reversion", "breakout"]
+complexity_tiers = ["tier1_fast", "tier2_medium"]
+strategies = [
+    "swing_momentum_ma_crossover_conservative", "swing_momentum_ma_crossover_moderate",
+    "swing_momentum_macd_moderate", "swing_momentum_macd_aggressive",
+    "swing_mean_reversion_bb_conservative", "swing_mean_reversion_bb_moderate",
+    "swing_mean_reversion_rsi_conservative", "swing_mean_reversion_rsi_moderate",
+    "swing_breakout_channel_moderate", "swing_breakout_channel_aggressive",
+    "swing_breakout_volume_moderate", "swing_breakout_volume_aggressive",
+    "mean_reversion_bb_conservative", "mean_reversion_bb_moderate",
+    "mean_reversion_bb_aggressive", "mean_reversion_bb_trend_filtered",
+    "mean_reversion_rsi_conservative", "mean_reversion_rsi_moderate",
+    "mean_reversion_rsi_aggressive", "mean_reversion_rsi_trend_filtered",
+    "breakout_donchian_20d", "breakout_donchian_55d", "breakout_donchian_dual_channel",
+    "breakout_volatility_expansion_conservative", "breakout_volatility_expansion_moderate",
+    "breakout_volatility_expansion_aggressive"
+]
+min_trades_is = 60
+min_trades_oos = 30
+train_test_split = 0.65
+wfa_enabled = true
+wfa_folds = 5
+
+[profiles.per_timeframe.position]
+label = "Position Trading (2-12 weeks)"
+holding_period = "2-12 weeks"
+data_requirement = "Daily OHLCV + Fundamentals"
+data_window_years = 5
+families = ["position", "pair", "portfolio", "momentum", "sector_rotation"]
+hypotheses = ["momentum", "stat_arb", "value", "diversification"]
+complexity_tiers = ["tier2_medium", "tier3_slow"]
+strategies = [
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_trend_following_adx_moderate",
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "position_fundamental_quality_moderate",
+    "pair_trading_cointegration_conservative", "pair_trading_cointegration_moderate",
+    "pair_trading_cointegration_aggressive", "pair_trading_cointegration_short_term",
+    "pair_trading_distance_conservative", "pair_trading_distance_moderate",
+    "pair_trading_distance_aggressive", "pair_trading_distance_short_term",
+    "stat_arb_multi_pair_conservative", "stat_arb_multi_pair_moderate",
+    "stat_arb_multi_pair_aggressive", "stat_arb_multi_pair_diversified",
+    "portfolio_equal_weight_5_assets", "portfolio_equal_weight_10_assets",
+    "portfolio_equal_weight_20_assets", "portfolio_equal_weight_30_assets",
+    "portfolio_risk_parity_conservative", "portfolio_risk_parity_moderate",
+    "portfolio_risk_parity_aggressive", "portfolio_risk_parity_leveraged",
+    "portfolio_min_variance_conservative", "portfolio_min_variance_moderate",
+    "portfolio_min_variance_long_short",
+    "portfolio_max_sharpe_conservative", "portfolio_max_sharpe_moderate",
+    "portfolio_max_sharpe_aggressive",
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5"
+]
+min_trades_is = 30
+min_trades_oos = 15
+train_test_split = 0.60
+wfa_enabled = true
+wfa_folds = 10
+
+[profiles.per_timeframe.long_term]
+label = "Long-Term (3+ months)"
+holding_period = "3+ months"
+data_requirement = "Daily OHLCV + Fundamentals + Economic"
+data_window_years = 10
+families = ["factor", "seasonal", "buy_hold", "multi_strategy", "volatility", "event_driven"]
+hypotheses = ["value", "quality", "seasonal", "passive", "adaptive"]
+complexity_tiers = ["tier2_medium", "tier3_slow", "tier4_very_slow"]
+strategies = [
+    "momentum_cross_sectional_12m", "momentum_cross_sectional_multi_period",
+    "momentum_time_series_50d", "momentum_time_series_200d",
+    "momentum_time_series_dual_ma", "momentum_time_series_adaptive",
+    "sector_rotation_business_cycle", "sector_rotation_business_cycle_defensive",
+    "factor_value_pe_conservative", "factor_value_pb_moderate",
+    "factor_quality_roe_conservative", "factor_quality_multi_metric_moderate",
+    "factor_low_volatility_conservative", "factor_low_volatility_moderate",
+    "factor_multi_factor_balanced", "factor_multi_factor_aggressive",
+    "seasonal_calendar_effects_january", "seasonal_calendar_effects_sell_in_may",
+    "seasonal_commodity_natural_gas", "seasonal_commodity_grains",
+    "volatility_vix_mean_reversion_conservative", "volatility_vix_mean_reversion_moderate",
+    "volatility_breakout_atr_moderate", "volatility_breakout_bb_width_moderate",
+    "event_driven_earnings_pre_announcement", "event_driven_earnings_post_surprise",
+    "event_driven_ma_arbitrage_conservative", "event_driven_ma_arbitrage_moderate",
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative", "buy_hold_dividend_growth_moderate",
+    "multi_strategy_momentum_mean_reversion"
+]
+min_trades_is = 20
+min_trades_oos = 10
+train_test_split = 0.60
+wfa_enabled = true
+wfa_folds = 20
+
+# =============================================================================
+# PROFILE: Adaptive (Option C)
+# =============================================================================
+# Timeframe adapts dynamically based on market volatility regime.
+# System automatically selects appropriate strategies based on conditions.
+
+[profiles.adaptive]
+description = "Timeframe adaptativo baseado em regime de volatilidade"
+mode = "dynamic"
+regime_indicator = "atr_percentile"
+
+[profiles.adaptive.regime_thresholds]
+# ATR percentile thresholds for regime detection
+low_volatility_max = 30      # 0-30% = low volatility
+medium_volatility_max = 70   # 30-70% = medium volatility
+high_volatility_min = 70     # 70-100% = high volatility
+
+[profiles.adaptive.low_volatility]
+description = "Mercado calmo - preferir position trading e estratégias de longo prazo"
+preferred_timeframe = "position"
+preferred_families = ["position", "factor", "buy_hold", "portfolio"]
+holding_multiplier = 1.5
+risk_adjustment = 0.8
+allowed_strategies = [
+    "position_trend_following_ma_conservative", "position_trend_following_ma_moderate",
+    "position_fundamental_value_conservative", "position_fundamental_value_moderate",
+    "portfolio_equal_weight_10_assets", "portfolio_equal_weight_20_assets",
+    "portfolio_risk_parity_conservative", "portfolio_risk_parity_moderate",
+    "portfolio_min_variance_conservative", "portfolio_min_variance_moderate",
+    "factor_value_pe_conservative", "factor_quality_roe_conservative",
+    "factor_low_volatility_conservative", "factor_multi_factor_balanced",
+    "buy_hold_index_ibov", "buy_hold_index_sp500",
+    "buy_hold_dividend_growth_conservative", "buy_hold_dividend_growth_moderate",
+    "momentum_time_series_200d", "momentum_time_series_dual_ma"
+]
+
+[profiles.adaptive.medium_volatility]
+description = "Mercado normal - preferir swing trading"
+preferred_timeframe = "swing"
+preferred_families = ["swing", "momentum", "mean_reversion", "breakout", "pair"]
+holding_multiplier = 1.0
+risk_adjustment = 1.0
+allowed_strategies = [
+    "swing_momentum_ma_crossover_conservative", "swing_momentum_ma_crossover_moderate",
+    "swing_momentum_macd_moderate", "swing_momentum_macd_aggressive",
+    "swing_mean_reversion_bb_conservative", "swing_mean_reversion_bb_moderate",
+    "swing_mean_reversion_rsi_conservative", "swing_mean_reversion_rsi_moderate",
+    "swing_breakout_channel_moderate", "swing_breakout_channel_aggressive",
+    "swing_breakout_volume_moderate", "swing_breakout_volume_aggressive",
+    "mean_reversion_bb_moderate", "mean_reversion_bb_trend_filtered",
+    "mean_reversion_rsi_moderate", "mean_reversion_rsi_trend_filtered",
+    "breakout_donchian_20d", "breakout_donchian_55d",
+    "breakout_volatility_expansion_moderate",
+    "momentum_cross_sectional_3m", "momentum_cross_sectional_6m",
+    "momentum_time_series_50d", "momentum_time_series_dual_ma",
+    "pair_trading_cointegration_moderate", "pair_trading_distance_moderate",
+    "stat_arb_multi_pair_moderate",
+    "sector_rotation_relative_strength_top3", "sector_rotation_relative_strength_top5"
+]
+
+[profiles.adaptive.high_volatility]
+description = "Mercado volátil - preferir intraday e estratégias rápidas"
+preferred_timeframe = "intraday"
+preferred_families = ["intraday", "volatility", "breakout"]
+holding_multiplier = 0.5
+risk_adjustment = 1.3
+allowed_strategies = [
+    "orb_breakout_moderate", "orb_breakout_aggressive",
+    "vwap_mean_reversion_moderate", "vwap_trend_following_aggressive",
+    "intraday_mean_reversion_rsi_moderate", "intraday_mean_reversion_bb_moderate",
+    "intraday_momentum_macd_moderate", "intraday_momentum_macd_aggressive",
+    "intraday_momentum_adx_moderate", "intraday_momentum_adx_aggressive",
+    "gap_fill_moderate", "gap_continuation_aggressive",
+    "volume_profile_poc_moderate", "volume_profile_vah_val_moderate",
+    "news_based_volatility_moderate",
+    "swing_breakout_channel_aggressive", "swing_breakout_volume_aggressive",
+    "mean_reversion_bb_aggressive", "mean_reversion_rsi_aggressive",
+    "breakout_volatility_expansion_aggressive",
+    "volatility_vix_mean_reversion_moderate",
+    "volatility_breakout_atr_moderate", "volatility_breakout_bb_width_moderate"
+]
+
+# =============================================================================
+# REGIME DETECTION CONFIGURATION
+# =============================================================================
+
+[regime_detection]
+enabled = true
+lookback_days = 20
+update_frequency = "daily"
+
+[regime_detection.indicators]
+primary = "atr_percentile"
+secondary = ["bb_width_percentile", "realized_vol_percentile"]
+confirmation_required = 2  # Need 2 of 3 to confirm regime change
+
+[regime_detection.atr_percentile]
+period = 14
+percentile_lookback = 252  # 1 year
+
+[regime_detection.bb_width_percentile]
+period = 20
+std_dev = 2.0
+percentile_lookback = 252
+
+[regime_detection.realized_vol_percentile]
+period = 20
+percentile_lookback = 252
+
+# =============================================================================
+# TRANSITION RULES
+# =============================================================================
+
+[transition_rules]
+min_regime_duration_days = 5  # Minimum days before allowing regime change
+cooldown_days = 3             # Days to wait after a transition
+gradual_transition = true     # Blend strategies during transition
+
+[transition_rules.gradual]
+blend_days = 5               # Days over which to blend old and new regime
+old_weight_start = 0.8       # Start with 80% old regime
+new_weight_end = 1.0         # End with 100% new regime
+
+# =============================================================================
+# DATA WINDOW MAPPING BY TIMEFRAME
+# =============================================================================
+
+[data_windows]
+intraday = { min_months = 3, optimal_months = 6, max_months = 12 }
+swing = { min_years = 1, optimal_years = 2, max_years = 5 }
+position = { min_years = 2, optimal_years = 5, max_years = 10 }
+long_term = { min_years = 5, optimal_years = 10, max_years = 20 }
+
+# =============================================================================
+# COMPUTATIONAL MAPPING BY TIMEFRAME
+# =============================================================================
+
+[computational_limits]
+intraday = { population_size = 200, max_generations = 100, parallel_evals = 100 }
+swing = { population_size = 150, max_generations = 80, parallel_evals = 50 }
+position = { population_size = 100, max_generations = 50, parallel_evals = 20 }
+long_term = { population_size = 50, max_generations = 30, parallel_evals = 10 }
+
+

@@ -1,0 +1,201 @@
+# =============================================================================
+# Parameter Bounds - Multi-Strategy Family
+# =============================================================================
+
+[metadata]
+family = "multi_strategy"
+version = "1.0.0"
+description = "Parameter bounds for multi-strategy adaptive approaches"
+
+# Regime Detection
+[parameters.regime_indicator]
+type = "enum"
+values = ["vix_percentile", "atr_percentile", "trend_strength", "composite"]
+default = "vix_percentile"
+description = "Primary regime detection indicator"
+
+[parameters.regime_lookback]
+type = "integer"
+min = 20
+max = 126
+step = 21
+default = 63
+description = "Lookback for regime calculation"
+
+[parameters.regime_smoothing]
+type = "integer"
+min = 1
+max = 10
+step = 1
+default = 5
+description = "Days for regime smoothing"
+
+# Regime Thresholds
+[parameters.trending_threshold]
+type = "float"
+min = 0.5
+max = 0.8
+step = 0.05
+default = 0.6
+description = "Threshold for trending regime"
+
+[parameters.mean_reverting_threshold]
+type = "float"
+min = 0.2
+max = 0.5
+step = 0.05
+default = 0.4
+description = "Threshold for mean-reverting regime"
+
+[parameters.high_vol_percentile]
+type = "integer"
+min = 60
+max = 90
+step = 10
+default = 70
+description = "Percentile for high volatility regime"
+
+[parameters.low_vol_percentile]
+type = "integer"
+min = 10
+max = 40
+step = 10
+default = 30
+description = "Percentile for low volatility regime"
+
+# Strategy Weights by Regime
+[parameters.momentum_weight_trending]
+type = "float"
+min = 0.5
+max = 1.0
+step = 0.1
+default = 0.8
+description = "Momentum weight in trending regime"
+
+[parameters.momentum_weight_ranging]
+type = "float"
+min = 0.0
+max = 0.5
+step = 0.1
+default = 0.2
+description = "Momentum weight in ranging regime"
+
+[parameters.mean_reversion_weight_trending]
+type = "float"
+min = 0.0
+max = 0.5
+step = 0.1
+default = 0.2
+description = "Mean reversion weight in trending regime"
+
+[parameters.mean_reversion_weight_ranging]
+type = "float"
+min = 0.5
+max = 1.0
+step = 0.1
+default = 0.8
+description = "Mean reversion weight in ranging regime"
+
+# Component Strategy Parameters
+[parameters.momentum_lookback]
+type = "integer"
+min = 20
+max = 100
+step = 10
+default = 50
+description = "Lookback for momentum component"
+
+[parameters.mean_reversion_lookback]
+type = "integer"
+min = 10
+max = 40
+step = 5
+default = 20
+description = "Lookback for mean reversion component"
+
+[parameters.momentum_entry_threshold]
+type = "float"
+min = 0.0
+max = 0.1
+step = 0.02
+default = 0.05
+description = "Momentum entry threshold"
+
+[parameters.mean_reversion_zscore]
+type = "float"
+min = 1.5
+max = 3.0
+step = 0.25
+default = 2.0
+description = "Z-score for mean reversion entry"
+
+# Transition Rules
+[parameters.min_regime_duration]
+type = "integer"
+min = 3
+max = 15
+step = 2
+default = 5
+description = "Minimum days before regime switch"
+
+[parameters.gradual_transition]
+type = "boolean"
+default = true
+description = "Use gradual transition between regimes"
+
+[parameters.transition_days]
+type = "integer"
+min = 3
+max = 10
+step = 1
+default = 5
+description = "Days for gradual transition"
+
+# Position Sizing
+[parameters.base_position_size]
+type = "float"
+min = 0.02
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Base position size percentage"
+
+[parameters.scale_by_regime_confidence]
+type = "boolean"
+default = true
+description = "Scale position by regime confidence"
+
+[parameters.max_total_exposure]
+type = "float"
+min = 0.5
+max = 1.5
+step = 0.25
+default = 1.0
+description = "Maximum total portfolio exposure"
+
+# Risk Management
+[parameters.stop_loss_pct]
+type = "float"
+min = 0.03
+max = 0.12
+step = 0.01
+default = 0.06
+description = "Stop loss percentage"
+
+[parameters.max_drawdown_trigger]
+type = "float"
+min = 0.1
+max = 0.25
+step = 0.05
+default = 0.15
+description = "Drawdown to trigger risk reduction"
+
+[parameters.correlation_limit]
+type = "float"
+min = 0.5
+max = 0.9
+step = 0.1
+default = 0.7
+description = "Maximum correlation between positions"
+
+

@@ -36,6 +36,7 @@ pub mod context;
 pub mod experiment;
 pub mod fast_context;
 pub mod registry;
+pub mod universe;
 
 // Re-exports
 pub use blocks::{BlockParams, BlockResult, BlockType, Signal, SignalDirection, StrategyBlock};
@@ -55,6 +56,10 @@ pub use fast_context::{
     fast_momentum_select, fast_low_vol_select, fast_equal_weight,
 };
 pub use registry::BlockRegistry;
+pub use universe::{
+    ComplexityTier, StrategyFamily, TrainingModel, UniverseConfig, UniverseLoader,
+    UniverseRestrictions, UniverseValidator, EffectiveLimits,
+};
 
 /// Prelude for convenient imports.
 pub mod prelude {
@@ -72,5 +77,9 @@ pub mod prelude {
         RunMetadata, RunMetrics, ExperimentResult,
     };
     pub use crate::registry::BlockRegistry;
+    pub use crate::universe::{
+        ComplexityTier, StrategyFamily, TrainingModel, UniverseConfig, UniverseLoader,
+        UniverseRestrictions, UniverseValidator,
+    };
 }
 

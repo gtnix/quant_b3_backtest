@@ -1,6 +1,4 @@
 import { 
-  LayoutDashboard, 
-  TrendingUp, 
   Users, 
   LineChart,
   Settings,
@@ -16,7 +14,8 @@ import {
   Globe,
   Cpu,
   DollarSign,
-  Activity
+  Activity,
+  Boxes
 } from 'lucide-react';
 import type { Page } from '../../App';
 
@@ -26,9 +25,10 @@ interface SidebarProps {
 }
 
 const navItems: { id: Page; label: string; icon: React.ElementType; group?: string }[] = [
-  // Mining (new primary section)
+  // Mining (primary section)
   { id: 'miner', label: 'Miner Control', icon: Gauge, group: 'Mining' },
   { id: 'hall-of-fame', label: 'Hall of Fame', icon: Trophy, group: 'Mining' },
+  { id: 'strategies', label: 'Strategy Catalog', icon: Boxes, group: 'Mining' },
   
   // Configuration
   { id: 'config-universe', label: 'Universe', icon: Globe, group: 'Config' },
@@ -48,13 +48,8 @@ const navItems: { id: Page; label: string; icon: React.ElementType; group?: stri
   { id: 'comparison', label: 'Comparison', icon: GitCompare, group: 'Advanced' },
   
   // System
-  { id: 'evolution', label: 'Evolution', icon: TrendingUp, group: 'System' },
   { id: 'risk', label: 'Risk Analytics', icon: Activity, group: 'System' },
   { id: 'audit', label: 'Audit Report', icon: Shield, group: 'System' },
-  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, group: 'System' },
-  
-  // Legacy (keep for compatibility)
-  { id: 'cockpit', label: 'Cockpit (Legacy)', icon: Gauge, group: 'Legacy' },
 ];
 
 export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
@@ -126,7 +121,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
       {/* Footer */}
       <div className="p-4 border-t border-terminal-border">
         <button 
-          onClick={() => onPageChange('dashboard')}
+          onClick={() => onPageChange('config-trading')}
           className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-terminal-muted hover:text-white hover:bg-terminal-border/50 transition-all"
         >
           <Settings className="w-4 h-4" />

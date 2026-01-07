@@ -1,0 +1,173 @@
+# =============================================================================
+# Parameter Bounds - Breakout Family
+# =============================================================================
+
+[metadata]
+family = "breakout"
+version = "1.0.0"
+description = "Parameter bounds for breakout trading strategies"
+
+# Donchian Channel Parameters
+[parameters.donchian_entry_period]
+type = "integer"
+min = 10
+max = 100
+step = 5
+default = 55
+description = "Donchian channel period for entry"
+
+[parameters.donchian_exit_period]
+type = "integer"
+min = 5
+max = 50
+step = 5
+default = 20
+description = "Donchian channel period for exit"
+
+[parameters.donchian_mode]
+type = "enum"
+values = ["single", "dual"]
+default = "dual"
+description = "Single or dual channel mode"
+
+# Volatility Expansion Parameters
+[parameters.consolidation_period]
+type = "integer"
+min = 5
+max = 30
+step = 5
+default = 10
+description = "Period to identify consolidation"
+
+[parameters.atr_period]
+type = "integer"
+min = 10
+max = 30
+step = 5
+default = 14
+description = "ATR calculation period"
+
+[parameters.atr_breakout_mult]
+type = "float"
+min = 1.0
+max = 3.0
+step = 0.25
+default = 1.5
+description = "ATR multiplier for breakout confirmation"
+
+[parameters.bb_width_percentile]
+type = "integer"
+min = 5
+max = 30
+step = 5
+default = 10
+description = "BB width percentile for consolidation"
+
+# Volume Confirmation
+[parameters.volume_confirmation]
+type = "boolean"
+default = true
+description = "Require volume confirmation"
+
+[parameters.volume_multiplier]
+type = "float"
+min = 1.2
+max = 3.0
+step = 0.2
+default = 1.5
+description = "Volume multiplier for confirmation"
+
+[parameters.volume_lookback]
+type = "integer"
+min = 10
+max = 50
+step = 5
+default = 20
+description = "Lookback for average volume"
+
+# Price Channel Parameters
+[parameters.channel_lookback]
+type = "integer"
+min = 10
+max = 60
+step = 5
+default = 20
+description = "Lookback for price channel"
+
+[parameters.channel_breakout_pct]
+type = "float"
+min = 0.0
+max = 0.02
+step = 0.005
+default = 0.005
+description = "Required break above channel as percentage"
+
+# False Breakout Protection
+[parameters.confirmation_bars]
+type = "integer"
+min = 1
+max = 5
+step = 1
+default = 2
+description = "Number of bars to confirm breakout"
+
+[parameters.retest_entry]
+type = "boolean"
+default = false
+description = "Wait for retest before entry"
+
+[parameters.retest_tolerance]
+type = "float"
+min = 0.0
+max = 0.02
+step = 0.005
+default = 0.01
+description = "Tolerance for retest entry"
+
+# Risk Management
+[parameters.stop_loss_atr_mult]
+type = "float"
+min = 1.0
+max = 4.0
+step = 0.5
+default = 2.0
+description = "Stop loss as ATR multiplier"
+
+[parameters.trailing_stop]
+type = "boolean"
+default = true
+description = "Use trailing stop"
+
+[parameters.trailing_stop_atr_mult]
+type = "float"
+min = 1.5
+max = 4.0
+step = 0.5
+default = 2.5
+description = "Trailing stop as ATR multiplier"
+
+[parameters.take_profit_atr_mult]
+type = "float"
+min = 2.0
+max = 8.0
+step = 1.0
+default = 4.0
+description = "Take profit as ATR multiplier"
+
+[parameters.max_holding_days]
+type = "integer"
+min = 5
+max = 60
+step = 5
+default = 30
+description = "Maximum holding period in days"
+
+[parameters.position_size_pct]
+type = "float"
+min = 0.02
+max = 0.1
+step = 0.01
+default = 0.05
+description = "Position size as portfolio percentage"
+
+

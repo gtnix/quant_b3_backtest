@@ -51,6 +51,28 @@ min_market_cap_us = 5000000000   # $5B
 max_annualized_vol = 0.45
 top_quantile = 0.25
 
+# =============================================================================
+# Universe Restrictions for Parameter Universe System
+# =============================================================================
+[universe_restrictions]
+# Allowed strategy families for this risk profile
+allowed_strategy_families = ["swing", "position", "pair", "portfolio", "momentum", "mean_reversion", "sector_rotation", "factor", "seasonal", "buy_hold", "multi_strategy"]
+
+# Maximum parameters the GA can optimize
+max_parameters_to_optimize = 8
+
+# Allowed complexity tiers
+allowed_complexity_tiers = ["tier1_fast", "tier2_medium"]
+
+# Evolution limits
+max_population_size = 150
+max_generations = 100
+
+# Validation strictness
+min_wfa_folds = 5
+min_pbo_permutations = 750
+max_pbo_threshold = 0.25
+
 
 
 

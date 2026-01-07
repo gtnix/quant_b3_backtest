@@ -184,6 +184,161 @@ impl Population {
         self.generation += 1;
         self.genomes = new_genomes;
     }
+
+    /// Generate a population from universe-restricted strategies.
+    /// This is the HYBRID generation mode: uses allowed strategies as templates
+    /// and creates variations within the parameter bounds.
+    pub fn from_universe(
+        size: usize,
+        rng: &mut ChaCha8Rng,
+        param_ranges: &ParamRanges,
+        allowed_strategies: &[String],
+        family_filter: Option<&[String]>,
+    ) -> Self {
+        if allowed_strategies.is_empty() {
+            // Fallback to random generation if no strategies defined
+            return Self::random(size, rng, param_ranges);
+        }
+
+        // Filter strategies by family if specified
+        let filtered_strategies: Vec<&String> = if let Some(families) = family_filter {
+            allowed_strategies
+                .iter()
+                .filter(|s| families.iter().any(|f| s.starts_with(f)))
+                .collect()
+        } else {
+            allowed_strategies.iter().collect()
+        };
+
+        if filtered_strategies.is_empty() {
+            return Self::random(size, rng, param_ranges);
+        }
+
+        let genomes: Vec<_> = (0..size)
+            .map(|_| {
+                // Pick a random allowed strategy
+                let strategy_id = filtered_strategies[rng.gen_range(0..filtered_strategies.len())];
+                Self::genome_from_strategy_template(strategy_id, rng, param_ranges, 0)
+            })
+            .collect();
+
+        Self {
+            genomes,
+            generation: 0,
+        }
+    }
+
+    /// Generate a genome based on a strategy template with random parameter variations.
+    pub fn genome_from_strategy_template(
+        strategy_id: &str,
+        rng: &mut ChaCha8Rng,
+        param_ranges: &ParamRanges,
+        generation: u32,
+    ) -> StrategyGenome {
+        // Parse family from strategy_id (e.g., "swing_momentum_ma_crossover_conservative" -> "swing")
+        let family = strategy_id.split('_').next().unwrap_or("swing");
+        
+        // Build genes based on family type
+        let mut genes = Vec::new();
+
+        // Add selection blocks appropriate for the family
+        let selection_ids = param_ranges.block_ids_by_type(BlockType::Selection);
+        let family_selection: Vec<_> = selection_ids
+            .iter()
+            .filter(|id| id.contains(family) || Self::is_generic_block(id))
+            .collect();
+
+        if !family_selection.is_empty() {
+            let num = rng.gen_range(1..=2).min(family_selection.len());
+            for i in 0..num {
+                let block_id = family_selection[i % family_selection.len()];
+                genes.push(Self::random_gene(BlockType::Selection, block_id, rng, param_ranges));
+            }
+        } else if !selection_ids.is_empty() {
+            // Fallback to any selection block
+            let block_id = selection_ids[rng.gen_range(0..selection_ids.len())];
+            genes.push(Self::random_gene(BlockType::Selection, block_id, rng, param_ranges));
+        }
+
+        // Add entry block if strategy type suggests it
+        if Self::strategy_needs_entry(strategy_id) {
+            let entry_ids = param_ranges.block_ids_by_type(BlockType::Entry);
+            let family_entry: Vec<_> = entry_ids
+                .iter()
+                .filter(|id| id.contains(family) || Self::is_generic_block(id))
+                .collect();
+
+            if !family_entry.is_empty() {
+                let block_id = family_entry[rng.gen_range(0..family_entry.len())];
+                genes.push(Self::random_gene(BlockType::Entry, block_id, rng, param_ranges));
+            } else if !entry_ids.is_empty() {
+                let block_id = entry_ids[rng.gen_range(0..entry_ids.len())];
+                genes.push(Self::random_gene(BlockType::Entry, block_id, rng, param_ranges));
+            }
+
+            // Add exit blocks
+            let exit_ids = param_ranges.block_ids_by_type(BlockType::Exit);
+            let num_exit = rng.gen_range(1..=2);
+            for _ in 0..num_exit.min(exit_ids.len()) {
+                let block_id = exit_ids[rng.gen_range(0..exit_ids.len())];
+                genes.push(Self::random_gene(BlockType::Exit, block_id, rng, param_ranges));
+            }
+        }
+
+        // Always add sizing block
+        let sizing_ids = param_ranges.block_ids_by_type(BlockType::Sizing);
+        if !sizing_ids.is_empty() {
+            // Prefer risk-appropriate sizing based on strategy risk level
+            let sizing_id = Self::select_sizing_for_strategy(strategy_id, &sizing_ids, rng);
+            genes.push(Self::random_gene(BlockType::Sizing, sizing_id, rng, param_ranges));
+        }
+
+        StrategyGenome::new(genes).with_generation(generation)
+    }
+
+    /// Check if a block is a generic utility block.
+    fn is_generic_block(block_id: &str) -> bool {
+        matches!(
+            block_id,
+            "stop_loss" | "take_profit" | "trailing_stop" | "equal_weight" | 
+            "volatility_target" | "risk_parity" | "time_exit" | "atr_exit"
+        )
+    }
+
+    /// Determine if strategy type needs entry/exit blocks.
+    fn strategy_needs_entry(strategy_id: &str) -> bool {
+        // Portfolio strategies often don't need explicit entry/exit
+        !strategy_id.contains("portfolio") 
+            && !strategy_id.contains("buy_hold")
+            && !strategy_id.contains("equal_weight")
+    }
+
+    /// Select appropriate sizing block based on strategy risk level.
+    fn select_sizing_for_strategy<'a>(
+        strategy_id: &str,
+        sizing_ids: &[&'a str],
+        rng: &mut ChaCha8Rng,
+    ) -> &'a str {
+        // Check risk level from strategy name
+        let is_conservative = strategy_id.contains("conservative");
+        let is_aggressive = strategy_id.contains("aggressive");
+
+        // Prefer matching sizing blocks
+        if is_conservative {
+            // Prefer equal_weight or low risk sizing
+            if let Some(id) = sizing_ids.iter().find(|id| id.contains("equal") || id.contains("fixed")) {
+                return id;
+            }
+        } else if is_aggressive {
+            // Prefer volatility-based sizing
+            if let Some(id) = sizing_ids.iter().find(|id| id.contains("volatility") || id.contains("kelly")) {
+                return id;
+            }
+        }
+
+        // Fallback to random
+        sizing_ids[rng.gen_range(0..sizing_ids.len())]
+    }
 }
 
 impl Default for Population {

@@ -1,0 +1,35 @@
+# =============================================================================
+# Training Strategy: Walk-Forward Analysis
+# =============================================================================
+# Rolling window validation for time-series data.
+# Best for strategies sensitive to market regime changes.
+# =============================================================================
+
+[strategy]
+id = "walk_forward"
+name = "Walk-Forward Analysis"
+description = "Rolling window validation simulating real-time trading conditions"
+
+[validation]
+method = "walk_forward"
+wfa_enabled = true
+wfa_num_folds = 8
+wfa_is_ratio = 0.60
+wfa_purge_days = 3
+train_test_split = 0.65
+pbo_enabled = true
+pbo_num_permutations = 500
+pbo_significance_level = 0.05
+
+[requirements]
+min_data_years = 3
+min_trades_is = 40
+min_trades_oos = 20
+max_pbo = 0.25
+max_degradation_is_to_oos = 0.35
+
+[complexity]
+tier = "tier2_medium"
+estimated_runtime_multiplier = 1.5
+
+

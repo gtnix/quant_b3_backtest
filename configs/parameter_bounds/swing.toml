@@ -1,0 +1,111 @@
+# =============================================================================
+# Parameter Bounds: Swing Trading Family
+# =============================================================================
+# Defines valid ranges for all parameters in swing trading strategies.
+# Used by the GA to constrain the search space.
+# =============================================================================
+
+[bounds]
+family = "swing"
+description = "Short-term trend following with 2-10 day holding periods"
+
+# -----------------------------------------------------------------------------
+# Moving Average Parameters
+# -----------------------------------------------------------------------------
+[bounds.ma_periods]
+fast = { min = 5, max = 50, step = 5, default = 20 }
+slow = { min = 20, max = 200, step = 10, default = 50 }
+type = { options = ["SMA", "EMA", "WMA"], default = "SMA" }
+
+# Constraint: fast < slow (validated at runtime)
+[bounds.ma_periods.constraints]
+fast_less_than_slow = true
+min_gap = 15
+
+# -----------------------------------------------------------------------------
+# RSI Parameters
+# -----------------------------------------------------------------------------
+[bounds.rsi]
+period = { min = 7, max = 21, step = 1, default = 14 }
+oversold = { min = 20, max = 35, step = 5, default = 30 }
+overbought = { min = 65, max = 80, step = 5, default = 70 }
+
+[bounds.rsi.constraints]
+oversold_less_than_overbought = true
+
+# -----------------------------------------------------------------------------
+# MACD Parameters
+# -----------------------------------------------------------------------------
+[bounds.macd]
+fast_period = { min = 8, max = 15, step = 1, default = 12 }
+slow_period = { min = 20, max = 30, step = 2, default = 26 }
+signal_period = { min = 7, max = 12, step = 1, default = 9 }
+
+# -----------------------------------------------------------------------------
+# Bollinger Bands Parameters
+# -----------------------------------------------------------------------------
+[bounds.bollinger]
+period = { min = 15, max = 30, step = 5, default = 20 }
+std_dev = { min = 1.5, max = 3.0, step = 0.25, default = 2.0 }
+
+# -----------------------------------------------------------------------------
+# ATR / Stop-Loss Parameters
+# -----------------------------------------------------------------------------
+[bounds.atr]
+period = { min = 10, max = 20, step = 2, default = 14 }
+stop_multiplier = { min = 1.5, max = 4.0, step = 0.5, default = 2.0 }
+target_multiplier = { min = 2.0, max = 5.0, step = 0.5, default = 3.0 }
+
+[bounds.atr.constraints]
+target_greater_than_stop = true
+
+# -----------------------------------------------------------------------------
+# Volume Filter
+# -----------------------------------------------------------------------------
+[bounds.volume]
+ma_period = { min = 10, max = 30, step = 5, default = 20 }
+multiplier = { min = 1.0, max = 2.0, step = 0.1, default = 1.2 }
+
+# -----------------------------------------------------------------------------
+# Timeframe Configuration
+# -----------------------------------------------------------------------------
+[bounds.timeframe]
+bar_interval = { options = ["1D"], default = "1D" }
+data_window_years = { min = 1, max = 5, step = 1, default = 2 }
+lookback_bars = { min = 20, max = 100, step = 10, default = 60 }
+min_history_bars = { min = 50, max = 252, step = 50, default = 100 }
+
+# -----------------------------------------------------------------------------
+# Holding Period
+# -----------------------------------------------------------------------------
+[bounds.holding]
+period_min = { min = 2, max = 5, step = 1, default = 3 }
+period_max = { min = 5, max = 15, step = 1, default = 10 }
+
+[bounds.holding.constraints]
+min_less_than_max = true
+
+# -----------------------------------------------------------------------------
+# Position Sizing
+# -----------------------------------------------------------------------------
+[bounds.position_sizing]
+risk_per_trade_pct = { min = 0.5, max = 2.5, step = 0.25, default = 1.0 }
+max_position_pct = { min = 5.0, max = 20.0, step = 2.5, default = 15.0 }
+
+# -----------------------------------------------------------------------------
+# Validation Parameters
+# -----------------------------------------------------------------------------
+[bounds.validation]
+train_test_split = { min = 0.60, max = 0.75, step = 0.05, default = 0.65 }
+wfa_folds = { min = 3, max = 10, step = 1, default = 5 }
+min_trades_total = { min = 50, max = 150, step = 25, default = 80 }
+
+# -----------------------------------------------------------------------------
+# Complexity Classification
+# -----------------------------------------------------------------------------
+[complexity]
+tier = "tier1_fast"
+typical_parameters = 8
+evaluation_time_ms = 50
+
+

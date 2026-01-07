@@ -1,0 +1,36 @@
+# =============================================================================
+# Training Strategy: Expanding Window
+# =============================================================================
+# Incrementally expanding training set with fixed test windows.
+# Adaptive to new data while preserving historical patterns.
+# =============================================================================
+
+[strategy]
+id = "expanding_window"
+name = "Expanding Window"
+description = "Incrementally expanding training set for adaptive learning"
+
+[validation]
+method = "expanding_window"
+wfa_enabled = true
+wfa_num_folds = 6
+wfa_is_ratio = 0.65
+wfa_purge_days = 5
+train_test_split = 0.60
+pbo_enabled = true
+pbo_num_permutations = 750
+pbo_significance_level = 0.05
+rolling = true
+
+[requirements]
+min_data_years = 3
+min_trades_is = 45
+min_trades_oos = 20
+max_pbo = 0.28
+max_degradation_is_to_oos = 0.38
+
+[complexity]
+tier = "tier2_medium"
+estimated_runtime_multiplier = 1.2
+
+

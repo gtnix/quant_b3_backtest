@@ -1,0 +1,32 @@
+# =============================================================================
+# Training Strategy: Anchored Validation
+# =============================================================================
+# Fixed training start with expanding window.
+# Best for long-term strategies (factor investing, buy & hold).
+# =============================================================================
+
+[strategy]
+id = "anchored"
+name = "Anchored Validation"
+description = "Fixed anchor point with expanding training window for long-term strategies"
+
+[validation]
+method = "anchored"
+wfa_enabled = false
+train_test_split = 0.70
+pbo_enabled = true
+pbo_num_permutations = 500
+pbo_significance_level = 0.10
+
+[requirements]
+min_data_years = 5
+min_trades_is = 30
+min_trades_oos = 15
+max_pbo = 0.35
+max_degradation_is_to_oos = 0.45
+
+[complexity]
+tier = "tier1_fast"
+estimated_runtime_multiplier = 0.5
+
+

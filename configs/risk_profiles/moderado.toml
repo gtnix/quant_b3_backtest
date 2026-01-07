@@ -65,6 +65,28 @@ min_momentum_return = 0.0
 use_quantile_thresholds = true
 top_quantile = 0.20
 
+# =============================================================================
+# Universe Restrictions for Parameter Universe System
+# =============================================================================
+[universe_restrictions]
+# Allowed strategy families for this risk profile
+allowed_strategy_families = ["swing", "position", "pair", "portfolio", "momentum", "mean_reversion", "breakout", "sector_rotation", "factor", "volatility", "event_driven", "buy_hold", "multi_strategy"]
+
+# Maximum parameters the GA can optimize
+max_parameters_to_optimize = 10
+
+# Allowed complexity tiers
+allowed_complexity_tiers = ["tier1_fast", "tier2_medium"]
+
+# Evolution limits
+max_population_size = 200
+max_generations = 150
+
+# Validation strictness
+min_wfa_folds = 5
+min_pbo_permutations = 500
+max_pbo_threshold = 0.30
+
 
 
 

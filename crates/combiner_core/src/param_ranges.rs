@@ -500,6 +500,96 @@ impl ParamRanges {
     pub fn all_block_ids(&self) -> Vec<&str> {
         self.blocks.keys().map(|s| s.as_str()).collect()
     }
+
+    /// Apply restrictions to narrow the parameter space.
+    /// 
+    /// This method returns a new ParamRanges with:
+    /// - Only blocks from allowed families (if specified)
+    /// - Narrowed numeric ranges based on provided bounds
+    /// 
+    /// # Arguments
+    /// * `allowed_blocks` - Optional list of block IDs to keep (filters out others)
+    /// * `max_parameters` - Optional maximum number of parameters per block
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let ranges = ParamRanges::new()
+    ///     .with_restrictions(Some(&["momentum", "equal_weight"]), Some(5));
+    /// ```
+    pub fn with_restrictions(
+        mut self,
+        allowed_blocks: Option<&[&str]>,
+        max_parameters: Option<usize>,
+    ) -> Self {
+        // Filter blocks if allowed list provided
+        if let Some(allowed) = allowed_blocks {
+            self.blocks.retain(|id, _| allowed.contains(&id.as_str()));
+        }
+
+        // Limit parameters per block if specified
+        if let Some(max_params) = max_parameters {
+            for block in self.blocks.values_mut() {
+                if block.params.len() > max_params {
+                    // Keep only the first N parameters (typically the most important)
+                    block.params.truncate(max_params);
+                }
+            }
+        }
+
+        self
+    }
+
+    /// Apply numeric bounds to narrow parameter ranges.
+    /// 
+    /// # Arguments
+    /// * `block_id` - The block to modify
+    /// * `param_name` - The parameter to narrow
+    /// * `new_min` - New minimum value (None to keep current)
+    /// * `new_max` - New maximum value (None to keep current)
+    /// 
+    /// The resulting range is the intersection of old and new bounds.
+    pub fn narrow_param_range(
+        &mut self,
+        block_id: &str,
+        param_name: &str,
+        new_min: Option<f64>,
+        new_max: Option<f64>,
+    ) -> bool {
+        if let Some(block) = self.blocks.get_mut(block_id) {
+            for param in &mut block.params {
+                if param.name == param_name {
+                    // Get current bounds and narrow them
+                    match &mut param.default {
+                        ParamValue::Float { min, max, .. } => {
+                            if let Some(nm) = new_min {
+                                *min = min.max(nm);
+                            }
+                            if let Some(nx) = new_max {
+                                *max = max.min(nx);
+                            }
+                            return true;
+                        }
+                        ParamValue::Int { min, max, .. } => {
+                            if let Some(nm) = new_min {
+                                *min = (*min).max(nm as i64);
+                            }
+                            if let Some(nx) = new_max {
+                                *max = (*max).min(nx as i64);
+                            }
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Get the total count of optimizable parameters across all blocks.
+    pub fn total_parameter_count(&self) -> usize {
+        self.blocks.values().map(|b| b.params.len()).sum()
+    }
 }
 
 #[cfg(test)]

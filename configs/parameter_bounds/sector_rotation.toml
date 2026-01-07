@@ -1,0 +1,138 @@
+# =============================================================================
+# Parameter Bounds - Sector Rotation Family
+# =============================================================================
+
+[metadata]
+family = "sector_rotation"
+version = "1.0.0"
+description = "Parameter bounds for sector rotation strategies"
+
+# Business Cycle Parameters
+[parameters.cycle_indicator]
+type = "enum"
+values = ["composite", "yield_curve", "pmi", "gdp_momentum"]
+default = "composite"
+description = "Economic indicator for cycle detection"
+
+[parameters.cycle_smoothing]
+type = "integer"
+min = 1
+max = 6
+step = 1
+default = 3
+description = "Months for cycle indicator smoothing"
+
+[parameters.defensive_mode]
+type = "boolean"
+default = false
+description = "Prefer defensive sectors in uncertainty"
+
+# Relative Strength Parameters
+[parameters.rs_lookback]
+type = "integer"
+min = 21
+max = 126
+step = 21
+default = 63
+description = "Lookback for relative strength calculation"
+
+[parameters.rs_top_n]
+type = "integer"
+min = 1
+max = 5
+step = 1
+default = 3
+description = "Number of top sectors to hold"
+
+[parameters.rs_momentum_weight]
+type = "float"
+min = 0.0
+max = 1.0
+step = 0.25
+default = 1.0
+description = "Weight on momentum in RS calculation"
+
+# Rebalancing
+[parameters.rebalance_frequency]
+type = "enum"
+values = ["weekly", "bi_weekly", "monthly", "quarterly"]
+default = "monthly"
+description = "Sector rebalancing frequency"
+
+[parameters.min_holding_period]
+type = "integer"
+min = 5
+max = 21
+step = 5
+default = 10
+description = "Minimum days to hold a sector"
+
+# Sector Universe
+[parameters.include_utilities]
+type = "boolean"
+default = true
+description = "Include utilities sector"
+
+[parameters.include_real_estate]
+type = "boolean"
+default = true
+description = "Include real estate sector"
+
+[parameters.include_financials]
+type = "boolean"
+default = true
+description = "Include financial sector"
+
+# Allocation Rules
+[parameters.equal_weight_sectors]
+type = "boolean"
+default = true
+description = "Equal weight among selected sectors"
+
+[parameters.max_sector_weight]
+type = "float"
+min = 0.2
+max = 0.5
+step = 0.1
+default = 0.4
+description = "Maximum weight per sector"
+
+[parameters.min_sector_weight]
+type = "float"
+min = 0.0
+max = 0.2
+step = 0.05
+default = 0.05
+description = "Minimum weight per sector"
+
+# Risk Management
+[parameters.momentum_exit]
+type = "boolean"
+default = true
+description = "Exit on momentum reversal"
+
+[parameters.momentum_exit_threshold]
+type = "float"
+min = -0.2
+max = 0.0
+step = 0.05
+default = -0.1
+description = "Momentum threshold for exit"
+
+[parameters.max_drawdown_sector]
+type = "float"
+min = 0.1
+max = 0.3
+step = 0.05
+default = 0.2
+description = "Maximum drawdown per sector"
+
+[parameters.cash_threshold]
+type = "float"
+min = 0.0
+max = 0.3
+step = 0.1
+default = 0.0
+description = "Cash allocation when no sectors qualify"
+
+

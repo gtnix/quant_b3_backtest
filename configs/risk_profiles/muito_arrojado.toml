@@ -63,6 +63,28 @@ max_annualized_vol = 0.60        # Include high-vol assets
 min_dividend_yield = -0.08
 top_quantile = 0.10              # Very selective
 
+# =============================================================================
+# Universe Restrictions for Parameter Universe System
+# =============================================================================
+[universe_restrictions]
+# Allowed strategy families for this risk profile
+allowed_strategy_families = ["intraday", "swing", "momentum", "breakout", "volatility", "event_driven"]
+
+# Maximum parameters the GA can optimize
+max_parameters_to_optimize = 20
+
+# Allowed complexity tiers
+allowed_complexity_tiers = ["tier1_fast", "tier2_medium", "tier3_slow"]
+
+# Evolution limits
+max_population_size = 500
+max_generations = 300
+
+# Validation strictness
+min_wfa_folds = 3
+min_pbo_permutations = 250
+max_pbo_threshold = 0.40
+
 
 
 
