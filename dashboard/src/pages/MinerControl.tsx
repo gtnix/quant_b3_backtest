@@ -290,7 +290,7 @@ function PerformancePanel() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold font-mono text-white">
-                {current.throughput_genomes_per_min.toFixed(1)}
+                {(current.throughput_genomes_per_min || 0).toFixed(1)}
                 <span className="text-sm text-slate-500 ml-1">/min</span>
               </div>
               <div className="text-[10px] text-slate-500 uppercase">Genomas Avaliados</div>
@@ -308,13 +308,13 @@ function PerformancePanel() {
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-emerald-400">
-                {current.evaluations_per_second.toFixed(1)}
+                {(current.evaluations_per_second || 0).toFixed(1)}
               </div>
               <div className="text-[10px] text-slate-500">EVAL/SEC</div>
             </div>
             <div className="bg-slate-800/50 rounded p-2">
               <div className="text-lg font-bold font-mono text-blue-400">
-                {(current.cache_hit_rate * 100).toFixed(0)}%
+                {((current.cache_hit_rate || 0) * 100).toFixed(0)}%
               </div>
               <div className="text-[10px] text-slate-500">CACHE HITS</div>
             </div>
@@ -348,7 +348,7 @@ function PerformancePanel() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-2xl font-bold font-mono text-slate-400">
-                {historical.avg_throughput_per_min.toFixed(1)}
+                {(historical.avg_throughput_per_min || 0).toFixed(1)}
                 <span className="text-sm text-slate-500 ml-1">/min</span>
               </div>
               <div className="text-[10px] text-slate-500 uppercase">Throughput Médio (24h)</div>
@@ -448,7 +448,7 @@ function ActiveCampaignCard({ campaign }: { campaign: CurrentCampaign }) {
         </div>
         <div className="bg-slate-800/50 rounded p-2 text-center">
           <div className="text-lg font-bold font-mono text-white">
-            {campaign.candidatesEvaluated.toLocaleString()}
+            {(campaign.candidatesEvaluated || 0).toLocaleString()}
           </div>
           <div className="text-[9px] text-slate-500">CAND</div>
         </div>
@@ -867,19 +867,19 @@ export function MinerControl() {
             <Clock className="w-5 h-5 text-slate-600" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-blue-500/50">
-            <LiveCounter value={stats?.candidates.last24h || 0} label="CANDIDATOS 24H" tooltipKey="candidates_24h" />
+            <LiveCounter value={stats?.candidates?.last24h || 0} label="CANDIDATOS 24H" tooltipKey="candidates_24h" />
             <BarChart2 className="w-5 h-5 text-blue-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-amber-500/50">
-            <LiveCounter value={stats?.promotions.last24h || 0} label="PROMOÇÕES 24H" tooltipKey="promotions_24h" />
+            <LiveCounter value={stats?.promotions?.last24h || 0} label="PROMOÇÕES 24H" tooltipKey="promotions_24h" />
             <Trophy className="w-5 h-5 text-amber-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-emerald-500/50">
-            <LiveCounter value={stats?.promotions.total || 0} label="HALL DA FAMA" tooltipKey="hall_of_fame_count" />
+            <LiveCounter value={stats?.promotions?.total || 0} label="HALL DA FAMA" tooltipKey="hall_of_fame_count" />
             <Trophy className="w-5 h-5 text-emerald-500" />
           </div>
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between transition-all hover:border-violet-500/50">
-            <LiveCounter value={stats?.throughput.candidatesPerMin || 0} label="THROUGHPUT/MIN" format="decimal" tooltipKey="throughput_min" />
+            <LiveCounter value={stats?.throughput?.candidatesPerMin || 0} label="THROUGHPUT/MIN" format="decimal" tooltipKey="throughput_min" />
             <TrendingUp className="w-5 h-5 text-violet-500" />
           </div>
         </div>
@@ -935,10 +935,10 @@ export function MinerControl() {
                 <BarChart2 className="w-4 h-4 text-slate-500" />
                 <span className="text-xs font-medium text-slate-400">ESTATÍSTICAS</span>
               </div>
-              <StatRow label="Candidatos (7d)" value={stats?.candidates.last7d?.toLocaleString() || '0'} />
-              <StatRow label="Promoções (7d)" value={stats?.promotions.last7d || 0} color="amber" />
-              <StatRow label="Campanhas Concluídas" value={stats?.campaigns.completed || 0} color="emerald" />
-              <StatRow label="Campanhas Falhadas" value={stats?.campaigns.failed || 0} />
+              <StatRow label="Candidatos (7d)" value={stats?.candidates?.last7d?.toLocaleString() || '0'} />
+              <StatRow label="Promoções (7d)" value={stats?.promotions?.last7d || 0} color="amber" />
+              <StatRow label="Campanhas Concluídas" value={stats?.campaigns?.completed || 0} color="emerald" />
+              <StatRow label="Campanhas Falhadas" value={stats?.campaigns?.failed || 0} />
             </div>
             
             {/* Conversion Funnel */}
@@ -1036,7 +1036,7 @@ export function MinerControl() {
               </div>
               <div className="text-center py-4">
                 <div className="text-4xl font-bold font-mono text-amber-400">
-                  {stats?.promotions.total || 0}
+                  {stats?.promotions?.total || 0}
                 </div>
                 <div className="text-[10px] text-amber-500/70 uppercase">Estratégias Promovidas</div>
               </div>

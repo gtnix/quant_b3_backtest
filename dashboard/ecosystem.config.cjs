@@ -1,5 +1,5 @@
 /**
- * PM2 Ecosystem Configuration
+ * PM2 Ecosystem Configuration - Alpha Forge
  * 
  * Usage:
  *   pm2 start ecosystem.config.cjs
@@ -8,13 +8,15 @@
  *   pm2 logs
  */
 
+const ALPHA_FORGE_ROOT = '/opt/alpha-forge';
+
 module.exports = {
   apps: [
     {
       // API Server with OMP (Orquestrador de Mineração Perpétua)
       name: 'api-server',
       script: 'server.js',
-      cwd: '/opt/alpha-forge/quant_b3_backtest/dashboard',
+      cwd: `${ALPHA_FORGE_ROOT}/dashboard`,
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -30,12 +32,16 @@ module.exports = {
         PORT: 3001,
         DATABASE_URL: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require',
         OMP_ENABLED: 'true',
+        // Binary paths for SCG/OMP
+        COMBINER_PATH: `${ALPHA_FORGE_ROOT}/bin/combiner`,
+        BACKTEST_PATH: `${ALPHA_FORGE_ROOT}/bin/backtest`,
+        CONFIGS_PATH: `${ALPHA_FORGE_ROOT}/configs`,
       },
       
       // Logging
-      log_file: '/opt/alpha-forge/logs/api-server.log',
-      error_file: '/opt/alpha-forge/logs/api-server-error.log',
-      out_file: '/opt/alpha-forge/logs/api-server-out.log',
+      log_file: `${ALPHA_FORGE_ROOT}/logs/api-server.log`,
+      error_file: `${ALPHA_FORGE_ROOT}/logs/api-server-error.log`,
+      out_file: `${ALPHA_FORGE_ROOT}/logs/api-server-out.log`,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       merge_logs: true,
       
@@ -48,7 +54,7 @@ module.exports = {
       name: 'alpha-dashboard',
       script: 'npm',
       args: 'run preview -- --port 5173 --host',
-      cwd: '/opt/alpha-forge/quant_b3_backtest/dashboard',
+      cwd: `${ALPHA_FORGE_ROOT}/dashboard`,
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
@@ -60,9 +66,9 @@ module.exports = {
         NODE_ENV: 'production',
       },
       
-      log_file: '/opt/alpha-forge/logs/dashboard.log',
-      error_file: '/opt/alpha-forge/logs/dashboard-error.log',
-      out_file: '/opt/alpha-forge/logs/dashboard-out.log',
+      log_file: `${ALPHA_FORGE_ROOT}/logs/dashboard.log`,
+      error_file: `${ALPHA_FORGE_ROOT}/logs/dashboard-error.log`,
+      out_file: `${ALPHA_FORGE_ROOT}/logs/dashboard-out.log`,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     },
   ],

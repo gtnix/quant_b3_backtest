@@ -150,3 +150,5 @@ ON CONFLICT (slug) DO UPDATE SET
     is_system = EXCLUDED.is_system;
 
 
+
+

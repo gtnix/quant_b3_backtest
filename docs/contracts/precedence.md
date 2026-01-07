@@ -187,3 +187,5 @@ ERROR Universe validation failed: Strategy family 'intraday' not allowed
 *Documento de contrato para o Parameter Universe System. Qualquer mudança neste contrato requer atualização da documentação e dos testes de integração.*
 
 
+
+

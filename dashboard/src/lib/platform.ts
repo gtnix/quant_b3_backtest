@@ -57,20 +57,27 @@ export const capabilities = {
 // API CONFIGURATION
 // =============================================================================
 
+// Detect if we're on a remote server (not localhost)
+const isRemoteServer = (): boolean => {
+  return typeof window !== 'undefined' && 
+    !window.location.hostname.includes('localhost') &&
+    !window.location.hostname.includes('127.0.0.1');
+};
+
 // Determine API base URL based on environment
 const getApiBase = (): string => {
-  // In production, API is served from same domain via nginx proxy
-  if (platform.isProd) {
-    return '/api';
+  // For remote VPS deployments, use explicit port 3001
+  if (isRemoteServer()) {
+    return `http://${window.location.hostname}:3001/api`;
   }
   // In development, use local Express server
   return 'http://localhost:3001/api';
 };
 
 const getSseEndpoint = (): string => {
-  // In production, SSE is served via nginx proxy
-  if (platform.isProd) {
-    return '/api/events';
+  // For remote VPS deployments, use explicit port 3001
+  if (isRemoteServer()) {
+    return `http://${window.location.hostname}:3001/api/events`;
   }
   return 'http://localhost:3001/api/events';
 };

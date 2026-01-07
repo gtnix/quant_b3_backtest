@@ -284,6 +284,13 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       if (!response.ok) throw new Error('Failed to fetch status');
       const data = await response.json();
       
+      // Normalize currentCampaign fields (API uses elapsedSecs, frontend uses elapsedSeconds)
+      const currentCampaign = data.currentCampaign ? {
+        ...data.currentCampaign,
+        elapsedSeconds: data.currentCampaign.elapsedSecs || data.currentCampaign.elapsedSeconds || 0,
+        candidatesEvaluated: data.currentCampaign.candidatesEvaluated || 0,
+      } : null;
+      
       set({
         status: data.status || 'offline',
         startedAt: data.startedAt,
@@ -291,7 +298,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
         loopCount: data.loopCount || 0,
         queueLength: data.queueLength || 0,
         lastPromotion: data.lastPromotion,
-        currentCampaign: data.currentCampaign,
+        currentCampaign,
         resources: data.resources || get().resources,
         config: data.config,
         lastError: null,
@@ -551,6 +558,13 @@ export const useOmpStore = create<OmpState>((set, get) => ({
             // INCREMENTAL UPDATE: Only update fields that have new values
             // Keep previous values if new ones are null/undefined
             const prev = get();
+            // Normalize currentCampaign fields
+            const rawCampaign = data.currentCampaign as Record<string, unknown> | null;
+            const currentCampaign = rawCampaign ? {
+              ...rawCampaign,
+              elapsedSeconds: (rawCampaign.elapsedSecs as number) || (rawCampaign.elapsedSeconds as number) || 0,
+              candidatesEvaluated: (rawCampaign.candidatesEvaluated as number) || 0,
+            } as CurrentCampaign : null;
             set({
               status: (data.status as OmpStatus) || prev.status || 'offline',
               startedAt: (data.startedAt as string | null) ?? prev.startedAt,
@@ -558,7 +572,7 @@ export const useOmpStore = create<OmpState>((set, get) => ({
               loopCount: typeof data.loopCount === 'number' ? data.loopCount : prev.loopCount,
               queueLength: typeof data.queueLength === 'number' ? data.queueLength : prev.queueLength,
               lastPromotion: (data.lastPromotion as string | null) ?? prev.lastPromotion,
-              currentCampaign: (data.currentCampaign as CurrentCampaign | null) ?? prev.currentCampaign,
+              currentCampaign: currentCampaign ?? prev.currentCampaign,
               resources: data.resources ? { ...prev.resources, ...(data.resources as OmpResources) } : prev.resources,
             });
           } else if (event.type === 'omp-started') {
