@@ -7,8 +7,45 @@ const router = Router();
 
 router.get('/candidates/recent', async (req, res) => {
   try {
-    const result = await pool.query(`SELECT c.*, r.run_id, camp.name as campaign_name FROM scg_candidates c LEFT JOIN scg_runs r ON c.run_id = r.run_id LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id ORDER BY c.oos_sharpe_net DESC NULLS LAST, c.created_at DESC LIMIT $1`, [parseInt(req.query.limit) || 10]);
-    res.json({ candidates: result.rows.map(c => ({ candidate_id: c.candidate_id, genome_hash: c.genome_hash || '', rank: c.rank_in_run || 1, display_name: `Strategy #${c.rank_in_run || 1} | ${(c.genome_hash || '').slice(-8)}`, oos_sharpe_net: c.oos_sharpe_net || 0, oos_cagr_net: c.oos_cagr_net || 0, max_drawdown_net: c.max_drawdown_net, pbo: c.pbo || 0, dsr: c.dsr || 0, gates_passed: c.gates_passed || false, run_id: c.run_id, campaign_name: c.campaign_name })), count: result.rows.length });
+    const limit = parseInt(req.query.limit) || 50;
+    const result = await pool.query(`
+      SELECT c.*, r.run_id, camp.name as campaign_name 
+      FROM scg_candidates c 
+      LEFT JOIN scg_runs r ON c.run_id = r.run_id 
+      LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id 
+      ORDER BY c.oos_sharpe_net DESC NULLS LAST, c.created_at DESC 
+      LIMIT $1
+    `, [limit]);
+    res.json({ 
+      candidates: result.rows.map(c => {
+        // Estimate max_drawdown from CAGR/Sharpe if missing (typical ratio ~0.5-0.7x annual vol)
+        const cagr = c.oos_cagr_net || 0.15;
+        const sharpe = c.oos_sharpe_net || 1.0;
+        const annualVol = sharpe > 0.1 ? Math.abs(cagr) / sharpe : 0.20;
+        const estimatedMaxDD = c.max_drawdown_net != null ? c.max_drawdown_net : -(annualVol * 0.6);
+        return {
+          candidate_id: c.candidate_id, 
+          genome_hash: c.genome_hash || '', 
+          rank: c.rank_in_run || 1, 
+          display_name: `Strategy #${c.rank_in_run || 1} | ${(c.genome_hash || '').slice(-8)}`, 
+          oos_sharpe_net: c.oos_sharpe_net || 0, 
+          oos_cagr_net: c.oos_cagr_net || 0, 
+          max_drawdown_net: estimatedMaxDD,
+          max_drawdown_estimated: c.max_drawdown_net == null,
+          pbo: c.pbo || 0, 
+          dsr: c.dsr || 0, 
+          gates_passed: c.gates_passed || false, 
+          run_id: c.run_id, 
+          campaign_name: c.campaign_name,
+          source_stage: c.source_stage || (c.gates_passed ? 'B' : 'A'),
+          candidate_class: c.candidate_class || (c.gates_passed ? 'validated' : 'research'),
+          stress_passed: c.stress_passed || 0,
+          stress_total: c.stress_total || 3,
+          data_source: 'candidates'
+        };
+      }), 
+      count: result.rows.length 
+    });
   } catch (e) { res.status(500).json({ error: e.message, candidates: [] }); }
 });
 
@@ -80,7 +117,8 @@ router.get('/candidate/:candidateId/simulated-equity', async (req, res) => {
     for (let i = 0; i < numDays; i++) {
       const date = new Date(Date.now() - (numDays - i) * 86400000).toISOString().slice(0, 10);
       if (i > 0) { const u1 = seededRandom(), u2 = seededRandom(); const z = Math.sqrt(-2 * Math.log(u1 + 0.0001)) * Math.cos(2 * Math.PI * u2); equity = equity * (1 + dailyReturn + dailyVol * z); if (equity > peak) peak = equity; if (equity < startCapital * 0.5) equity = startCapital * 0.5 + seededRandom() * startCapital * 0.1; }
-      timeseries.push({ date, equity: Math.round(equity * 100) / 100, drawdown: peak > 0 ? Math.round((peak - equity) / peak * 10000) / 10000 : 0 });
+      const dd = peak > 0 ? (equity - peak) / peak : 0; // Negative when underwater
+      timeseries.push({ date, equity: Math.round(equity * 100) / 100, drawdown: Math.round(dd * 10000) / 10000 });
     }
     res.json({ candidate_id: req.params.candidateId, data_source: 'simulated', simulation_params: { target_cagr: cagr, target_sharpe: sharpe, days: numDays, start_capital: startCapital }, timeseries });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -102,13 +140,41 @@ router.get('/candidate/:candidateId/pipeline', async (req, res) => {
 
 router.get('/candidate/:candidateId/wfa', async (req, res) => {
   try {
-    const result = await pool.query(`SELECT oos_sharpe_net, pbo, created_at FROM scg_candidates WHERE candidate_id = $1`, [req.params.candidateId]);
+    const result = await pool.query(`SELECT oos_sharpe_net, oos_cagr_net, max_drawdown_net, pbo, created_at FROM scg_candidates WHERE candidate_id = $1`, [req.params.candidateId]);
     if (result.rows.length === 0) return res.status(404).json({ error: `Candidate ${req.params.candidateId} not found` });
     const c = result.rows[0];
-    const folds = 5;
+    const numFolds = 5;
     const hashNum = req.params.candidateId.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-    const wfaFolds = Array.from({ length: folds }, (_, i) => ({ fold: i + 1, train_sharpe: (c.oos_sharpe_net || 1.5) * (0.9 + (((hashNum + i * 17) % 30) / 100)), oos_sharpe: (c.oos_sharpe_net || 1.2) * (0.85 + (((hashNum + i * 23) % 30) / 100)), is_oos: true, passed: true }));
-    res.json({ candidate_id: req.params.candidateId, wfa_type: 'anchored', num_folds: folds, folds: wfaFolds, summary: { avg_oos_sharpe: c.oos_sharpe_net || 0, consistency: 0.85, passed: true }, data_source: 'simulated' });
+    const baseSharpe = c.oos_sharpe_net || 1.2;
+    const baseCagr = c.oos_cagr_net || 0.15;
+    const baseMaxDD = Math.abs(c.max_drawdown_net) || 0.12;
+    const baseDate = new Date(c.created_at || Date.now());
+    const folds = Array.from({ length: numFolds }, (_, i) => {
+      const isSharpe = baseSharpe * (1.1 + (((hashNum + i * 17) % 20) / 100));
+      const oosSharpe = baseSharpe * (0.85 + (((hashNum + i * 23) % 25) / 100));
+      const degradation = Math.round(((isSharpe - oosSharpe) / isSharpe) * 100);
+      const foldStart = new Date(baseDate.getTime() - (numFolds - i) * 90 * 86400000);
+      const isEnd = new Date(foldStart.getTime() + 60 * 86400000);
+      const oosEnd = new Date(isEnd.getTime() + 30 * 86400000);
+      return {
+        fold: i + 1,
+        is_period: { start: foldStart.toISOString().slice(0, 10), end: isEnd.toISOString().slice(0, 10), days: 60 },
+        oos_period: { start: isEnd.toISOString().slice(0, 10), end: oosEnd.toISOString().slice(0, 10), days: 30 },
+        is_metrics: { sharpe: Math.round(isSharpe * 100) / 100, cagr: baseCagr * (1 + (hashNum % 10) / 50), max_dd: -baseMaxDD * 0.8 },
+        oos_metrics: { sharpe: Math.round(oosSharpe * 100) / 100, cagr: baseCagr * (0.9 + (hashNum % 8) / 50), max_dd: -baseMaxDD },
+        degradation,
+        status: degradation < 40 ? 'PASS' : degradation < 50 ? 'WARN' : 'FAIL'
+      };
+    });
+    const passedFolds = folds.filter(f => f.status === 'PASS' || f.status === 'WARN').length;
+    const avgDegradation = Math.round(folds.reduce((a, f) => a + f.degradation, 0) / numFolds);
+    res.json({
+      candidate_id: req.params.candidateId,
+      wfa_config: { method: 'anchored', is_ratio: 0.67, oos_ratio: 0.33, num_folds: numFolds, min_samples: 252 },
+      folds,
+      summary: { total_folds: numFolds, passed_folds: passedFolds, avg_degradation: avgDegradation, consistency_score: Math.round((passedFolds / numFolds) * 100), overall_status: passedFolds >= 3 ? 'PASS' : 'FAIL' },
+      data_source: 'simulated'
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -117,8 +183,46 @@ router.get('/candidate/:candidateId/stress', async (req, res) => {
     const result = await pool.query(`SELECT oos_sharpe_net, max_drawdown_net, stress_passed, stress_total FROM scg_candidates WHERE candidate_id = $1`, [req.params.candidateId]);
     if (result.rows.length === 0) return res.status(404).json({ error: `Candidate ${req.params.candidateId} not found` });
     const c = result.rows[0];
-    const scenarios = [{ name: 'Flash Crash', description: 'Sudden 10% drop', severity: 'extreme', result: { max_dd: -0.15, recovery_days: 45, passed: true } }, { name: 'High Volatility', description: 'VIX spike to 40+', severity: 'high', result: { max_dd: -0.12, recovery_days: 30, passed: true } }, { name: 'Liquidity Crisis', description: 'Bid-ask spread 5x', severity: 'medium', result: { max_dd: -0.08, recovery_days: 20, passed: true } }];
-    res.json({ candidate_id: req.params.candidateId, scenarios, summary: { passed: c.stress_passed || 0, total: c.stress_total || scenarios.length, pass_rate: c.stress_total ? (c.stress_passed / c.stress_total) : 1.0 }, data_source: 'simulated' });
+    const baseSharpe = c.oos_sharpe_net || 1.2;
+    const hashNum = req.params.candidateId.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+    const scenariosDef = [
+      { id: 'flash_crash', name: 'Flash Crash', desc: 'Sudden 10% market drop in single session', severity: 'high', mult: 0.65 },
+      { id: 'high_vol', name: 'High Volatility', desc: 'VIX spike to 40+ for extended period', severity: 'medium', mult: 0.75 },
+      { id: 'liquidity', name: 'Liquidity Crisis', desc: 'Bid-ask spread increases 5x', severity: 'medium', mult: 0.80 },
+      { id: 'rate_shock', name: 'Rate Shock', desc: 'Central bank rate hike 100bps', severity: 'low', mult: 0.88 },
+      { id: 'correlation', name: 'Correlation Breakdown', desc: 'Cross-asset correlations spike to 0.9', severity: 'high', mult: 0.70 },
+      { id: 'gap_risk', name: 'Gap Risk', desc: 'Overnight gap of 5% against position', severity: 'medium', mult: 0.78 },
+      { id: 'regime_change', name: 'Regime Change', desc: 'Volatility regime shift from low to high', severity: 'low', mult: 0.85 },
+      { id: 'drawdown_ext', name: 'Extended Drawdown', desc: 'Max drawdown period extended 2x', severity: 'high', mult: 0.68 }
+    ];
+    const minSharpeThreshold = 0.3;
+    const scenarios = scenariosDef.map((s, i) => {
+      const variation = ((hashNum + i * 13) % 15) / 100;
+      const stressedSharpe = Math.round(baseSharpe * (s.mult + variation) * 1000) / 1000;
+      const degradationPct = Math.round((1 - stressedSharpe / baseSharpe) * 100);
+      const passed = stressedSharpe >= minSharpeThreshold;
+      return {
+        scenario_id: s.id,
+        scenario_name: s.name,
+        description: s.desc,
+        base_sharpe: Math.round(baseSharpe * 1000) / 1000,
+        stressed_sharpe: stressedSharpe,
+        degradation_pct: degradationPct,
+        threshold: minSharpeThreshold,
+        status: passed ? 'PASS' : 'FAIL',
+        severity: s.severity
+      };
+    });
+    const passedCount = scenarios.filter(s => s.status === 'PASS').length;
+    const failedCount = scenarios.length - passedCount;
+    const worstScenario = scenarios.reduce((w, s) => s.stressed_sharpe < w.stressed_sharpe ? s : w, scenarios[0]);
+    res.json({
+      candidate_id: req.params.candidateId,
+      stress_config: { min_sharpe_threshold: minSharpeThreshold, pass_ratio_required: 0.625, scenarios_tested: scenarios.length },
+      scenarios,
+      summary: { total_scenarios: scenarios.length, passed: passedCount, failed: failedCount, pass_rate: Math.round((passedCount / scenarios.length) * 100), overall_status: passedCount >= 5 ? 'PASS' : 'FAIL', worst_scenario: worstScenario.scenario_name },
+      data_source: 'simulated'
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

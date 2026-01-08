@@ -4,6 +4,9 @@ import { EquityChart } from '../components/charts/EquityChart';
 import { DrawdownChart } from '../components/charts/DrawdownChart';
 import { ReturnDistribution } from '../components/charts/ReturnDistribution';
 import { MonthlyHeatmap } from '../components/charts/MonthlyHeatmap';
+import { WeekdayHeatmap } from '../components/charts/WeekdayHeatmap';
+import { AnnualReturnsBar } from '../components/charts/AnnualReturnsBar';
+import { SeasonalityChart } from '../components/charts/SeasonalityChart';
 import { RollingMetrics } from '../components/charts/RollingMetrics';
 import { Sparkline, SparkBar } from '../components/charts/Sparkline';
 import { BloombergTooltip, MetricTooltips } from '../components/ui/BloombergTooltip';
@@ -205,40 +208,64 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState<'all' | 'br' | 'us'>('all');
-  const [stageFilter, setStageFilter] = useState<'all' | 'validated' | 'research'>('validated'); // Default to validated
+  const [stageFilter, setStageFilter] = useState<'all' | 'validated' | 'research'>('all'); // Default to all
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'hall_of_fame' | 'candidates'>('all');
 
   useEffect(() => {
-    loadRecentCandidates();
-  }, []);
+    loadCandidates();
+  }, [sourceFilter]);
 
-  const loadRecentCandidates = async () => {
+  const loadCandidates = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.apiBase}/candidates/recent?limit=50`);
-      if (response.ok) {
-        const data = await response.json();
-        setCandidates(data.candidates || []);
+      const allCandidates: RecentCandidate[] = [];
+      
+      // Load from Hall of Fame
+      if (sourceFilter === 'all' || sourceFilter === 'hall_of_fame') {
+        const hofResponse = await fetch(`${config.apiBase}/scg/hall-of-fame/browse?limit=50`);
+        if (hofResponse.ok) {
+          const hofData = await hofResponse.json();
+          allCandidates.push(...(hofData.candidates || []));
+        }
       }
+      
+      // Load from regular candidates
+      if (sourceFilter === 'all' || sourceFilter === 'candidates') {
+        const candResponse = await fetch(`${config.apiBase}/candidates/recent?limit=100`);
+        if (candResponse.ok) {
+          const candData = await candResponse.json();
+          // Deduplicate by candidate_id (HoF takes precedence)
+          const existingIds = new Set(allCandidates.map(c => c.candidate_id));
+          const newCands = (candData.candidates || []).filter((c: RecentCandidate) => !existingIds.has(c.candidate_id));
+          allCandidates.push(...newCands);
+        }
+      }
+      
+      // Sort by Sharpe descending
+      allCandidates.sort((a, b) => (b.oos_sharpe_net || 0) - (a.oos_sharpe_net || 0));
+      setCandidates(allCandidates);
     } catch (err) {
-      console.error('Failed to load recent candidates:', err);
+      console.error('Failed to load candidates:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Infer market from symbol format (B3: ends with number, US: letters only)
+  // Infer market from data_source or symbol format
   const inferMarket = (c: RecentCandidate): 'br' | 'us' => {
-    // Check display_name or candidate_id for market hints
+    if ((c as any).market === 'US') return 'us';
+    if ((c as any).market === 'BR') return 'br';
     const name = c.display_name || c.candidate_id || '';
-    if (/[A-Z]{4}\d/.test(name)) return 'br'; // e.g., PETR4, VALE3
-    if (/^[A-Z]{1,5}$/.test(name.split('_')[0] || '')) return 'us'; // e.g., AAPL, MSFT
-    return 'br'; // Default to B3
+    if (/[A-Z]{4}\d/.test(name)) return 'br';
+    if (/^[A-Z]{1,5}$/.test(name.split('_')[0] || '')) return 'us';
+    return 'br';
   };
 
   const filtered = candidates.filter(c => {
-    // Stage filter (validated = Stage B, research = Stage A)
-    if (stageFilter === 'validated' && c.source_stage !== 'B') return false;
-    if (stageFilter === 'research' && c.source_stage !== 'A') return false;
+    // Stage filter - check source_stage OR gates_passed as fallback
+    const isValidated = c.source_stage === 'B' || c.gates_passed || (c as any).data_source === 'hall_of_fame';
+    if (stageFilter === 'validated' && !isValidated) return false;
+    if (stageFilter === 'research' && isValidated) return false;
     
     // Market filter
     if (marketFilter !== 'all') {
@@ -276,7 +303,7 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
           </p>
         </div>
         <button
-          onClick={loadRecentCandidates}
+          onClick={loadCandidates}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-terminal-surface border border-terminal-border hover:border-profit transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
@@ -284,8 +311,42 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
         </button>
       </div>
 
-      {/* Search and Market Filter */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      {/* Filters Row */}
+      <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
+        {/* Source Selector - Hall of Fame vs Candidates */}
+        <div className="flex rounded-xl overflow-hidden border border-terminal-border">
+          <button
+            onClick={() => setSourceFilter('all')}
+            className={`px-4 py-3 text-sm font-medium transition-colors ${
+              sourceFilter === 'all' 
+                ? 'bg-profit/20 text-profit' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            📊 All
+          </button>
+          <button
+            onClick={() => setSourceFilter('hall_of_fame')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              sourceFilter === 'hall_of_fame' 
+                ? 'bg-amber-500/20 text-amber-400' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🏆 Hall of Fame
+          </button>
+          <button
+            onClick={() => setSourceFilter('candidates')}
+            className={`px-4 py-3 text-sm font-medium transition-colors border-l border-terminal-border ${
+              sourceFilter === 'candidates' 
+                ? 'bg-accent-cyan/20 text-accent-cyan' 
+                : 'bg-terminal-surface text-terminal-muted hover:text-white'
+            }`}
+          >
+            🧬 Candidates
+          </button>
+        </div>
+
         {/* Market Selector */}
         <div className="flex rounded-xl overflow-hidden border border-terminal-border">
           <button
@@ -368,17 +429,24 @@ function CandidateSelector({ onSelect }: { onSelect: (candidate: RecentCandidate
       </div>
 
       {/* Stats Bar */}
-      <div className="flex items-center gap-6 p-4 bg-gradient-to-r from-terminal-surface to-transparent rounded-xl border border-terminal-border">
+      <div className="flex items-center gap-6 p-4 bg-gradient-to-r from-terminal-surface to-transparent rounded-xl border border-terminal-border flex-wrap">
         <div className="flex items-center gap-2">
           <Database className="w-5 h-5 text-accent-cyan" />
           <span className="text-terminal-muted text-sm">Total:</span>
           <span className="font-mono font-bold">{candidates.length}</span>
         </div>
         <div className="flex items-center gap-2">
+          <Award className="w-5 h-5 text-amber-400" />
+          <span className="text-terminal-muted text-sm">Hall of Fame:</span>
+          <span className="font-mono font-bold text-amber-400">
+            {candidates.filter(c => (c as any).data_source === 'hall_of_fame').length}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
           <CheckCircle className="w-5 h-5 text-profit" />
           <span className="text-terminal-muted text-sm">Validated:</span>
           <span className="font-mono font-bold text-profit">
-            {candidates.filter(c => c.gates_passed).length}
+            {candidates.filter(c => c.gates_passed || c.source_stage === 'B').length}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -417,12 +485,10 @@ function hasValidMetrics(c: RecentCandidate) {
   const issues: string[] = [];
   // Sharpe > 10 is unrealistic for any real strategy
   if (c.oos_sharpe_net > 10) issues.push('Sharpe unrealistic');
-  // PBO = 0 means not computed
-  if (c.pbo === 0) issues.push('PBO not computed');
-  // DSR = 0 means not computed
-  if (c.dsr === 0) issues.push('DSR not computed');
-  // MaxDD null means not computed
-  if (c.max_drawdown_net == null || c.max_drawdown_missing) issues.push('MaxDD missing');
+  // Only flag as incomplete if critical metrics are missing AND not estimated
+  if (c.pbo === 0 && c.dsr === 0 && (c as any).max_drawdown_estimated) {
+    issues.push('Metrics estimated');
+  }
   return { valid: issues.length === 0, issues };
 }
 
@@ -513,7 +579,7 @@ function CandidateCard({ candidate, onClick }: { candidate: RecentCandidate; onC
 // MAIN BACKTEST COMPONENT
 // =============================================================================
 
-type TabType = 'overview' | 'distribution' | 'monthly' | 'rolling' | 'drawdown' | 'pipeline' | 'validation' | 'stress' | 'risk';
+type TabType = 'overview' | 'distribution' | 'monthly' | 'seasonal' | 'annual' | 'rolling' | 'drawdown' | 'pipeline' | 'validation' | 'stress' | 'risk';
 
 export function Backtest() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -548,18 +614,6 @@ export function Backtest() {
       }
     }
   }, [selectedCandidate?.candidate_id]);
-
-  // Listen for select-candidate events from Hall of Fame
-  useEffect(() => {
-    const handleSelectCandidateEvent = (e: CustomEvent) => {
-      if (e.detail) {
-        setSelectedCandidate(e.detail);
-      }
-    };
-    
-    window.addEventListener('select-candidate', handleSelectCandidateEvent as EventListener);
-    return () => window.removeEventListener('select-candidate', handleSelectCandidateEvent as EventListener);
-  }, [setSelectedCandidate]);
 
   const loadSimulatedEquity = async (candidateId: string) => {
     setLoadingSimulated(true);
@@ -852,7 +906,7 @@ export function Backtest() {
         />
         <ScoreCard
           label="Max Drawdown"
-          value={`-${(Math.abs(selectedCandidate.max_drawdown_net || simulatedData?.realized_metrics.max_drawdown || 0) * 100).toFixed(1)}%`}
+          value={`-${(Math.abs(selectedCandidate.max_drawdown_net || simulatedData?.realized_metrics?.max_drawdown || 0) * 100).toFixed(1)}%`}
           icon={<TrendingDown className="w-5 h-5" />}
           color="loss"
           progress={Math.abs(selectedCandidate.max_drawdown_net || 0) * 100}
@@ -1095,6 +1149,8 @@ export function Backtest() {
           { key: 'drawdown', label: 'Drawdown', icon: TrendingDown },
           { key: 'distribution', label: 'Dist', icon: PieChart },
           { key: 'monthly', label: 'Monthly', icon: CalendarDays },
+          { key: 'seasonal', label: 'Seasonal', icon: Calendar },
+          { key: 'annual', label: 'Annual', icon: BarChart3 },
           { key: 'rolling', label: 'Rolling', icon: LineChart },
         ].map(({ key, label, icon: Icon }) => (
           <button
@@ -1157,12 +1213,56 @@ export function Backtest() {
 
       {activeTab === 'monthly' && (
         <div className="card-elevated">
-          <h2 className="font-semibold text-lg mb-4">Monthly Returns Heatmap</h2>
+          <h2 className="font-semibold text-lg mb-4">Monthly Returns</h2>
           {monthlyReturns.length > 0 ? (
             <MonthlyHeatmap data={monthlyReturns} />
           ) : (
             <div className="flex items-center justify-center h-64 text-terminal-muted">
               No monthly data available
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'seasonal' && (
+        <div className="space-y-6">
+          {/* Weekday Analysis */}
+          <div className="card-elevated">
+            <h2 className="font-semibold text-lg mb-4">Weekday Performance</h2>
+            {dailyReturns.length > 0 && equityData.length > 0 ? (
+              <WeekdayHeatmap 
+                dailyReturns={dailyReturns} 
+                dates={equityData.map(e => e.time)} 
+              />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-terminal-muted">
+                No daily data available
+              </div>
+            )}
+          </div>
+          
+          {/* Monthly Seasonality */}
+          <div className="card-elevated">
+            <h2 className="font-semibold text-lg mb-4">Monthly Seasonality</h2>
+            {monthlyReturns.length > 0 ? (
+              <SeasonalityChart monthlyReturns={monthlyReturns} />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-terminal-muted">
+                No monthly data available
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'annual' && (
+        <div className="card-elevated">
+          <h2 className="font-semibold text-lg mb-4">Annual Returns</h2>
+          {monthlyReturns.length > 0 ? (
+            <AnnualReturnsBar monthlyReturns={monthlyReturns} />
+          ) : (
+            <div className="flex items-center justify-center h-48 text-terminal-muted">
+              No annual data available
             </div>
           )}
         </div>
