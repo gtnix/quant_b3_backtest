@@ -3,6 +3,7 @@
 use anyhow::Result;
 use tokio::runtime::Runtime;
 
+use combiner_engine::InstitutionalThresholds;
 use super::bundle::BundleGenerator;
 use super::registry::{generate_promotion_id, Registry};
 
@@ -33,7 +34,7 @@ impl PromotionStage {
     }
 }
 
-/// Promotion criteria.
+/// Promotion criteria - delegates to InstitutionalThresholds for research tier.
 pub struct PromotionCriteria {
     pub min_oos_sharpe_net: f32,
     pub max_pbo: f32,
@@ -44,12 +45,14 @@ pub struct PromotionCriteria {
 
 impl Default for PromotionCriteria {
     fn default() -> Self {
+        // Use research thresholds as defaults
+        let t = InstitutionalThresholds::research();
         Self {
-            min_oos_sharpe_net: 0.5,
-            max_pbo: 0.15,
+            min_oos_sharpe_net: t.min_oos_sharpe as f32,
+            max_pbo: t.max_pbo as f32,
             min_stress_passed: 4,
             gates_required: true,
-            min_dsr: None,
+            min_dsr: Some(t.min_dsr as f32),
         }
     }
 }
@@ -185,7 +188,7 @@ pub fn execute_promote(
     })
 }
 
-/// Hall of Fame promotion criteria (stricter than standard).
+/// Hall of Fame promotion criteria - delegates to InstitutionalThresholds.
 #[derive(Debug, Clone)]
 pub struct HallOfFameCriteria {
     pub min_oos_sharpe_net: f32,
@@ -197,17 +200,35 @@ pub struct HallOfFameCriteria {
 
 impl Default for HallOfFameCriteria {
     fn default() -> Self {
+        // Use research thresholds for default (less strict for discovery)
+        Self::from(InstitutionalThresholds::research())
+    }
+}
+
+impl From<InstitutionalThresholds> for HallOfFameCriteria {
+    fn from(t: InstitutionalThresholds) -> Self {
         Self {
-            min_oos_sharpe_net: 0.5,
-            max_pbo: 0.20,
-            min_dsr: 0.4,
-            max_drawdown_net: 0.30,
+            min_oos_sharpe_net: t.min_oos_sharpe as f32,
+            max_pbo: t.max_pbo as f32,
+            min_dsr: t.min_dsr as f32,
+            // Convert negative drawdown to positive (e.g. -0.20 -> 0.20)
+            max_drawdown_net: t.max_oos_drawdown.abs() as f32,
             gates_required: true,
         }
     }
 }
 
 impl HallOfFameCriteria {
+    /// Create production-grade criteria (strictest, matches OMP spec)
+    pub fn production() -> Self {
+        Self::from(InstitutionalThresholds::production())
+    }
+    
+    /// Create research-grade criteria (relaxed for discovery)
+    pub fn research() -> Self {
+        Self::from(InstitutionalThresholds::research())
+    }
+    
     /// Create criteria from PromotionConfig (reads max_drawdown from TOML).
     pub fn from_promotion_config(config: &super::config::PromotionConfig) -> Self {
         Self {
@@ -221,7 +242,14 @@ impl HallOfFameCriteria {
     }
 }
 
-/// Auto-promote candidates to Hall of Fame after a run completes.
+/// Maximum size of the global Hall of Fame per market.
+pub const HALL_OF_FAME_MAX_SIZE: i32 = 50;
+
+/// Auto-promote candidates to the GLOBAL Hall of Fame after a run completes.
+/// 
+/// This function compares new candidates against the all-time best strategies
+/// and only inserts if the candidate would make it into the top N.
+/// 
 /// Called automatically at the end of `factory run`.
 pub async fn auto_promote_to_hall_of_fame(
     registry: &Registry,
@@ -229,14 +257,30 @@ pub async fn auto_promote_to_hall_of_fame(
     market: &str,
     criteria: Option<HallOfFameCriteria>,
 ) -> Result<usize> {
-    use tracing::info;
+    use tracing::{info, debug};
     
     let criteria = criteria.unwrap_or_default();
     let candidates = registry.get_top_candidates(run_id, 100).await?;
     
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    
+    // Get current Hall of Fame count and threshold
+    let hof_count = registry.get_hall_of_fame_count(market).await?;
+    let threshold = registry.get_hall_of_fame_threshold(HALL_OF_FAME_MAX_SIZE, market).await?;
+    
+    debug!(
+        run_id, 
+        hof_count, 
+        threshold = threshold.unwrap_or(0.0), 
+        "Hall of Fame status before promotion"
+    );
+    
     let mut promoted = 0;
     let mut skipped_criteria = 0;
     let mut skipped_duplicate = 0;
+    let mut skipped_threshold = 0;
     
     // Get git SHA for provenance
     let git_sha = std::process::Command::new("git")
@@ -246,8 +290,12 @@ pub async fn auto_promote_to_hall_of_fame(
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().chars().take(40).collect::<String>());
     
+    // Get campaign_id from run
+    let campaign_id = registry.get_run(run_id).await?
+        .map(|r| r.campaign_id);
+    
     for cand in candidates {
-        // Check all criteria
+        // Check all criteria first
         let sharpe = cand.oos_sharpe_net.unwrap_or(0.0);
         let pbo = cand.pbo.unwrap_or(1.0);
         let dsr = cand.dsr.unwrap_or(0.0);
@@ -265,36 +313,64 @@ pub async fn auto_promote_to_hall_of_fame(
             continue;
         }
         
-        // Check if already promoted
-        if registry.is_already_promoted(&cand.genome_hash, "hall_of_fame").await? {
+        // Check if already in global Hall of Fame
+        if registry.is_in_hall_of_fame(&cand.genome_hash).await? {
             skipped_duplicate += 1;
             continue;
         }
         
-        // Promote!
-        let promotion_id = generate_promotion_id();
-        registry.register_hall_of_fame_promotion(
-            &promotion_id,
+        // CRITICAL: Check if this candidate would make it into top N
+        // Only insert if: (1) HoF not full yet, OR (2) Sharpe > worst in top N
+        let hof_not_full = hof_count < HALL_OF_FAME_MAX_SIZE as i64;
+        let beats_threshold = threshold.map_or(true, |t| sharpe > t);
+        
+        if !hof_not_full && !beats_threshold {
+            skipped_threshold += 1;
+            continue;
+        }
+        
+        // Insert into global Hall of Fame!
+        let inserted = registry.upsert_hall_of_fame(
+            &cand.genome_hash,
             &cand.candidate_id,
             sharpe,
-            pbo,
-            Some(dsr),
-            cand.max_drawdown_net,
             cand.oos_cagr_net,
+            cand.max_drawdown_net,
+            Some(pbo),
+            Some(dsr),
             cand.stress_passed,
             cand.stress_total,
             gates,
+            run_id,
+            campaign_id.as_deref(),
             git_sha.as_deref(),
             market,
-            &format!("Auto-promoted by Rust from run {}", run_id),
+            None, // strategy_toml - could load from artifacts
+            None, // genome_json - could serialize genome
         ).await?;
         
-        promoted += 1;
+        if inserted {
+            promoted += 1;
+        }
+    }
+    
+    // Prune Hall of Fame to max size (removes worst entries)
+    if promoted > 0 {
+        let pruned = registry.prune_hall_of_fame(HALL_OF_FAME_MAX_SIZE, market).await?;
+        if pruned > 0 {
+            debug!(run_id, pruned, "Pruned Hall of Fame to max size {}", HALL_OF_FAME_MAX_SIZE);
+        }
     }
     
     if promoted > 0 {
-        info!(run_id, promoted, skipped_criteria, skipped_duplicate, 
-              "Hall of Fame auto-promotion complete");
+        info!(
+            run_id, 
+            promoted, 
+            skipped_criteria, 
+            skipped_duplicate,
+            skipped_threshold,
+            "Global Hall of Fame promotion complete"
+        );
     }
     
     Ok(promoted)

@@ -18,6 +18,7 @@ pub mod stress;
 pub mod stability;
 pub mod market_data;
 pub mod sensitivity;
+pub mod db_loader;
 
 pub use types::*;
 pub use runner::{
@@ -45,5 +46,9 @@ pub use market_data::{MarketDataProvider, OhlcvBar, MarketDataError};
 pub use sensitivity::{
     SensitivityAnalyzer, SensitivityConfig, SensitivityReport, PerturbationGenerator,
     Perturbation, PerturbationResult, MetricsSnapshot as SensitivityMetrics,
+};
+pub use db_loader::{
+    DatabaseMarketLoader, DbLoaderError, 
+    load_market_data_sync, load_market_data_range_sync,
 };
 

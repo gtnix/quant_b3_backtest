@@ -35,7 +35,7 @@ from .reports.generator import ReportGenerator
 from .config import BOOTSTRAP_START, BOOTSTRAP_END
 from .indices import fetch_index, US_INDEX_FETCHERS
 from .indices_db import get_connection as get_idx_conn, ensure_tables_exist as ensure_idx_tables, upsert_index, get_index_symbols, get_all_indices
-from .intraday import sync_intraday_us, sync_daily_us
+from .intraday import sync_intraday_us, sync_daily_us, sync_aggregate_us, AGGREGATE_INTERVALS
 
 # Setup logging
 logging.basicConfig(
@@ -509,6 +509,64 @@ def daily_sync(
     table.add_row("Failed", f"[red]{result.symbols_failed}[/red]" if result.symbols_failed else "0")
     table.add_row("Bars Inserted", f"{result.bars_inserted:,}")
     table.add_row("Duration", f"{result.duration_secs:.1f}s")
+    
+    console.print(table)
+
+
+@app.command("aggregate")
+def aggregate(
+    interval: Optional[str] = typer.Option(None, "--interval", "-i", help="Single interval (default: all 30m,1h,1d)"),
+    period: str = typer.Option("1mo", "--period", "-p", help="Date range (e.g., 5d, 1mo)"),
+):
+    """Aggregate intraday data for multiple intervals (30m, 1h, 1d)."""
+    intervals = [interval] if interval else AGGREGATE_INTERVALS
+    
+    console.print("\n[bold blue]DataHub US - Aggregate Sync[/bold blue]\n")
+    console.print(f"Intervals: {', '.join(intervals)} | Period: {period}")
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Aggregating...", total=100)
+        
+        def on_progress(intv, current, total, symbol, bars):
+            progress.update(task, completed=current, total=total, description=f"[cyan]{intv}[/cyan] {symbol}")
+        
+        results = sync_aggregate_us(
+            symbols=None,
+            intervals=intervals,
+            period=period,
+            on_progress=on_progress,
+        )
+    
+    console.print("\n[bold green]Aggregate Sync Complete[/bold green]\n")
+    
+    table = Table(title="Results by Interval")
+    table.add_column("Interval", style="cyan")
+    table.add_column("Success", style="green")
+    table.add_column("Failed", style="red")
+    table.add_column("Bars", style="white")
+    table.add_column("Duration", style="dim")
+    
+    total_bars = 0
+    total_duration = 0
+    for intv, r in results.items():
+        table.add_row(
+            intv,
+            str(r.symbols_success),
+            str(r.symbols_failed) if r.symbols_failed else "-",
+            f"{r.bars_inserted:,}",
+            f"{r.duration_secs:.1f}s"
+        )
+        total_bars += r.bars_inserted
+        total_duration += r.duration_secs
+    
+    table.add_row("", "", "", "", "", end_section=True)
+    table.add_row("[bold]TOTAL[/bold]", "", "", f"[bold]{total_bars:,}[/bold]", f"[bold]{total_duration:.1f}s[/bold]")
     
     console.print(table)
 

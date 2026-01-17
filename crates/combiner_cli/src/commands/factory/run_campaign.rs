@@ -197,6 +197,40 @@ fn run_campaign(campaign_path: &str, is_resume: bool) -> Result<()> {
             println!("[Data Integrity] PASSED - Proceeding with campaign\n");
         }
 
+        // === GLOBAL HALL OF FAME STATUS ===
+        // Check current state of global HoF before running - helps diagnose persistence issues
+        let market = &config.dataset.market;
+        match registry.get_hall_of_fame_count(market).await {
+            Ok(hof_count) => {
+                if hof_count > 0 {
+                    // Get top entry for display
+                    let top_entries = registry.get_hall_of_fame_top(3, market).await.unwrap_or_default();
+                    println!("╔══════════════════════════════════════════════════════════════╗");
+                    println!("║              GLOBAL HALL OF FAME STATUS                      ║");
+                    println!("╠══════════════════════════════════════════════════════════════╣");
+                    println!("║ Market:      {}                                              ", market);
+                    println!("║ Total:       {} strategies                                   ", hof_count);
+                    if let Some(top) = top_entries.first() {
+                        println!("║ Top Sharpe:  {:.3}                                          ", top.oos_sharpe_net);
+                    }
+                    println!("╚══════════════════════════════════════════════════════════════╝\n");
+                    info!("Global HoF has {} entries for market {}", hof_count, market);
+                } else {
+                    println!("╔══════════════════════════════════════════════════════════════╗");
+                    println!("║              GLOBAL HALL OF FAME STATUS                      ║");
+                    println!("╠══════════════════════════════════════════════════════════════╣");
+                    println!("║ Market:      {}                                              ", market);
+                    println!("║ Status:      ⚠️  EMPTY - No strategies yet                    ║");
+                    println!("║ Note:        Candidates must pass Stage B criteria to enter  ║");
+                    println!("╚══════════════════════════════════════════════════════════════╝\n");
+                    info!("Global HoF is EMPTY for market {}. Stage B criteria must be met.", market);
+                }
+            }
+            Err(e) => {
+                info!("Could not check global HoF status: {}", e);
+            }
+        }
+
         // Progress bar for seeds
         let pb = ProgressBar::new(seeds_to_run.len() as u64);
         pb.set_style(
@@ -427,6 +461,12 @@ async fn execute_single_run(
     if let Some(conv) = config.evolution.convergence_generations {
         evo_config.convergence_generations = conv;
     }
+    
+    // Set validation tier for Stage B criteria
+    if let Some(ref tier) = config.evolution.validation_tier {
+        evo_config.validation_tier = tier.clone();
+        info!("Using validation tier: {} (from campaign config)", tier);
+    }
 
     // Set hall_of_fame_size to persist_stage_a_top_n for research candidates
     evo_config.hall_of_fame_size = config.budget.persist_stage_a_top_n;
@@ -545,6 +585,13 @@ async fn execute_single_run(
             }
             info!("DATABASE_URL is set, will use Neon database for market data");
         }
+    }
+    
+    // Add market if configured (BR or US)
+    let market = &config.dataset.market;
+    if !market.is_empty() {
+        info!("Using market: {}", market);
+        executor = executor.with_market(market);
     }
     
     // Add risk profile if configured

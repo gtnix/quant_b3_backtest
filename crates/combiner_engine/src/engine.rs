@@ -166,6 +166,24 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             }
         }
 
+        // Final consolidation - consolidate ALL pending files
+        // QUANT PRINCIPLE: Persist everything before campaign ends
+        if let (Some(pending_dir), Some(consolidated_dir)) = 
+            (self.executor.pending_dir(), self.executor.consolidated_dir()) 
+        {
+            let empty_keep: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+            
+            if let Ok((stats, _removed, _)) = obfs::consolidate_and_cleanup(&pending_dir, &consolidated_dir, &empty_keep) {
+                if stats.artifacts_processed > 0 {
+                    info!(
+                        "Final consolidation: {} artifacts -> {:.2} MB Parquet",
+                        stats.artifacts_processed,
+                        stats.parquet_size_bytes as f64 / 1_048_576.0
+                    );
+                }
+            }
+        }
+
         info!(
             "Evolution complete. Hall of Fame size: {}, Total generations: {}, Repaired genomes: {}",
             self.hall_of_fame.len(),
@@ -249,7 +267,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 
     /// Convert backtest output to fitness (static version to avoid borrow issues).
     fn output_to_fitness_static(output: &BacktestOutput, fitness_config: &FitnessConfig) -> MultiObjectiveFitness {
-        MultiObjectiveFitness::from_metrics(
+        let mut fitness = MultiObjectiveFitness::from_metrics(
             output.metrics.cagr,
             output.metrics.sharpe_ratio,
             output.metrics.max_drawdown,
@@ -260,7 +278,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             output.metrics.volatility.unwrap_or(0.0),
             output.metrics.turnover_annual.unwrap_or(0.0),
             fitness_config,
-        )
+        );
+        // Store run_id for pending artifact cleanup
+        fitness.run_id = output.run_id.clone();
+        fitness
     }
 
     /// Create the next generation.
@@ -471,8 +492,9 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             self.config.max_generations, self.config.population_size, top_k_stage_b
         );
 
-        // Initialize validated hall of fame with gates from config
-        let mut institutional_criteria = crate::hall_of_fame_unified::InstitutionalCriteria::research();
+        // Initialize validated hall of fame with criteria based on validation tier
+        let thresholds = crate::institutional_thresholds::InstitutionalThresholds::from_tier(&self.config.validation_tier);
+        let mut institutional_criteria = crate::hall_of_fame_unified::InstitutionalCriteria::from(thresholds.clone());
         institutional_criteria.max_oos_drawdown = self.config.gates.max_drawdown;
         let institutional_strategy = crate::hall_of_fame_unified::InstitutionalStrategy::new(institutional_criteria);
         let mut validated_hof = ValidatedHallOfFame::new(self.config.hall_of_fame_size, institutional_strategy);
@@ -480,11 +502,20 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         // Create split plan for Stage B validation
         let split_config = SplitPlanConfig::default();
         let split_plan = Arc::new(ValidationSplitPlan::generate(split_config, 2520)); // ~10 years of data
-        info!("Stage B split plan: {} splits", split_plan.num_splits());
+        info!("Stage B split plan: {} splits, validation tier: {}", split_plan.num_splits(), self.config.validation_tier);
 
-        // Create Stage B validator with config from gates
-        let mut stage_b_config = StageBConfig::default();
+        // Create Stage B validator with config from validation tier
+        let mut stage_b_config = StageBConfig::from_tier(&self.config.validation_tier);
         stage_b_config.max_oos_drawdown = self.config.gates.max_drawdown;
+        
+        // Log Stage B thresholds for visibility
+        info!(
+            "Stage B thresholds: min_sharpe={:.2}, max_pbo={:.2}, max_degrad={:.0}%, max_dd={:.0}%",
+            stage_b_config.min_oos_sharpe,
+            stage_b_config.max_pbo,
+            stage_b_config.max_degradation_pct,
+            stage_b_config.max_oos_drawdown * 100.0
+        );
 
         // Generate initial population
         self.population = Population::random(
@@ -630,6 +661,13 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                 // Stage B validation - inline validation using split plan
                 let hof_start = Instant::now();
                 
+                // Stage B failure tracking for detailed logging
+                let mut stage_b_fail_sharpe = 0usize;
+                let mut stage_b_fail_pbo = 0usize;
+                let mut stage_b_fail_degradation = 0usize;
+                let mut stage_b_fail_drawdown = 0usize;
+                let mut stage_b_passed = 0usize;
+                
                 for (_, genome) in top_k.iter() {
                     let genome_hash = genome.hash();
                     
@@ -713,21 +751,29 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                             0.0
                         };
                         
-                        // Apply basic institutional filter
-                        let passes = oos_sharpe >= stage_b_config.min_oos_sharpe
-                            && pbo <= stage_b_config.max_pbo
-                            && degradation_pct <= stage_b_config.max_degradation_pct
-                            && oos_max_dd >= stage_b_config.max_oos_drawdown;
+                        // Apply basic institutional filter with per-criterion tracking
+                        let pass_sharpe = oos_sharpe >= stage_b_config.min_oos_sharpe;
+                        let pass_pbo = pbo <= stage_b_config.max_pbo;
+                        let pass_degradation = degradation_pct <= stage_b_config.max_degradation_pct;
+                        let pass_drawdown = oos_max_dd >= stage_b_config.max_oos_drawdown;
+                        let passes = pass_sharpe && pass_pbo && pass_degradation && pass_drawdown;
+                        
+                        // Track failure reasons for summary logging
+                        if !pass_sharpe { stage_b_fail_sharpe += 1; }
+                        if !pass_pbo { stage_b_fail_pbo += 1; }
+                        if !pass_degradation { stage_b_fail_degradation += 1; }
+                        if !pass_drawdown { stage_b_fail_drawdown += 1; }
+                        if passes { stage_b_passed += 1; }
                         
                         // Debug logging for Stage B validation
                         if !passes {
                             debug!(
-                                "Stage B FAIL: oos_sharpe={:.3} (min={:.3}), pbo={:.3} (max={:.3}), \
-                                 degrad={:.1}% (max={:.1}%), dd={:.3} (max={:.3})",
-                                oos_sharpe, stage_b_config.min_oos_sharpe,
-                                pbo, stage_b_config.max_pbo,
-                                degradation_pct, stage_b_config.max_degradation_pct,
-                                oos_max_dd, stage_b_config.max_oos_drawdown
+                                "Stage B FAIL: oos_sharpe={:.3} (min={:.3}, {}), pbo={:.3} (max={:.3}, {}), \
+                                 degrad={:.1}% (max={:.1}%, {}), dd={:.3} (max={:.3}, {})",
+                                oos_sharpe, stage_b_config.min_oos_sharpe, if pass_sharpe { "OK" } else { "FAIL" },
+                                pbo, stage_b_config.max_pbo, if pass_pbo { "OK" } else { "FAIL" },
+                                degradation_pct, stage_b_config.max_degradation_pct, if pass_degradation { "OK" } else { "FAIL" },
+                                oos_max_dd, stage_b_config.max_oos_drawdown, if pass_drawdown { "OK" } else { "FAIL" }
                             );
                         }
 
@@ -767,6 +813,18 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                 snapshot.hof_time_ms = hof_elapsed.as_millis() as f64;
                 perf_metrics.add_hof_time(hof_elapsed);
                 perf_metrics.add_genomes_validated(snapshot.genomes_validated);
+                
+                // Log Stage B summary with failure breakdown
+                let stage_b_total = top_k.len();
+                let stage_b_failed = stage_b_total - stage_b_passed;
+                if stage_b_failed > 0 {
+                    info!(
+                        "Gen {} Stage B: {}/{} passed ({:.0}%) | Failures: sharpe={}, pbo={}, degrad={}, dd={}",
+                        gen, stage_b_passed, stage_b_total,
+                        if stage_b_total > 0 { 100.0 * stage_b_passed as f64 / stage_b_total as f64 } else { 0.0 },
+                        stage_b_fail_sharpe, stage_b_fail_pbo, stage_b_fail_degradation, stage_b_fail_drawdown
+                    );
+                }
             }
 
             let stage_b_elapsed = stage_b_start.elapsed();
@@ -818,17 +876,132 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             if gen < self.config.max_generations - 1 {
                 self.create_next_generation(gen + 1);
             }
+
+            // Incremental consolidation + cleanup - prevent disk explosion during long runs
+            // QUANT PRINCIPLE: Never delete without persisting first
+            let cleanup_interval = self.config.incremental_cleanup_interval;
+            if cleanup_interval > 0 && gen > 0 && gen % cleanup_interval == 0 {
+                if let (Some(pending_dir), Some(consolidated_dir)) = 
+                    (self.executor.pending_dir(), self.executor.consolidated_dir()) 
+                {
+                    // Collect run_ids from HoF entries - O(n) where n = hof_size (max ~50)
+                    let keep_uuids: std::collections::HashSet<uuid::Uuid> = self.hall_of_fame
+                        .entries()
+                        .iter()
+                        .filter_map(|e| {
+                            e.genome.fitness.as_ref()
+                                .and_then(|f| f.run_id.as_ref())
+                                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                        })
+                        .collect();
+                    
+                    // Spawn non-blocking consolidation + cleanup thread for I/O
+                    // Safe: consolidates to Parquet BEFORE deleting pending files
+                    let pdir = pending_dir.clone();
+                    let cdir = consolidated_dir.clone();
+                    let gen_copy = gen;
+                    std::thread::spawn(move || {
+                        match obfs::consolidate_and_cleanup(&pdir, &cdir, &keep_uuids) {
+                            Ok((stats, removed, kept)) => {
+                                if stats.artifacts_processed > 0 {
+                                    debug!(
+                                        "Incremental consolidation gen {}: {} artifacts -> {:.2} MB Parquet, removed={}, kept={}",
+                                        gen_copy, 
+                                        stats.artifacts_processed,
+                                        stats.parquet_size_bytes as f64 / 1_048_576.0,
+                                        removed, 
+                                        kept
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Incremental consolidation failed gen {}: {}", gen_copy, e);
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Parquet compaction - merge small files to reduce disk usage
+            // Run less frequently than consolidation (every 100 cleanup intervals)
+            let compaction_interval = self.config.compaction_interval;
+            if compaction_interval > 0 && gen > 0 && gen % compaction_interval == 0 {
+                if let Some(consolidated_dir) = self.executor.consolidated_dir() {
+                    let data_dir = consolidated_dir.join("data");
+                    let gen_copy = gen;
+                    let min_files = self.config.compaction_min_files;
+                    let target_size_mb = self.config.compaction_target_size_mb;
+                    
+                    std::thread::spawn(move || {
+                        match obfs::compact_parquets(&data_dir, min_files, target_size_mb) {
+                            Ok(stats) => {
+                                if !stats.skipped && stats.files_merged > 0 {
+                                    info!(
+                                        "Compaction gen {}: {} files merged, {:.2} MB saved",
+                                        gen_copy,
+                                        stats.files_merged,
+                                        stats.space_saved_bytes as f64 / 1_048_576.0
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Compaction failed gen {}: {}", gen_copy, e);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        // Final consolidation - consolidate ALL remaining pending files (including HoF)
+        // QUANT PRINCIPLE: Persist everything before campaign ends
+        if let (Some(pending_dir), Some(consolidated_dir)) = 
+            (self.executor.pending_dir(), self.executor.consolidated_dir()) 
+        {
+            // Empty keep set = consolidate everything
+            let empty_keep: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+            
+            match obfs::consolidate_and_cleanup(&pending_dir, &consolidated_dir, &empty_keep) {
+                Ok((stats, removed, _)) => {
+                    if stats.artifacts_processed > 0 {
+                        info!(
+                            "Final consolidation: {} artifacts -> {:.2} MB Parquet, {} files cleaned",
+                            stats.artifacts_processed,
+                            stats.parquet_size_bytes as f64 / 1_048_576.0,
+                            removed
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Final consolidation failed: {}", e);
+                }
+            }
         }
 
         let total_elapsed = self.start_time.unwrap().elapsed();
         let perf_summary = perf_metrics.summary();
 
         info!(
-            "ULTRA Evolution complete in {:.1}s. Validated HoF: {}, Cache hit: {:.1}%",
+            "ULTRA Evolution complete in {:.1}s. Validated HoF: {}, Stage A HoF: {}, Cache hit: {:.1}%",
             total_elapsed.as_secs_f64(),
             validated_hof.len(),
+            self.hall_of_fame.len(),
             perf_summary.stage_a_cache_hit_rate
         );
+        
+        // Log warning if validated HoF is empty but Stage A HoF has candidates
+        if validated_hof.is_empty() && !self.hall_of_fame.is_empty() {
+            warn!(
+                "⚠️ Validated HoF is EMPTY but Stage A HoF has {} candidates. \
+                 Stage B criteria may be too strict. Check min_oos_sharpe, max_pbo, max_degradation_pct, max_oos_drawdown.",
+                self.hall_of_fame.len()
+            );
+        } else if validated_hof.is_empty() && self.hall_of_fame.is_empty() {
+            warn!(
+                "⚠️ Both HoFs are EMPTY. No candidates passed Stage A (pareto_rank=0). \
+                 Check backtester configuration and fitness calculation."
+            );
+        }
 
         Ok(UltraEvolutionResult {
             validated_hall_of_fame: validated_hof,

@@ -106,13 +106,25 @@ export function StrategyPipeline({ candidateId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+      <div className="space-y-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-terminal-surface" />
+          <div className="space-y-2">
+            <div className="h-4 w-32 bg-terminal-surface rounded" />
+            <div className="h-3 w-24 bg-terminal-surface rounded" />
+          </div>
+        </div>
+        {[1, 2, 3].map(i => (
+          <div key={i} className="ml-14 p-4 rounded-xl bg-terminal-surface/50 border border-terminal-border">
+            <div className="h-4 w-40 bg-terminal-border rounded mb-2" />
+            <div className="h-3 w-64 bg-terminal-border/50 rounded" />
+          </div>
+        ))}
       </div>
     );
   }
 
-  if (error || !pipeline) {
+  if (error || !pipeline || !pipeline.blocks) {
     return (
       <div className="flex items-center justify-center h-64 text-terminal-muted">
         {error || 'No pipeline data'}
@@ -159,18 +171,20 @@ export function StrategyPipeline({ candidateId }: Props) {
       </div>
 
       {/* Execution Config */}
-      <div className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
-        <div className="flex items-center gap-2 mb-3">
-          <Settings className="w-4 h-4 text-terminal-muted" />
-          <h4 className="text-sm font-medium text-terminal-muted">Execution Configuration</h4>
+      {pipeline.execution && (
+        <div className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
+          <div className="flex items-center gap-2 mb-3">
+            <Settings className="w-4 h-4 text-terminal-muted" />
+            <h4 className="text-sm font-medium text-terminal-muted">Execution Configuration</h4>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <ExecutionParam label="Delay Bars" value={`${pipeline.execution.delay_bars ?? 0}`} />
+            <ExecutionParam label="Fill Policy" value={(pipeline.execution.fill_policy ?? 'unknown').replace(/_/g, ' ')} />
+            <ExecutionParam label="Slippage" value={`${pipeline.execution.slippage_bps ?? 0} bps`} />
+            <ExecutionParam label="Commission" value={`${pipeline.execution.commission_bps ?? 0} bps`} />
+          </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <ExecutionParam label="Delay Bars" value={`${pipeline.execution.delay_bars}`} />
-          <ExecutionParam label="Fill Policy" value={pipeline.execution.fill_policy.replace(/_/g, ' ')} />
-          <ExecutionParam label="Slippage" value={`${pipeline.execution.slippage_bps} bps`} />
-          <ExecutionParam label="Commission" value={`${pipeline.execution.commission_bps} bps`} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

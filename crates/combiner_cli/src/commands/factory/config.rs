@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use combiner_engine::InstitutionalThresholds;
+
+/// Research thresholds cached for serde defaults
+static RESEARCH_THRESHOLDS: LazyLock<InstitutionalThresholds> = LazyLock::new(InstitutionalThresholds::research);
 
 // =============================================================================
 // CAMPAIGN CONFIG
@@ -122,6 +128,11 @@ pub struct EvolutionRef {
     /// Override convergence generations.
     #[serde(default)]
     pub convergence_generations: Option<u32>,
+    /// Validation tier for Stage B criteria.
+    /// Options: "production" (strictest), "research" (default), "lenient" (debugging)
+    /// Use "lenient" to diagnose why candidates aren't passing Stage B.
+    #[serde(default)]
+    pub validation_tier: Option<String>,
 }
 
 /// Execution configuration reference.
@@ -231,6 +242,10 @@ impl Default for BudgetConfig {
 /// Promotion thresholds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromotionConfig {
+    /// Tier: "research" (relaxed) or "production" (strict OMP spec).
+    /// When set, overrides individual threshold defaults.
+    #[serde(default = "default_tier")]
+    pub tier: String,
     /// Minimum OOS Sharpe (net of costs).
     #[serde(default = "default_min_sharpe")]
     pub min_oos_sharpe_net: f64,
@@ -251,16 +266,45 @@ pub struct PromotionConfig {
     pub max_drawdown: f64,
 }
 
+fn default_tier() -> String {
+    "research".to_string()
+}
+
+impl PromotionConfig {
+    /// Get the InstitutionalThresholds based on the tier setting.
+    pub fn get_thresholds(&self) -> InstitutionalThresholds {
+        match self.tier.as_str() {
+            "production" => InstitutionalThresholds::production(),
+            _ => InstitutionalThresholds::research(),
+        }
+    }
+    
+    /// Create production-grade config
+    pub fn production() -> Self {
+        let t = InstitutionalThresholds::production();
+        Self {
+            tier: "production".to_string(),
+            min_oos_sharpe_net: t.min_oos_sharpe,
+            max_pbo: t.max_pbo,
+            min_stress_passed: 4,
+            gates_required: true,
+            min_dsr: Some(t.min_dsr),
+            max_drawdown: t.max_oos_drawdown,
+        }
+    }
+}
+
+// Serde default functions - delegate to InstitutionalThresholds::research()
 fn default_max_drawdown() -> f64 {
-    -0.30 // 30% max drawdown by default
+    RESEARCH_THRESHOLDS.max_oos_drawdown
 }
 
 fn default_min_sharpe() -> f64 {
-    0.5
+    RESEARCH_THRESHOLDS.min_oos_sharpe
 }
 
 fn default_max_pbo() -> f64 {
-    0.15
+    RESEARCH_THRESHOLDS.max_pbo
 }
 
 fn default_min_stress() -> usize {
@@ -273,13 +317,15 @@ fn default_gates_required() -> bool {
 
 impl Default for PromotionConfig {
     fn default() -> Self {
+        let t = &*RESEARCH_THRESHOLDS;
         Self {
-            min_oos_sharpe_net: default_min_sharpe(),
-            max_pbo: default_max_pbo(),
+            tier: default_tier(),
+            min_oos_sharpe_net: t.min_oos_sharpe,
+            max_pbo: t.max_pbo,
             min_stress_passed: default_min_stress(),
             gates_required: default_gates_required(),
-            min_dsr: None,
-            max_drawdown: default_max_drawdown(),
+            min_dsr: Some(t.min_dsr),
+            max_drawdown: t.max_oos_drawdown,
         }
     }
 }

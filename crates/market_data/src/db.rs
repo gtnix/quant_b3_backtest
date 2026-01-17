@@ -36,6 +36,9 @@ impl Database {
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| DbError::Config("DATABASE_URL not set".into()))?;
 
+        // Install crypto provider (required for rustls 0.23+)
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         // Use rustls for SSL
         let root_store =
             rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

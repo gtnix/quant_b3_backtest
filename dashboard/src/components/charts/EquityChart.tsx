@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
 
 interface EquityChartProps {
@@ -19,6 +19,7 @@ export function EquityChart({
 }: EquityChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const [normalized, setNormalized] = useState(true); // Normalize to 100 for fair comparison
 
   // Filter out invalid data points (null/undefined values)
   const validData = useMemo(() => {
@@ -31,18 +32,49 @@ export function EquityChart({
     );
   }, [data]);
 
+  // Normalize data to base 100 for fair comparison
+  const normalizedData = useMemo(() => {
+    if (!normalized || validData.length === 0) return validData;
+    const startValue = validData[0].value;
+    return validData.map(point => ({
+      time: point.time,
+      value: (point.value / startValue) * 100
+    }));
+  }, [validData, normalized]);
+
   // Generate benchmark data (CDI cumulative return)
   const benchmarkData = useMemo(() => {
     if (!showBenchmark || validData.length === 0) return [];
     
-    const startValue = validData[0].value;
     const dailyRate = Math.pow(1 + benchmarkRate, 1/252) - 1;
+    const startValue = normalized ? 100 : validData[0].value;
     
     return validData.map((point, i) => ({
       time: point.time,
       value: startValue * Math.pow(1 + dailyRate, i)
     }));
-  }, [validData, showBenchmark, benchmarkRate]);
+  }, [validData, showBenchmark, benchmarkRate, normalized]);
+
+  // Compute final values for legend
+  const finalStrategyValue = useMemo(() => {
+    if (validData.length === 0) return 0;
+    return validData[validData.length - 1].value;
+  }, [validData]);
+
+  const finalCDIValue = useMemo(() => {
+    if (benchmarkData.length === 0) return 0;
+    return benchmarkData[benchmarkData.length - 1].value;
+  }, [benchmarkData]);
+
+  const strategyReturn = useMemo(() => {
+    if (validData.length < 2) return 0;
+    return ((validData[validData.length - 1].value / validData[0].value) - 1) * 100;
+  }, [validData]);
+
+  const cdiReturn = useMemo(() => {
+    if (benchmarkData.length < 2) return 0;
+    return ((benchmarkData[benchmarkData.length - 1].value / benchmarkData[0].value) - 1) * 100;
+  }, [benchmarkData]);
 
   useEffect(() => {
     if (!chartContainerRef.current || validData.length === 0) return;
@@ -74,10 +106,11 @@ export function EquityChart({
       rightPriceScale: {
         borderColor: '#1e1e2e',
         scaleMargins: {
-          top: 0.1,
-          bottom: 0.1,
+          top: 0.15,
+          bottom: 0.15,
         },
         mode: logScale ? 1 : 0, // 1 = logarithmic, 0 = normal
+        minimumWidth: 80, // Ensure enough space for labels
       },
       timeScale: {
         borderColor: '#1e1e2e',
@@ -93,6 +126,21 @@ export function EquityChart({
 
     chartRef.current = chart;
 
+    // Benchmark (CDI) line - draw first so it's behind
+    if (showBenchmark && benchmarkData.length > 0) {
+      const benchmarkSeries = chart.addLineSeries({
+        color: '#fbbf24',
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        priceFormat: {
+          type: 'custom',
+          formatter: (price: number) => normalized ? price.toFixed(0) : '$' + price.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+        },
+        title: `CDI`,
+      });
+      benchmarkSeries.setData(benchmarkData);
+    }
+
     // Strategy equity curve
     const strategySeries = chart.addAreaSeries({
       lineColor: '#00ff88',
@@ -101,27 +149,12 @@ export function EquityChart({
       lineWidth: 2,
       priceFormat: {
         type: 'custom',
-        formatter: (price: number) => '$' + price.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+        formatter: (price: number) => normalized ? price.toFixed(0) : '$' + price.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       },
       title: 'Strategy',
     });
 
-    // Benchmark (CDI) line
-    if (showBenchmark && benchmarkData.length > 0) {
-      const benchmarkSeries = chart.addLineSeries({
-        color: '#71717a',
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        priceFormat: {
-          type: 'custom',
-          formatter: (price: number) => '$' + price.toLocaleString(undefined, { maximumFractionDigits: 0 }),
-        },
-        title: `CDI (${(benchmarkRate * 100).toFixed(1)}% a.a.)`,
-      });
-      benchmarkSeries.setData(benchmarkData);
-    }
-
-    strategySeries.setData(validData);
+    strategySeries.setData(normalized ? normalizedData : validData);
     chart.timeScale().fitContent();
 
     const handleResize = () => {
@@ -140,7 +173,7 @@ export function EquityChart({
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [validData, logScale, showBenchmark, benchmarkData, benchmarkRate]);
+  }, [validData, normalizedData, logScale, showBenchmark, benchmarkData, benchmarkRate, normalized]);
 
   if (validData.length === 0) {
     return (
@@ -150,5 +183,25 @@ export function EquityChart({
     );
   }
 
-  return <div ref={chartContainerRef} className="w-full h-full" />;
+  return (
+    <div className="w-full h-full relative">
+      <div ref={chartContainerRef} className="w-full h-full" />
+      
+      {/* Legend with actual returns */}
+      <div className="absolute bottom-2 left-2 flex items-center gap-4 bg-terminal-bg/90 backdrop-blur-sm border border-terminal-border rounded-lg px-3 py-2 z-10">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-0.5 bg-profit rounded" />
+          <span className="text-xs text-terminal-muted">Strategy</span>
+          <span className="text-xs font-mono text-profit">+{strategyReturn.toFixed(1)}%</span>
+        </div>
+        {showBenchmark && (
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-0.5 bg-amber-400 rounded" />
+            <span className="text-xs text-terminal-muted">CDI ({(benchmarkRate * 100).toFixed(1)}% a.a.)</span>
+            <span className="text-xs font-mono text-amber-400">+{cdiReturn.toFixed(1)}%</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { MetricCard } from '../components/ui/MetricCard';
 import { WalkForwardChart } from '../components/charts/WalkForwardChart';
 import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { useDataStore } from '../stores/dataStore';
@@ -12,7 +11,8 @@ import {
   Target,
   Activity,
   Settings,
-  Play,
+  BookOpen,
+  ChevronDown,
 } from 'lucide-react';
 
 export function WalkForward() {
@@ -26,7 +26,6 @@ export function WalkForward() {
     isLoading,
     error,
     loadWalkForward,
-    artifactsRoot,
   } = useDataStore();
 
   // Load walk-forward when candidate is selected or params change
@@ -35,21 +34,6 @@ export function WalkForward() {
       loadWalkForward(selectedCandidate.candidate_id, windowMonths, stepMonths);
     }
   }, [selectedCandidate?.candidate_id, windowMonths, stepMonths]);
-
-  // No artifacts root
-  if (!artifactsRoot) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <BarChart3 className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
-          <p className="text-terminal-muted">
-            Select a project folder from the Candidates page first.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // No candidate selected
   if (!selectedCandidate) {
@@ -158,6 +142,44 @@ export function WalkForward() {
         </div>
       </div>
 
+      {/* Educational Banner - Why Walk-Forward? */}
+      <details className="card group">
+        <summary className="cursor-pointer font-semibold flex items-center gap-2 list-none">
+          <BookOpen className="w-4 h-4 text-accent-cyan" />
+          <span>Por que Walk-Forward Analysis?</span>
+          <ChevronDown className="w-4 h-4 ml-auto transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-4 space-y-4 text-sm border-t border-terminal-border pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-3 rounded-lg bg-loss/5 border border-loss/20">
+              <div className="font-medium text-loss mb-2">O Problema</div>
+              <p className="text-terminal-muted text-xs leading-relaxed">
+                Uma estratégia pode ter Sharpe 3.0 no backtest e apenas 0.3 ao operar de verdade. 
+                Isso acontece porque ela "decorou" os dados históricos em vez de aprender padrões reais.
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-accent-cyan/5 border border-accent-cyan/20">
+              <div className="font-medium text-accent-cyan mb-2">A Solução</div>
+              <p className="text-terminal-muted text-xs leading-relaxed">
+                WFA divide os dados em janelas sequenciais. Cada janela treina (IS) em dados passados 
+                e testa (OOS) em dados que a estratégia nunca viu - simulando trading real.
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-profit/5 border border-profit/20">
+              <div className="font-medium text-profit mb-2">WFE - A Métrica Chave</div>
+              <p className="text-terminal-muted text-xs leading-relaxed">
+                <span className="font-mono text-white">WFE = OOS / IS</span><br />
+                Se OOS retém mais de 50% do Sharpe IS, a estratégia é considerada robusta. 
+                Menos que 30% indica overfitting.
+              </p>
+            </div>
+          </div>
+          <div className="text-xs text-terminal-muted italic border-l-2 border-accent-cyan/50 pl-3">
+            Ref: Robert Pardo, "The Evaluation and Optimization of Trading Strategies" - O padrão-ouro para validação de estratégias.
+          </div>
+        </div>
+      </details>
+
       {/* Robustness Verdict */}
       <div className={`p-4 rounded-lg border ${isRobust ? 'bg-profit/10 border-profit/30' : 'bg-loss/10 border-loss/30'}`}>
         <div className="flex items-center gap-3">
@@ -183,28 +205,28 @@ export function WalkForward() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card group hover:border-terminal-muted/50 transition-colors">
           <div className="flex items-start justify-between mb-2">
-            <span className="metric-label inline-flex items-center">OOS Sharpe<QuickTooltip termKey="sharpe_oos" /></span>
+            <span className="metric-label inline-flex items-center">Sharpe Real (OOS)<QuickTooltip termKey="sharpe_oos" /></span>
             <Target className="w-4 h-4" />
           </div>
           <div className="font-mono font-bold text-2xl">{walkForwardResult.aggregate_sharpe.toFixed(3)}</div>
         </div>
         <div className="card group hover:border-terminal-muted/50 transition-colors">
           <div className="flex items-start justify-between mb-2">
-            <span className="metric-label inline-flex items-center">Degradation Ratio<QuickTooltip termKey="degradation_ratio" /></span>
+            <span className="metric-label inline-flex items-center">WFE (Robustez)<QuickTooltip termKey="wfe" /></span>
             <Activity className={`w-4 h-4 ${walkForwardResult.degradation_ratio >= 0.5 ? 'text-profit' : 'text-loss'}`} />
           </div>
           <div className={`font-mono font-bold text-2xl ${walkForwardResult.degradation_ratio >= 0.5 ? 'text-profit' : 'text-loss'}`}>{(walkForwardResult.degradation_ratio * 100).toFixed(1)}%</div>
         </div>
         <div className="card group hover:border-terminal-muted/50 transition-colors">
           <div className="flex items-start justify-between mb-2">
-            <span className="metric-label inline-flex items-center">Consistency<QuickTooltip termKey="consistency_score" /></span>
+            <span className="metric-label inline-flex items-center">Consistência<QuickTooltip termKey="consistency_score" /></span>
             <BarChart3 className={`w-4 h-4 ${walkForwardResult.consistency_score >= 0.6 ? 'text-profit' : 'text-loss'}`} />
           </div>
           <div className={`font-mono font-bold text-2xl ${walkForwardResult.consistency_score >= 0.6 ? 'text-profit' : 'text-loss'}`}>{(walkForwardResult.consistency_score * 100).toFixed(1)}%</div>
         </div>
         <div className="card group hover:border-terminal-muted/50 transition-colors">
           <div className="flex items-start justify-between mb-2">
-            <span className="metric-label">Profit / Loss Periods</span>
+            <span className="metric-label">Períodos Lucro / Perda</span>
           </div>
           <div className="font-mono font-bold text-2xl">{walkForwardResult.profit_periods} / {walkForwardResult.loss_periods}</div>
         </div>
@@ -234,7 +256,7 @@ export function WalkForward() {
               <th className="text-right py-2 px-3 text-terminal-muted font-normal">OOS Return</th>
               <th className="text-right py-2 px-3 text-terminal-muted font-normal">IS MaxDD</th>
               <th className="text-right py-2 px-3 text-terminal-muted font-normal">OOS MaxDD</th>
-              <th className="text-center py-2 px-3 text-terminal-muted font-normal">Degradation</th>
+              <th className="text-center py-2 px-3 text-terminal-muted font-normal">WFE</th>
             </tr>
           </thead>
           <tbody>
@@ -282,22 +304,22 @@ export function WalkForward() {
 
       {/* Interpretation Guide */}
       <div className="card">
-        <h3 className="font-semibold mb-3">Interpretation Guide</h3>
+        <h3 className="font-semibold mb-3">Guia de Interpretação</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
-            <div className="font-medium text-profit mb-1">Good Signs</div>
+            <div className="font-medium text-profit mb-1">Sinais Positivos</div>
             <ul className="list-disc list-inside text-terminal-muted space-y-1">
-              <li>Degradation ratio {'>'}50% (OOS retains IS performance)</li>
-              <li>Consistency score {'>'}60% (majority profitable periods)</li>
-              <li>Stable OOS Sharpe across periods</li>
+              <li>WFE {'>'}50% (OOS retém performance IS)</li>
+              <li>Consistência {'>'}60% (maioria dos períodos lucrativa)</li>
+              <li>Sharpe OOS estável entre períodos</li>
             </ul>
           </div>
           <div>
-            <div className="font-medium text-loss mb-1">Warning Signs</div>
+            <div className="font-medium text-loss mb-1">Sinais de Alerta</div>
             <ul className="list-disc list-inside text-terminal-muted space-y-1">
-              <li>OOS Sharpe {'<'}50% of IS Sharpe</li>
-              <li>Many negative OOS periods</li>
-              <li>High variance in OOS performance</li>
+              <li>WFE {'<'}50% (estratégia pode ser overfit)</li>
+              <li>Muitos períodos OOS negativos</li>
+              <li>Alta variância na performance OOS</li>
             </ul>
           </div>
         </div>

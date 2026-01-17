@@ -84,6 +84,32 @@ impl InstitutionalThresholds {
         Self::default()
     }
     
+    /// Create with lenient thresholds (very relaxed, for debugging/discovery)
+    /// Use this to diagnose why candidates aren't passing Stage B.
+    /// WARNING: Strategies passing lenient thresholds should NOT be deployed.
+    pub fn lenient() -> Self {
+        Self {
+            min_oos_sharpe: 0.2,        // Very low - any positive expected return
+            max_pbo: 0.50,              // Allow up to 50% PBO
+            min_dsr: 0.2,               // Very low DSR requirement
+            max_degradation_pct: 90.0,  // Allow up to 90% degradation
+            min_split_pass_rate: 0.2,   // Just 20% of splits need to pass
+            max_oos_drawdown: -0.50,    // Allow up to 50% drawdown
+            min_profit_factor_oos: 1.0, // Just need to be profitable
+        }
+    }
+    
+    /// Create thresholds from a string tier name.
+    /// Valid tiers: "production", "research", "lenient"
+    pub fn from_tier(tier: &str) -> Self {
+        match tier.to_lowercase().as_str() {
+            "production" | "prod" => Self::production(),
+            "research" | "dev" => Self::research(),
+            "lenient" | "debug" | "discovery" => Self::lenient(),
+            _ => Self::research(), // Default to research
+        }
+    }
+    
     /// Validate that thresholds are within acceptable ranges
     pub fn validate(&self) -> Result<(), String> {
         if self.min_oos_sharpe < 0.0 {

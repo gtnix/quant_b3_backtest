@@ -295,3 +295,47 @@ def sync_daily_us(
         errors=[{"symbol": s, "error": "no data"} for s in failed_symbols]
     )
 
+
+# Intervalos padrão para agregação (igual BRAPI)
+AGGREGATE_INTERVALS = ["30m", "1h", "1d"]
+
+
+def sync_aggregate_us(
+    symbols: list[str] = None,
+    intervals: list[str] = None,
+    period: str = "1mo",
+    on_progress: Optional[Callable[[str, int, int, str, int], None]] = None
+) -> dict[str, SyncResult]:
+    """Sync múltiplos intervalos do yfinance.
+    
+    Args:
+        symbols: Lista de símbolos (default: todos dos índices)
+        intervals: Lista de intervalos (default: 30m, 1h, 1d)
+        period: Período de dados (default: 1mo)
+        on_progress: Callback(interval, current, total, symbol, bars_so_far)
+    
+    Returns:
+        Dict com SyncResult por intervalo
+    """
+    intervals = intervals or AGGREGATE_INTERVALS
+    results = {}
+    
+    for interval in intervals:
+        logger.info(f"=== Aggregating interval: {interval} ===")
+        
+        # Wrapper para incluir interval no callback
+        def progress_wrapper(current, total, symbol, bars):
+            if on_progress:
+                on_progress(interval, current, total, symbol, bars)
+        
+        results[interval] = sync_intraday_us(
+            symbols=symbols,
+            interval=interval,
+            period=period,
+            on_progress=progress_wrapper
+        )
+        
+        r = results[interval]
+        logger.info(f"[{interval}] Done: {r.bars_inserted:,} bars, {r.symbols_success}/{r.symbols_total} symbols")
+    
+    return results

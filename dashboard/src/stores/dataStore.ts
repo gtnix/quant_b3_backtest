@@ -448,6 +448,50 @@ export interface MonthlyReturn {
   return_pct: number;
 }
 
+/** Trade record for blotter */
+export interface TradeRecord {
+  trade_id: string;
+  entry_date: string;
+  exit_date: string;
+  symbol: string;
+  direction: 'Long' | 'Short';
+  quantity: number;
+  entry_price: number;
+  exit_price: number;
+  gross_pnl: number;
+  commission: number;
+  slippage: number;
+  net_pnl: number;
+  return_pct: number;
+  holding_period_hours: number;
+  is_winner: boolean;
+}
+
+/** Trade summary statistics */
+export interface TradesSummary {
+  total_trades: number;
+  winners: number;
+  losers: number;
+  win_rate: number;
+  total_net_pnl: number;
+  total_gross_pnl: number;
+  total_commission: number;
+  total_slippage: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+  expectancy: number;
+}
+
+/** Trades result from API */
+export interface TradesResult {
+  candidate_id: string;
+  trades: TradeRecord[];
+  total_trades: number;
+  summary?: TradesSummary;
+  data_source: 'csv' | 'simulated';
+}
+
 /** Comprehensive risk metrics */
 export interface RiskMetrics {
   candidate_id: string;
@@ -613,6 +657,16 @@ export interface RecentRun {
   best_oos_sharpe_net?: number;
 }
 
+/** Strategy family configuration stored per family */
+export interface FamilyConfig {
+  [key: string]: number | boolean | string;
+}
+
+/** All family configurations */
+export interface FamilyConfigs {
+  [family: string]: FamilyConfig;
+}
+
 interface DataState {
   // Artifacts root
   artifactsRoot: string | null;
@@ -634,12 +688,18 @@ interface DataState {
   // Backtest
   backtest: BacktestResult | null;
   
+  // Trades
+  tradesResult: TradesResult | null;
+  
   // Advanced Analytics
   riskMetrics: RiskMetrics | null;
   comparisonResult: ComparisonResult | null;
   walkForwardResult: WalkForwardResult | null;
   monteCarloResult: MonteCarloResult | null;
   regimeAnalysis: RegimeAnalysis | null;
+  
+  // Strategy Family Configurations
+  familyConfigs: FamilyConfigs;
   
   // Legacy data
   experiments: ExperimentListing[];
@@ -662,6 +722,7 @@ interface DataState {
   loadCandidateDetail: (candidateId: string) => Promise<void>;
   setSelectedCandidate: (candidate: CandidateDetailFull | null) => void;
   loadBacktest: (candidateId: string) => Promise<void>;
+  loadTrades: (candidateId: string, limit?: number) => Promise<void>;
   setCandidateFilters: (filters: CandidateFilters) => void;
   clearSelectedCandidate: () => void;
   toggleCandidateSelection: (candidateId: string) => void;
@@ -673,6 +734,12 @@ interface DataState {
   loadWalkForward: (candidateId: string, windowMonths?: number, stepMonths?: number) => Promise<void>;
   runMonteCarlo: (candidateId: string, numSimulations?: number, blockSize?: number) => Promise<void>;
   detectRegimes: (candidateId: string, volThreshold?: number) => Promise<void>;
+  
+  // Actions - Family Configurations
+  saveFamilyConfig: (family: string, config: FamilyConfig) => void;
+  loadFamilyConfig: (family: string) => FamilyConfig | undefined;
+  clearFamilyConfig: (family: string) => void;
+  clearAllFamilyConfigs: () => void;
   
   // Actions - File Watcher
   startWatcher: () => Promise<void>;
@@ -692,6 +759,32 @@ interface DataState {
 // STORE IMPLEMENTATION
 // =============================================================================
 
+// =============================================================================
+// PERSISTENCE HELPERS
+// =============================================================================
+
+const FAMILY_CONFIGS_KEY = 'quant_b3_family_configs';
+
+function loadPersistedFamilyConfigs(): FamilyConfigs {
+  try {
+    const stored = localStorage.getItem(FAMILY_CONFIGS_KEY);
+    if (stored) {
+      return JSON.parse(stored) as FamilyConfigs;
+    }
+  } catch (e) {
+    console.warn('[DataStore] Failed to load family configs from localStorage:', e);
+  }
+  return {};
+}
+
+function persistFamilyConfigs(configs: FamilyConfigs): void {
+  try {
+    localStorage.setItem(FAMILY_CONFIGS_KEY, JSON.stringify(configs));
+  } catch (e) {
+    console.warn('[DataStore] Failed to persist family configs to localStorage:', e);
+  }
+}
+
 export const useDataStore = create<DataState>((set, get) => ({
   // Initial state
   artifactsRoot: null,
@@ -706,11 +799,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   candidateFilters: {},
   selectedCandidateIds: [],
   backtest: null,
+  tradesResult: null,
   riskMetrics: null,
   comparisonResult: null,
   walkForwardResult: null,
   monteCarloResult: null,
   regimeAnalysis: null,
+  familyConfigs: loadPersistedFamilyConfigs(),
   experiments: [],
   currentExperiment: null,
   overview: null,
@@ -842,6 +937,19 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
   },
 
+  loadTrades: async (candidateId: string, limit = 100) => {
+    // Note: Don't set global isLoading here - TradeBlotter has its own loadingTrades state
+    // Setting isLoading would unmount/remount TradeBlotter causing infinite request loop
+    try {
+      const response = await fetch(`${config.apiBase}/candidate/${candidateId}/trades?limit=${limit}`);
+      if (!response.ok) throw new Error('Failed to load trades');
+      const tradesResult = await response.json();
+      set({ tradesResult });
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
   setCandidateFilters: (filters: CandidateFilters) => {
     set({ candidateFilters: filters });
   },
@@ -869,13 +977,15 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   // ==========================================================================
-  // ADVANCED ANALYTICS ACTIONS
+  // ADVANCED ANALYTICS ACTIONS (Web API + Tauri fallback)
   // ==========================================================================
 
   loadRiskMetrics: async (candidateId: string) => {
     set({ isLoading: true, error: null });
     try {
-      const riskMetrics = await safeInvoke<RiskMetrics>('calculate_risk_metrics', { candidateId });
+      const response = await fetch(`${config.apiBase}/analytics/risk/${candidateId}`);
+      if (!response.ok) throw new Error('Failed to load risk metrics');
+      const riskMetrics = await response.json();
       set({ riskMetrics, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -885,7 +995,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   compareCandidates: async (candidateIds: string[]) => {
     set({ isLoading: true, error: null });
     try {
-      const comparisonResult = await safeInvoke<ComparisonResult>('compare_candidates', { candidateIds });
+      const response = await fetch(`${config.apiBase}/analytics/compare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateIds }),
+      });
+      if (!response.ok) throw new Error('Failed to compare candidates');
+      const comparisonResult = await response.json();
       set({ comparisonResult, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -895,11 +1011,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadWalkForward: async (candidateId: string, windowMonths = 12, stepMonths = 3) => {
     set({ isLoading: true, error: null });
     try {
-      const walkForwardResult = await safeInvoke<WalkForwardResult>('calculate_walk_forward', {
-        candidateId,
-        windowMonths,
-        stepMonths,
-      });
+      const response = await fetch(
+        `${config.apiBase}/analytics/walk-forward/${candidateId}?windowMonths=${windowMonths}&stepMonths=${stepMonths}`
+      );
+      if (!response.ok) throw new Error('Failed to load walk-forward analysis');
+      const walkForwardResult = await response.json();
       set({ walkForwardResult, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -909,11 +1025,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   runMonteCarlo: async (candidateId: string, numSimulations = 1000, blockSize = 5) => {
     set({ isLoading: true, error: null });
     try {
-      const monteCarloResult = await safeInvoke<MonteCarloResult>('run_monte_carlo', {
-        candidateId,
-        numSimulations,
-        blockSize,
-      });
+      const response = await fetch(
+        `${config.apiBase}/analytics/monte-carlo/${candidateId}?numSimulations=${numSimulations}&blockSize=${blockSize}`
+      );
+      if (!response.ok) throw new Error('Failed to run Monte Carlo simulation');
+      const monteCarloResult = await response.json();
       set({ monteCarloResult, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -923,10 +1039,12 @@ export const useDataStore = create<DataState>((set, get) => ({
   detectRegimes: async (candidateId: string, volThreshold?: number) => {
     set({ isLoading: true, error: null });
     try {
-      const regimeAnalysis = await safeInvoke<RegimeAnalysis>('detect_regimes', {
-        candidateId,
-        volThreshold,
-      });
+      const url = volThreshold 
+        ? `${config.apiBase}/analytics/regimes/${candidateId}?volThreshold=${volThreshold}`
+        : `${config.apiBase}/analytics/regimes/${candidateId}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to detect regimes');
+      const regimeAnalysis = await response.json();
       set({ regimeAnalysis, isLoading: false });
     } catch (error) {
       set({ error: String(error), isLoading: false });
@@ -1044,6 +1162,35 @@ export const useDataStore = create<DataState>((set, get) => ({
       console.warn('Using mock equity data:', error);
       set({ equityData: generateMockEquityData() });
     }
+  },
+
+  // ==========================================================================
+  // FAMILY CONFIGURATION ACTIONS
+  // ==========================================================================
+
+  saveFamilyConfig: (family: string, config: FamilyConfig) => {
+    const { familyConfigs } = get();
+    const newConfigs = { ...familyConfigs, [family]: config };
+    set({ familyConfigs: newConfigs });
+    persistFamilyConfigs(newConfigs);
+  },
+
+  loadFamilyConfig: (family: string) => {
+    const { familyConfigs } = get();
+    return familyConfigs[family];
+  },
+
+  clearFamilyConfig: (family: string) => {
+    const { familyConfigs } = get();
+    const newConfigs = { ...familyConfigs };
+    delete newConfigs[family];
+    set({ familyConfigs: newConfigs });
+    persistFamilyConfigs(newConfigs);
+  },
+
+  clearAllFamilyConfigs: () => {
+    set({ familyConfigs: {} });
+    persistFamilyConfigs({});
   },
 
   // ==========================================================================

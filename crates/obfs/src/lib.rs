@@ -37,7 +37,7 @@ pub use compression::{
     UltraCompressor, ULTRA_COMPRESSION_LEVEL as COMPRESSION_LEVEL_ULTRA,
     DEFAULT_COMPRESSION_LEVEL,
 };
-pub use consolidator::{Consolidator, ConsolidationStats, consolidate};
+pub use consolidator::{Consolidator, ConsolidationStats, CompactionStats, consolidate, consolidate_and_cleanup, compact_parquets};
 pub use integrity::{IntegrityEngine, IntegrityLevel, IntegrityResult};
 pub use reader::ArtifactReader;
 pub use report_bundle::{
@@ -46,6 +46,32 @@ pub use report_bundle::{
 };
 pub use store::{MetadataStore, DEFAULT_LMDB_MAP_SIZE};
 pub use pending_store::{PendingArtifact, PendingStore, TimeseriesPoint as PendingTimeseriesPoint};
+
+/// Cleanup pending artifacts in a directory, keeping only the specified run IDs.
+/// 
+/// # DEPRECATED
+/// 
+/// **WARNING**: This function violates the Quant Principle - it deletes files WITHOUT
+/// consolidating them first. Use `consolidate_and_cleanup` instead for safe cleanup.
+/// 
+/// This is designed for incremental cleanup during long-running evolution campaigns
+/// to prevent disk explosion from accumulating thousands of .obfs files.
+/// 
+/// # Arguments
+/// * `pending_dir` - Path to the pending directory (e.g., "output/scg/backtests/pending")
+/// * `keep_run_ids` - Set of run IDs (UUIDs) to keep
+/// 
+/// # Returns
+/// * `Ok((removed, kept))` - Number of files removed and kept
+/// * `Err` - If directory access fails
+#[deprecated(since = "0.2.0", note = "Use consolidate_and_cleanup instead - this deletes without persisting")]
+pub fn cleanup_pending_except(
+    pending_dir: impl AsRef<Path>,
+    keep_run_ids: &std::collections::HashSet<uuid::Uuid>,
+) -> anyhow::Result<(usize, usize)> {
+    let store = PendingStore::new(pending_dir.as_ref().to_path_buf())?;
+    store.cleanup_except(keep_run_ids)
+}
 pub use timeseries::{TimeSeriesStore, TimeSeriesPoint, TimeSeriesRef, ParquetStats};
 pub use types::*;
 pub use writer::ArtifactWriter;

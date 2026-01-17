@@ -73,14 +73,21 @@ impl MarketDataCache {
     
     /// Generate cache key from query parameters.
     fn cache_key(&self, symbols: &[String], start: NaiveDate, end: NaiveDate) -> String {
+        self.cache_key_with_market(symbols, start, end, "BR")
+    }
+    
+    /// Generate cache key with explicit market.
+    fn cache_key_with_market(&self, symbols: &[String], start: NaiveDate, end: NaiveDate, market: &str) -> String {
         let mut hasher = Sha256::new();
+        hasher.update(market.to_uppercase().as_bytes());
         let mut sorted_symbols = symbols.to_vec();
         sorted_symbols.sort();
         hasher.update(sorted_symbols.join(",").as_bytes());
         hasher.update(start.to_string().as_bytes());
         hasher.update(end.to_string().as_bytes());
         let hash = hasher.finalize();
-        format!("{:x}", hash)[..16].to_string()
+        let hash_str = format!("{:x}", hash);
+        format!("{}_{}", market.to_uppercase(), &hash_str[..12])
     }
     
     /// Get cache file path for a key.
@@ -159,6 +166,79 @@ impl MarketDataCache {
             }
         }
         info!("Cache cleared: {}", self.cache_dir.display());
+        Ok(())
+    }
+    
+    /// Check if cache exists for a specific market.
+    pub fn has_cache_for_market(&self, symbols: &[String], start: NaiveDate, end: NaiveDate, market: &str) -> bool {
+        let key = self.cache_key_with_market(symbols, start, end, market);
+        self.cache_path(&key).exists()
+    }
+    
+    /// Load market data from cache with explicit market.
+    pub fn load_with_market(
+        &self, 
+        symbols: &[String], 
+        start: NaiveDate, 
+        end: NaiveDate,
+        market: &str,
+    ) -> Result<BacktestMarketData, BacktestDataError> {
+        let key = self.cache_key_with_market(symbols, start, end, market);
+        let path = self.cache_path(&key);
+        
+        if !path.exists() {
+            return Err(BacktestDataError::Cache(format!("Cache miss for market {}", market)));
+        }
+        
+        let compressed = std::fs::read(&path)?;
+        let decompressed = self.compression.decompress(&compressed)
+            .map_err(|e| BacktestDataError::Cache(format!("Decompress failed: {}", e)))?;
+        
+        let data: CachedMarketData = serde_json::from_slice(&decompressed)
+            .map_err(|e| BacktestDataError::Cache(format!("Deserialize failed: {}", e)))?;
+        
+        debug!("Cache HIT for {}: {} bars from {}", market, data.total_bars, path.display());
+        
+        Ok(BacktestMarketData {
+            bars_by_symbol: data.bars_by_symbol,
+            trading_dates: data.trading_dates,
+            total_bars: data.total_bars,
+        })
+    }
+    
+    /// Save market data to cache with explicit market.
+    pub fn save_with_market(
+        &self, 
+        symbols: &[String], 
+        start: NaiveDate, 
+        end: NaiveDate, 
+        data: &BacktestMarketData,
+        market: &str,
+    ) -> Result<(), BacktestDataError> {
+        let key = self.cache_key_with_market(symbols, start, end, market);
+        let path = self.cache_path(&key);
+        
+        let cached = CachedMarketData {
+            bars_by_symbol: data.bars_by_symbol.clone(),
+            trading_dates: data.trading_dates.clone(),
+            total_bars: data.total_bars,
+            cached_at: chrono::Utc::now().timestamp(),
+        };
+        
+        let json = serde_json::to_vec(&cached)
+            .map_err(|e| BacktestDataError::Cache(format!("Serialize failed: {}", e)))?;
+        
+        let compressed = self.compression.compress(&json)
+            .map_err(|e| BacktestDataError::Cache(format!("Compress failed: {}", e)))?;
+        
+        std::fs::write(&path, &compressed)?;
+        
+        let ratio = json.len() as f64 / compressed.len() as f64;
+        info!(
+            "Cache SAVE for {}: {} bars → {} ({:.1}x compression)",
+            market, data.total_bars, path.display(), ratio
+        );
+        
         Ok(())
     }
 }
@@ -249,6 +329,7 @@ impl BacktestMarketData {
 /// * `symbols` - List of symbols to load (empty = all symbols)
 /// * `start_date` - Start of date range (inclusive)
 /// * `end_date` - End of date range (inclusive)
+/// * `market` - Market to load from: "BR" uses ohlcv_daily, "US" uses ohlcv_daily_us
 ///
 /// # Returns
 /// `BacktestMarketData` with all bars organized by symbol.
@@ -258,32 +339,79 @@ pub async fn load_ohlcv_for_backtest(
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Result<BacktestMarketData, BacktestDataError> {
+    load_ohlcv_for_backtest_with_market(client, symbols, start_date, end_date, "BR").await
+}
+
+/// Load OHLCV data for backtesting with explicit market selection.
+pub async fn load_ohlcv_for_backtest_with_market(
+    client: &Client,
+    symbols: &[String],
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    market: &str,
+) -> Result<BacktestMarketData, BacktestDataError> {
     if start_date > end_date {
         return Err(BacktestDataError::InvalidDateRange(start_date, end_date));
     }
     
+    // Select table based on market
+    let table = match market.to_uppercase().as_str() {
+        "US" | "NYSE" | "NASDAQ" | "SP500" => "ohlcv_daily_us",
+        _ => "ohlcv_daily",  // Default to BR
+    };
+    
     info!(
-        "Loading OHLCV data: {} symbols, {} to {}",
+        "Loading OHLCV data: {} symbols, {} to {}, market={}, table={}",
         if symbols.is_empty() { "all".to_string() } else { symbols.len().to_string() },
         start_date,
-        end_date
+        end_date,
+        market,
+        table
     );
+    
+    // Note: ohlcv_daily_us does NOT have adj_close column, use close as fallback
+    let has_adj_close = table == "ohlcv_daily";
     
     let query = if symbols.is_empty() {
         // Load all symbols
-        "SELECT symbol, trading_date, open, high, low, close, adj_close, volume
-         FROM ohlcv_daily
-         WHERE trading_date >= $1 AND trading_date <= $2
-         ORDER BY symbol, trading_date".to_string()
+        if has_adj_close {
+            format!(
+                "SELECT symbol, trading_date, open, high, low, close, adj_close, volume
+                 FROM {}
+                 WHERE trading_date >= $1 AND trading_date <= $2
+                 ORDER BY symbol, trading_date",
+                table
+            )
+        } else {
+            format!(
+                "SELECT symbol, trading_date, open, high, low, close, close AS adj_close, volume
+                 FROM {}
+                 WHERE trading_date >= $1 AND trading_date <= $2
+                 ORDER BY symbol, trading_date",
+                table
+            )
+        }
     } else {
         // Load specific symbols
-        format!(
-            "SELECT symbol, trading_date, open, high, low, close, adj_close, volume
-             FROM ohlcv_daily
-             WHERE trading_date >= $1 AND trading_date <= $2
-               AND symbol = ANY($3)
-             ORDER BY symbol, trading_date"
-        )
+        if has_adj_close {
+            format!(
+                "SELECT symbol, trading_date, open, high, low, close, adj_close, volume
+                 FROM {}
+                 WHERE trading_date >= $1 AND trading_date <= $2
+                   AND symbol = ANY($3)
+                 ORDER BY symbol, trading_date",
+                table
+            )
+        } else {
+            format!(
+                "SELECT symbol, trading_date, open, high, low, close, close AS adj_close, volume
+                 FROM {}
+                 WHERE trading_date >= $1 AND trading_date <= $2
+                   AND symbol = ANY($3)
+                 ORDER BY symbol, trading_date",
+                table
+            )
+        }
     };
     
     let rows = if symbols.is_empty() {
@@ -299,15 +427,28 @@ pub async fn load_ohlcv_for_backtest(
     let mut bars_by_symbol: HashMap<String, Vec<OhlcvBar>> = HashMap::new();
     let mut all_dates: std::collections::BTreeSet<NaiveDate> = std::collections::BTreeSet::new();
     
+    let mut skipped = 0usize;
     for row in &rows {
         let symbol: String = row.get(0);
         let date: NaiveDate = row.get(1);
-        let open: Decimal = row.get(2);
-        let high: Decimal = row.get(3);
-        let low: Decimal = row.get(4);
-        let close: Decimal = row.get(5);
+        
+        // Handle potential NULL values in OHLCV columns (skip invalid rows)
+        let open: Option<Decimal> = row.get(2);
+        let high: Option<Decimal> = row.get(3);
+        let low: Option<Decimal> = row.get(4);
+        let close: Option<Decimal> = row.get(5);
         let adj_close: Option<Decimal> = row.get(6);
-        let volume: i64 = row.get(7);
+        // Volume can be NULL in some markets (BR has NULL volumes for some records)
+        let volume: i64 = row.try_get::<_, i64>(7).unwrap_or(0);
+        
+        // Skip rows with NULL OHLC values (incomplete data)
+        let (open, high, low, close) = match (open, high, low, close) {
+            (Some(o), Some(h), Some(l), Some(c)) => (o, h, l, c),
+            _ => {
+                skipped += 1;
+                continue;
+            }
+        };
         
         let bar = OhlcvBar {
             symbol: symbol.clone(),
@@ -322,6 +463,10 @@ pub async fn load_ohlcv_for_backtest(
         
         all_dates.insert(date);
         bars_by_symbol.entry(symbol).or_default().push(bar);
+    }
+    
+    if skipped > 0 {
+        info!("Skipped {} rows with NULL OHLC values", skipped);
     }
     
     let total_bars = rows.len();
@@ -418,6 +563,59 @@ pub async fn get_symbol_date_range(
         Some(r) => {
             let min_date: Option<NaiveDate> = r.get(0);
             let max_date: Option<NaiveDate> = r.get(1);
+            Ok(min_date.zip(max_date))
+        }
+        None => Ok(None),
+    }
+}
+
+/// List all available symbols for a specific market.
+///
+/// Queries the appropriate OHLCV table (ohlcv_daily for BR, ohlcv_daily_us for US)
+/// and returns all unique symbols with data.
+pub async fn list_symbols_for_market(
+    client: &Client,
+    market: &str,
+) -> Result<Vec<String>, BacktestDataError> {
+    let table = match market.to_uppercase().as_str() {
+        "US" | "NYSE" | "NASDAQ" | "SP500" => "ohlcv_daily_us",
+        _ => "ohlcv_daily",
+    };
+    
+    let query = format!(
+        "SELECT DISTINCT symbol FROM {} ORDER BY symbol",
+        table
+    );
+    
+    let rows = client.query(&query, &[]).await?;
+    let symbols: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
+    
+    info!("Loaded {} symbols from {} (market={})", symbols.len(), table, market);
+    Ok(symbols)
+}
+
+/// Get date range for a market's data.
+pub async fn get_market_date_range(
+    client: &Client,
+    market: &str,
+) -> Result<Option<(NaiveDate, NaiveDate)>, BacktestDataError> {
+    let table = match market.to_uppercase().as_str() {
+        "US" | "NYSE" | "NASDAQ" | "SP500" => "ohlcv_daily_us",
+        _ => "ohlcv_daily",
+    };
+    
+    let query = format!(
+        "SELECT MIN(trading_date), MAX(trading_date) FROM {}",
+        table
+    );
+    
+    let row = client.query_opt(&query, &[]).await?;
+    
+    match row {
+        Some(r) => {
+            let min_date: Option<NaiveDate> = r.get(0);
+            let max_date: Option<NaiveDate> = r.get(1);
+            info!("Market {} date range: {:?} to {:?}", market, min_date, max_date);
             Ok(min_date.zip(max_date))
         }
         None => Ok(None),

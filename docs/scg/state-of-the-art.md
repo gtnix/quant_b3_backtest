@@ -449,3 +449,4 @@ Ajusta o Sharpe pelo número de estratégias testadas.
 
 
 
+

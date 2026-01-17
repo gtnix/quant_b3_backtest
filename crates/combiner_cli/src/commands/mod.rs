@@ -1,6 +1,7 @@
 //! CLI commands.
 
 pub mod audit;
+pub mod extract;
 pub mod run;
 pub mod status;
 pub mod export;

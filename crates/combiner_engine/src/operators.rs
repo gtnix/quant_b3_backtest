@@ -148,13 +148,19 @@ impl Crossover {
             }
         }
 
-        let child1 = StrategyGenome::new(child1_genes)
+        let mut child1 = StrategyGenome::new(child1_genes)
             .with_generation(generation)
             .with_parents(vec![parent1.id, parent2.id]);
 
-        let child2 = StrategyGenome::new(child2_genes)
+        let mut child2 = StrategyGenome::new(child2_genes)
             .with_generation(generation)
             .with_parents(vec![parent1.id, parent2.id]);
+
+        // Deduplicate blocks and sanitize params to avoid clones
+        child1.deduplicate_blocks();
+        child2.deduplicate_blocks();
+        child1.sanitize();
+        child2.sanitize();
 
         (child1, child2)
     }
@@ -204,6 +210,10 @@ impl Mutation {
         if rng.gen_bool(self.rate * 0.1) {
             self.mutate_structure(genome, rng);
         }
+        
+        // Post-mutation cleanup: remove duplicate blocks and sanitize floats
+        genome.deduplicate_blocks();
+        genome.sanitize();
     }
 
     /// Mutate a parameter value.

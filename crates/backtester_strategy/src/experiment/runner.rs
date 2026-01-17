@@ -71,6 +71,10 @@ pub struct RunnerConfig {
     pub market_data_csv_path: Option<String>,
     /// Artifact output format (Legacy JSON/CSV or OBFS binary)
     pub artifact_format: ArtifactFormat,
+    /// Data source: "csv", "database", or None for placeholder
+    pub data_source: Option<String>,
+    /// Market for database loading: "BR" or "US"
+    pub market: Option<String>,
 }
 
 impl Default for RunnerConfig {
@@ -87,6 +91,8 @@ impl Default for RunnerConfig {
             dividend_csv_path: None,
             market_data_csv_path: None,
             artifact_format: ArtifactFormat::Obfs,
+            data_source: None,
+            market: None,
         }
     }
 }
@@ -129,6 +135,34 @@ impl ExperimentRunner {
         Ok(())
     }
     
+    /// Load market data from Neon database.
+    ///
+    /// # Arguments
+    /// * `market` - Market identifier: "BR" for ohlcv_daily, "US" for ohlcv_daily_us
+    ///
+    /// Uses OBFS caching for ultra-fast repeated loads.
+    pub fn load_market_data_from_database(&mut self, market: &str) -> Result<(), RunnerError> {
+        use super::db_loader::load_market_data_sync;
+        
+        tracing::info!("Loading market data for {} from database", market);
+        
+        let data = load_market_data_sync(market)
+            .map_err(|e| RunnerError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Database load failed: {}", e)
+            )))?;
+        
+        tracing::info!(
+            "Loaded {} symbols, {} trading days from {} database",
+            data.num_symbols(),
+            data.num_trading_days(),
+            market
+        );
+        
+        self.market_data = Some(data);
+        Ok(())
+    }
+    
     /// Check if market data is loaded.
     pub fn has_market_data(&self) -> bool {
         self.market_data.is_some()
@@ -137,9 +171,38 @@ impl ExperimentRunner {
     /// Create runner with custom configuration.
     pub fn with_config(config: RunnerConfig) -> Self {
         let execution_mode = config.execution_mode;
-        let market_data = config.market_data_csv_path.as_ref().and_then(|path| {
-            super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
-        });
+        
+        // Load market data based on data_source
+        let market_data = if let Some(ref source) = config.data_source {
+            if source == "database" {
+                // Load from database using market (defaults to BR)
+                let market = config.market.as_deref().unwrap_or("BR");
+                match super::db_loader::load_market_data_sync(market) {
+                    Ok(data) => {
+                        tracing::info!(
+                            "Loaded {} symbols, {} days from {} database",
+                            data.num_symbols(), data.num_trading_days(), market
+                        );
+                        Some(data)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load database data: {}", e);
+                        None
+                    }
+                }
+            } else {
+                // Load from CSV
+                config.market_data_csv_path.as_ref().and_then(|path| {
+                    super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
+                })
+            }
+        } else {
+            // No data source specified, try CSV path
+            config.market_data_csv_path.as_ref().and_then(|path| {
+                super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
+            })
+        };
+        
         Self {
             registry: BlockRegistry::with_builtins(),
             config,
@@ -656,23 +719,32 @@ impl ExperimentRunner {
             return self.create_context_from_market_data(market_data);
         }
         
+        // Determine market from config
+        let market_str = self.config.market.as_deref().unwrap_or("BR");
+        let market = if market_str.to_uppercase() == "US" {
+            backtester_intelligence::filters::Market::US
+        } else {
+            backtester_intelligence::filters::Market::BR
+        };
+        
         // Fallback to placeholder (for backwards compatibility)
         let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let cash = Decimal::from(100_000);
 
-        let mut ctx = StrategyContext::new(
-            date,
-            backtester_intelligence::filters::Market::BR,
-            cash,
-        );
+        let mut ctx = StrategyContext::new(date, market, cash);
 
-        // Candidatos de placeholder
-        let symbols = vec!["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3"];
+        // Candidatos de placeholder - use appropriate symbols for market
+        let symbols: Vec<&str> = if market_str.to_uppercase() == "US" {
+            vec!["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+        } else {
+            vec!["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3"]
+        };
+        
         let candidates: Vec<StrategyCandidate> = symbols
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                let mut c = StrategyCandidate::new(*s, backtester_intelligence::filters::Market::BR);
+                let mut c = StrategyCandidate::new(*s, market);
                 c.price = Some(Decimal::from(20 + i as i64 * 5));
                 c.volatility = Some(0.25 + i as f64 * 0.02);
                 c.momentum_return = Some(0.05 + i as f64 * 0.01);
@@ -697,11 +769,15 @@ impl ExperimentRunner {
         
         let cash = self.config.initial_capital;
         
-        let mut ctx = StrategyContext::new(
-            start_date,
-            backtester_intelligence::filters::Market::BR,
-            cash,
-        );
+        // Determine market from config
+        let market_str = self.config.market.as_deref().unwrap_or("BR");
+        let market = if market_str.to_uppercase() == "US" {
+            backtester_intelligence::filters::Market::US
+        } else {
+            backtester_intelligence::filters::Market::BR
+        };
+        
+        let mut ctx = StrategyContext::new(start_date, market, cash);
         
         // Build candidates from market data
         let mut candidates: Vec<StrategyCandidate> = Vec::new();
@@ -1314,6 +1390,8 @@ impl ExperimentRunner {
                 dividend_csv_path: self.config.dividend_csv_path.clone(),
                 market_data_csv_path: self.config.market_data_csv_path.clone(),
                 artifact_format: self.config.artifact_format,
+                data_source: self.config.data_source.clone(),
+                market: self.config.market.clone(),
             };
 
             let stressed_runner = ExperimentRunner::with_config(stressed_runner_config);

@@ -14,6 +14,7 @@ import { StrategyPipeline } from '../components/StrategyPipeline';
 import { WFAAnalysis } from '../components/WFAAnalysis';
 import { StressAnalysis } from '../components/StressAnalysis';
 import { RiskDecomposition } from '../components/RiskDecomposition';
+import { TradeBlotter } from '../components/TradeBlotter';
 import { useDataStore } from '../stores/dataStore';
 import { config, platform } from '../lib/platform';
 import type { MonthlyReturn, RollingPoint, CandidateSummary } from '../stores/dataStore';
@@ -579,7 +580,7 @@ function CandidateCard({ candidate, onClick }: { candidate: RecentCandidate; onC
 // MAIN BACKTEST COMPONENT
 // =============================================================================
 
-type TabType = 'overview' | 'distribution' | 'monthly' | 'seasonal' | 'annual' | 'rolling' | 'drawdown' | 'pipeline' | 'validation' | 'stress' | 'risk';
+type TabType = 'overview' | 'trades' | 'distribution' | 'monthly' | 'seasonal' | 'annual' | 'rolling' | 'drawdown' | 'pipeline' | 'validation' | 'stress' | 'risk';
 
 export function Backtest() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -608,10 +609,8 @@ export function Backtest() {
         loadRiskMetrics(selectedCandidate.candidate_id);
       }
       
-      // Also load simulated equity for Neon candidates
-      if ((selectedCandidate as any).data_source === 'neon' || !backtest?.available) {
-        loadSimulatedEquity(selectedCandidate.candidate_id);
-      }
+      // Always load simulated equity as fallback (loads in parallel)
+      loadSimulatedEquity(selectedCandidate.candidate_id);
     }
   }, [selectedCandidate?.candidate_id]);
 
@@ -793,8 +792,8 @@ export function Backtest() {
     return <CandidateSelector onSelect={handleSelectCandidate} />;
   }
 
-  // Loading state
-  if (isLoading && !backtest && !simulatedData) {
+  // Loading state - show spinner only while actively loading
+  if ((isLoading || loadingSimulated) && !error) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-4">
         <RefreshCw className="w-12 h-12 animate-spin text-terminal-muted" />
@@ -803,8 +802,9 @@ export function Backtest() {
     );
   }
 
-  // Error or no data available
-  if (error || (!backtest?.available && !simulatedData && !isLoading)) {
+  // Error or no data available (but only show after loading finished)
+  const hasLoadingStarted = backtest !== null || simulatedData !== null || isLoading || loadingSimulated;
+  if (error || (hasLoadingStarted && !backtest?.available && !simulatedData && !isLoading && !loadingSimulated)) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-4">
         <AlertTriangle className="w-12 h-12 text-amber-500" />
@@ -1142,6 +1142,7 @@ export function Backtest() {
       <div className="flex items-center gap-1 border-b border-terminal-border overflow-x-auto pb-0">
         {[
           { key: 'overview', label: 'Overview', icon: BarChart3 },
+          { key: 'trades', label: 'Trades', icon: FileText },
           { key: 'pipeline', label: 'Pipeline', icon: Layers },
           { key: 'validation', label: 'WFA', icon: FlaskConical },
           { key: 'stress', label: 'Stress', icon: AlertTriangle },
@@ -1170,14 +1171,88 @@ export function Backtest() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'overview' && metrics && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          <MetricCard label="CAGR" value={(metrics.cagr || 0) * 100} format="percent" icon={<TrendingUp className="w-4 h-4 text-profit" />} />
-          <MetricCard label="Sharpe" value={metrics.sharpe_ratio || 0} format="ratio" icon={<Target className="w-4 h-4" />} />
-          <MetricCard label="Sortino" value={metrics.sortino_ratio ?? 0} format="ratio" />
-          <MetricCard label="Calmar" value={metrics.calmar_ratio ?? 0} format="ratio" />
-          <MetricCard label="Max DD" value={(metrics.max_drawdown || 0) * 100} format="percent" icon={<TrendingDown className="w-4 h-4 text-loss" />} />
-          <MetricCard label="Win Rate" value={(metrics.hit_rate ?? 0) * 100} format="percent" icon={<Activity className="w-4 h-4" />} />
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          {/* Key Metrics Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <MetricCard label="CAGR" value={(computedCAGR || 0) * 100} format="percent" icon={<TrendingUp className="w-4 h-4 text-profit" />} />
+            <MetricCard label="Sharpe" value={stats.sharpe || 0} format="ratio" icon={<Target className="w-4 h-4" />} />
+            <MetricCard label="Sortino" value={stats.sortino ?? 0} format="ratio" />
+            <MetricCard label="Calmar" value={calmarRatio ?? 0} format="ratio" />
+            <MetricCard label="Max DD" value={(computedMaxDD || 0) * 100} format="percent" icon={<TrendingDown className="w-4 h-4 text-loss" />} />
+            <MetricCard label="Volatility" value={(stats.annualizedVol ?? 0) * 100} format="percent" icon={<Activity className="w-4 h-4" />} />
+          </div>
+
+          {/* Statistical Summary */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card-elevated">
+              <h3 className="text-sm font-semibold text-terminal-muted uppercase tracking-wider mb-4">Performance Summary</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Total Return</span>
+                  <span className={`font-mono font-medium ${totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    {(totalReturn * 100).toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Trading Days</span>
+                  <span className="font-mono">{equityData.length}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Win Rate (Daily)</span>
+                  <span className="font-mono">
+                    {((dailyReturns.filter(r => r > 0).length / (dailyReturns.length || 1)) * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Best Day</span>
+                  <span className="font-mono text-profit">
+                    +{(Math.max(...dailyReturns, 0) * 100).toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-sm text-terminal-muted">Worst Day</span>
+                  <span className="font-mono text-loss">
+                    {(Math.min(...dailyReturns, 0) * 100).toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card-elevated">
+              <h3 className="text-sm font-semibold text-terminal-muted uppercase tracking-wider mb-4">Risk Metrics</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">VaR (95%)</span>
+                  <span className="font-mono text-loss">
+                    {(stats.var95 * 100).toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">CVaR (95%)</span>
+                  <span className="font-mono text-loss">
+                    {(stats.cvar95 * 100).toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Skewness</span>
+                  <span className={`font-mono ${stats.skewness >= 0 ? 'text-profit' : 'text-loss'}`}>
+                    {stats.skewness.toFixed(3)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-terminal-border/30">
+                  <span className="text-sm text-terminal-muted">Kurtosis</span>
+                  <span className="font-mono">{stats.kurtosis.toFixed(3)}</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-sm text-terminal-muted">Omega Ratio</span>
+                  <span className={`font-mono ${stats.omega >= 1.5 ? 'text-profit' : ''}`}>
+                    {stats.omega === Infinity ? '∞' : stats.omega.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1336,6 +1411,13 @@ export function Backtest() {
         </div>
       )}
 
+      {/* Trades Blotter Tab */}
+      {activeTab === 'trades' && (
+        <div className="card-elevated">
+          <TradeBlotter candidateId={selectedCandidate.candidate_id} />
+        </div>
+      )}
+
       {/* Strategy Pipeline Tab */}
       {activeTab === 'pipeline' && (
         <div className="card-elevated">
@@ -1478,7 +1560,7 @@ function MetricRowWithTooltip({
         <span className="text-xs text-terminal-muted">{label}</span>
         <div className="relative">
           <Info className="w-3 h-3 text-terminal-muted/50 cursor-help" />
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-terminal-bg border border-terminal-border rounded text-[10px] whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg text-[11px] leading-relaxed max-w-[300px] text-left whitespace-normal opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-lg">
             {tooltip}
           </div>
         </div>
@@ -1543,7 +1625,7 @@ function MetricRowBloomberg({ label, value, color, quality, tooltip }: MetricRow
           ) : (
             <div className="relative">
               <Info className="w-3 h-3 text-terminal-muted/50 cursor-help" />
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-terminal-bg border border-terminal-border rounded text-[10px] max-w-[200px] text-center opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-terminal-surface border border-terminal-border rounded-lg text-[11px] leading-relaxed max-w-[300px] text-left whitespace-normal opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-lg">
                 {tooltip as string}
               </div>
             </div>

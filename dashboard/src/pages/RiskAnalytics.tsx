@@ -28,7 +28,6 @@ export function RiskAnalytics() {
     isLoading,
     error,
     loadRiskMetrics,
-    artifactsRoot,
   } = useDataStore();
 
   // Load risk metrics when candidate is selected
@@ -37,21 +36,6 @@ export function RiskAnalytics() {
       loadRiskMetrics(selectedCandidate.candidate_id);
     }
   }, [selectedCandidate?.candidate_id]);
-
-  // Sem artifacts root
-  if (!artifactsRoot) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <Shield className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Nenhum Projeto Selecionado</h2>
-          <p className="text-terminal-muted">
-            Selecione uma pasta de projeto na página de Candidatos primeiro.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // Nenhum candidato selecionado
   if (!selectedCandidate) {

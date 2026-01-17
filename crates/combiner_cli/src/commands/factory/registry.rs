@@ -107,6 +107,29 @@ pub struct Promotion {
     pub notes: Option<String>,
 }
 
+/// Hall of Fame entry (global, permanent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HallOfFameEntry {
+    pub id: i32,
+    pub genome_hash: String,
+    pub candidate_id: String,
+    pub oos_sharpe_net: f32,
+    pub oos_cagr_net: Option<f32>,
+    pub max_drawdown_net: Option<f32>,
+    pub pbo: Option<f32>,
+    pub dsr: Option<f32>,
+    pub stress_passed: Option<i32>,
+    pub stress_total: Option<i32>,
+    pub gates_passed: bool,
+    pub run_id: String,
+    pub campaign_id: Option<String>,
+    pub promoted_at: DateTime<Utc>,
+    pub git_sha: Option<String>,
+    pub market: String,
+    pub strategy_toml: Option<String>,
+    pub global_rank: Option<i32>,
+}
+
 /// Run status enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -933,6 +956,259 @@ impl Registry {
 
         Ok(rows.iter().map(Self::row_to_candidate).collect())
     }
+
+    // =========================================================================
+    // GLOBAL HALL OF FAME OPERATIONS
+    // =========================================================================
+
+    /// Get top N strategies from the global Hall of Fame, ordered by Sharpe.
+    pub async fn get_hall_of_fame_top(&self, limit: i32, market: &str) -> Result<Vec<HallOfFameEntry>> {
+        let rows = self
+            .client
+            .query(
+                r#"
+                SELECT id, genome_hash, candidate_id, oos_sharpe_net, oos_cagr_net,
+                       max_drawdown_net, pbo, dsr, stress_passed, stress_total,
+                       gates_passed, run_id, campaign_id, promoted_at, git_sha,
+                       market, strategy_toml, global_rank
+                FROM hall_of_fame
+                WHERE market = $1
+                ORDER BY oos_sharpe_net DESC
+                LIMIT $2
+                "#,
+                &[&market, &(limit as i64)],
+            )
+            .await
+            .context("Failed to get Hall of Fame top")?;
+
+        Ok(rows.iter().map(Self::row_to_hof_entry).collect())
+    }
+
+    /// Get the worst Sharpe in the current top N Hall of Fame.
+    pub async fn get_hall_of_fame_threshold(&self, top_n: i32, market: &str) -> Result<Option<f32>> {
+        let row = self
+            .client
+            .query_opt(
+                r#"
+                SELECT oos_sharpe_net FROM hall_of_fame
+                WHERE market = $1
+                ORDER BY oos_sharpe_net DESC
+                OFFSET $2 - 1
+                LIMIT 1
+                "#,
+                &[&market, &(top_n as i64)],
+            )
+            .await
+            .context("Failed to get Hall of Fame threshold")?;
+
+        Ok(row.map(|r| r.get("oos_sharpe_net")))
+    }
+
+    /// Get current count in Hall of Fame for a market.
+    pub async fn get_hall_of_fame_count(&self, market: &str) -> Result<i64> {
+        let row = self
+            .client
+            .query_one(
+                "SELECT COUNT(*) as cnt FROM hall_of_fame WHERE market = $1",
+                &[&market],
+            )
+            .await
+            .context("Failed to count Hall of Fame entries")?;
+
+        Ok(row.get("cnt"))
+    }
+
+    /// Check if a genome is already in the Hall of Fame.
+    pub async fn is_in_hall_of_fame(&self, genome_hash: &str) -> Result<bool> {
+        let row = self
+            .client
+            .query_opt(
+                "SELECT 1 FROM hall_of_fame WHERE genome_hash = $1",
+                &[&genome_hash],
+            )
+            .await
+            .context("Failed to check Hall of Fame membership")?;
+
+        Ok(row.is_some())
+    }
+
+    /// Upsert an entry into the global Hall of Fame.
+    /// If genome_hash already exists, updates metrics if new Sharpe is higher.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_hall_of_fame(
+        &self,
+        genome_hash: &str,
+        candidate_id: &str,
+        oos_sharpe_net: f32,
+        oos_cagr_net: Option<f32>,
+        max_drawdown_net: Option<f32>,
+        pbo: Option<f32>,
+        dsr: Option<f32>,
+        stress_passed: Option<i32>,
+        stress_total: Option<i32>,
+        gates_passed: bool,
+        run_id: &str,
+        campaign_id: Option<&str>,
+        git_sha: Option<&str>,
+        market: &str,
+        strategy_toml: Option<&str>,
+        genome_json: Option<&serde_json::Value>,
+    ) -> Result<bool> {
+        // Use INSERT ... ON CONFLICT DO UPDATE to upsert
+        // Only update if new Sharpe is higher
+        let result = self
+            .client
+            .execute(
+                r#"
+                INSERT INTO hall_of_fame
+                    (genome_hash, candidate_id, oos_sharpe_net, oos_cagr_net,
+                     max_drawdown_net, pbo, dsr, stress_passed, stress_total,
+                     gates_passed, run_id, campaign_id, git_sha, market,
+                     strategy_toml, genome_json)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                ON CONFLICT (genome_hash) DO UPDATE SET
+                    oos_sharpe_net = CASE 
+                        WHEN EXCLUDED.oos_sharpe_net > hall_of_fame.oos_sharpe_net 
+                        THEN EXCLUDED.oos_sharpe_net 
+                        ELSE hall_of_fame.oos_sharpe_net 
+                    END,
+                    oos_cagr_net = CASE 
+                        WHEN EXCLUDED.oos_sharpe_net > hall_of_fame.oos_sharpe_net 
+                        THEN EXCLUDED.oos_cagr_net 
+                        ELSE hall_of_fame.oos_cagr_net 
+                    END,
+                    max_drawdown_net = CASE 
+                        WHEN EXCLUDED.oos_sharpe_net > hall_of_fame.oos_sharpe_net 
+                        THEN EXCLUDED.max_drawdown_net 
+                        ELSE hall_of_fame.max_drawdown_net 
+                    END,
+                    promoted_at = CASE 
+                        WHEN EXCLUDED.oos_sharpe_net > hall_of_fame.oos_sharpe_net 
+                        THEN NOW() 
+                        ELSE hall_of_fame.promoted_at 
+                    END
+                "#,
+                &[
+                    &genome_hash,
+                    &candidate_id,
+                    &oos_sharpe_net,
+                    &oos_cagr_net,
+                    &max_drawdown_net,
+                    &pbo,
+                    &dsr,
+                    &stress_passed,
+                    &stress_total,
+                    &gates_passed,
+                    &run_id,
+                    &campaign_id,
+                    &git_sha,
+                    &market,
+                    &strategy_toml,
+                    &genome_json,
+                ],
+            )
+            .await
+            .context("Failed to upsert Hall of Fame entry")?;
+
+        let inserted = result > 0;
+        if inserted {
+            info!(genome_hash, oos_sharpe_net, market, "Upserted to Hall of Fame");
+        }
+        Ok(inserted)
+    }
+
+    /// Remove the worst entry from Hall of Fame if it exceeds max size.
+    pub async fn prune_hall_of_fame(&self, max_size: i32, market: &str) -> Result<i32> {
+        let result = self
+            .client
+            .execute(
+                r#"
+                DELETE FROM hall_of_fame
+                WHERE id IN (
+                    SELECT id FROM hall_of_fame
+                    WHERE market = $1
+                    ORDER BY oos_sharpe_net ASC
+                    LIMIT GREATEST(0, (SELECT COUNT(*) FROM hall_of_fame WHERE market = $1) - $2)
+                )
+                "#,
+                &[&market, &(max_size as i64)],
+            )
+            .await
+            .context("Failed to prune Hall of Fame")?;
+
+        if result > 0 {
+            info!(removed = result, market, "Pruned Hall of Fame to max size {}", max_size);
+        }
+        Ok(result as i32)
+    }
+
+    fn row_to_hof_entry(row: &Row) -> HallOfFameEntry {
+        HallOfFameEntry {
+            id: row.get("id"),
+            genome_hash: row.get("genome_hash"),
+            candidate_id: row.get("candidate_id"),
+            oos_sharpe_net: row.get("oos_sharpe_net"),
+            oos_cagr_net: row.get("oos_cagr_net"),
+            max_drawdown_net: row.get("max_drawdown_net"),
+            pbo: row.get("pbo"),
+            dsr: row.get("dsr"),
+            stress_passed: row.get("stress_passed"),
+            stress_total: row.get("stress_total"),
+            gates_passed: row.try_get("gates_passed").unwrap_or(false),
+            run_id: row.get("run_id"),
+            campaign_id: row.get("campaign_id"),
+            promoted_at: row.get("promoted_at"),
+            git_sha: row.get("git_sha"),
+            market: row.try_get("market").unwrap_or_else(|_| "BR".to_string()),
+            strategy_toml: row.get("strategy_toml"),
+            global_rank: row.get("global_rank"),
+        }
+    }
+    
+    /// Load Hall of Fame entries with genome JSON for seeding in-memory HoF.
+    /// Returns entries with their genome data (if available) for use in evolution.
+    pub async fn load_hall_of_fame_with_genomes(
+        &self,
+        market: &str,
+        limit: i32,
+    ) -> Result<Vec<HallOfFameWithGenome>> {
+        let rows = self
+            .client
+            .query(
+                r#"
+                SELECT id, genome_hash, candidate_id, oos_sharpe_net, oos_cagr_net,
+                       max_drawdown_net, pbo, dsr, stress_passed, stress_total,
+                       gates_passed, run_id, campaign_id, promoted_at, git_sha,
+                       market, strategy_toml, genome_json, global_rank
+                FROM hall_of_fame
+                WHERE market = $1 AND genome_json IS NOT NULL
+                ORDER BY oos_sharpe_net DESC
+                LIMIT $2
+                "#,
+                &[&market, &(limit as i64)],
+            )
+            .await
+            .context("Failed to load Hall of Fame with genomes")?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            let genome_json: Option<serde_json::Value> = row.get("genome_json");
+            entries.push(HallOfFameWithGenome {
+                entry: Self::row_to_hof_entry(&row),
+                genome_json,
+            });
+        }
+        
+        info!(market, count = entries.len(), "Loaded Hall of Fame entries with genomes");
+        Ok(entries)
+    }
+}
+
+/// Hall of Fame entry with genome JSON for seeding in-memory HoF.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HallOfFameWithGenome {
+    pub entry: HallOfFameEntry,
+    pub genome_json: Option<serde_json::Value>,
 }
 
 // =============================================================================

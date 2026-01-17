@@ -5,11 +5,15 @@
 #![allow(dead_code)]
 
 pub mod backtest_loader;
+pub mod brapi;
 pub mod calendar;
+pub mod db;
 pub mod fx_loader;
+pub mod interest_rates;
 
 pub use backtest_loader::{
-    load_ohlcv_for_backtest, load_ohlcv_cached, load_universe_symbols, get_symbol_date_range,
+    load_ohlcv_for_backtest, load_ohlcv_for_backtest_with_market, load_ohlcv_cached, 
+    load_universe_symbols, get_symbol_date_range, list_symbols_for_market, get_market_date_range,
     BacktestDataError, BacktestMarketData, OhlcvBar, DataSummary, MarketDataCache,
 };
 pub use fx_loader::{

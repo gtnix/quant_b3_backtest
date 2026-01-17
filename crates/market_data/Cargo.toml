@@ -28,7 +28,7 @@ path = "src/lib.rs"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
 tokio-postgres-rustls = "0.12"
-rustls = "0.23"
+rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }

@@ -75,13 +75,38 @@ export function StressAnalysis({ candidateId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+      <div className="space-y-6 animate-pulse">
+        <div className="grid grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
+              <div className="h-3 w-12 bg-terminal-border rounded mb-2" />
+              <div className="h-6 w-16 bg-terminal-border rounded" />
+            </div>
+          ))}
+        </div>
+        <div className="rounded-xl border border-terminal-border overflow-hidden">
+          <div className="bg-terminal-surface p-3">
+            <div className="grid grid-cols-6 gap-4">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="h-4 bg-terminal-border rounded" />
+              ))}
+            </div>
+          </div>
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="p-3 border-t border-terminal-border">
+              <div className="grid grid-cols-6 gap-4">
+                {[1, 2, 3, 4, 5, 6].map(j => (
+                  <div key={j} className="h-4 bg-terminal-border/50 rounded" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
-  if (error || !data) {
+  if (error || !data || !data.scenarios || !data.summary || !data.stress_config) {
     return (
       <div className="flex items-center justify-center h-64 text-terminal-muted">
         {error || 'No stress data'}
@@ -91,6 +116,20 @@ export function StressAnalysis({ candidateId }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* Explanation Banner */}
+      <div className="p-4 rounded-xl bg-gradient-to-r from-terminal-surface to-terminal-bg border border-terminal-border">
+        <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+          <Shield className="w-4 h-4 text-accent-cyan" />
+          What is Stress Testing?
+        </h3>
+        <p className="text-xs text-terminal-muted leading-relaxed">
+          Stress tests simulate extreme market conditions (crashes, high volatility, liquidity crises) to validate strategy robustness. 
+          Each scenario degrades the Sharpe Ratio - strategies that maintain a positive Sharpe under stress are more likely to survive real market crises.
+          The <strong className="text-white">Pass Rate</strong> shows what % of scenarios the strategy survived. 
+          <strong className="text-amber-400"> ≥62.5%</strong> (5/8) is required for production deployment.
+        </p>
+      </div>
+
       {/* Summary Header */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <SummaryCard
@@ -156,33 +195,67 @@ export function StressAnalysis({ candidateId }: Props) {
         </table>
       </div>
 
-      {/* Sharpe Degradation Visual */}
+      {/* Sharpe Degradation Visual - Enhanced */}
       <div className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
-        <h4 className="text-sm font-medium text-terminal-muted mb-4">Sharpe Impact by Scenario</h4>
-        <div className="space-y-3">
-          {data.scenarios.map((scenario) => (
-            <div key={scenario.scenario_id} className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-terminal-muted truncate max-w-[200px]">{scenario.scenario_name}</span>
-                <span className={scenario.status === 'PASS' ? 'text-profit' : 'text-loss'}>
-                  {scenario.stressed_sharpe.toFixed(2)}
-                </span>
-              </div>
-              <div className="h-2 bg-terminal-bg rounded-full overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all ${
-                    scenario.status === 'PASS' ? 'bg-profit' : 'bg-loss'
-                  }`}
-                  style={{ 
-                    width: `${Math.min(100, (scenario.stressed_sharpe / scenario.base_sharpe) * 100)}%` 
-                  }}
-                />
-              </div>
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-sm font-medium text-terminal-muted inline-flex items-center gap-1">
+            Sharpe Impact by Scenario
+            <QuickTooltip termKey="stress_degradation" />
+          </h4>
+          <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded bg-profit" />
+              <span className="text-terminal-muted">Pass</span>
             </div>
-          ))}
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded bg-loss" />
+              <span className="text-terminal-muted">Fail</span>
+            </div>
+          </div>
         </div>
-        <div className="mt-4 pt-4 border-t border-terminal-border flex items-center justify-center gap-2 text-xs text-terminal-muted">
-          <span>Threshold: Sharpe &gt; {data.stress_config.min_sharpe_threshold}</span>
+        <div className="space-y-4">
+          {data.scenarios.map((scenario) => {
+            const retentionPct = scenario.base_sharpe > 0 ? (scenario.stressed_sharpe / scenario.base_sharpe) * 100 : 0;
+            return (
+              <div key={scenario.scenario_id} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-terminal-muted truncate max-w-[200px]">{scenario.scenario_name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-terminal-muted">
+                      {scenario.base_sharpe.toFixed(2)} → 
+                    </span>
+                    <span className={`font-mono font-medium ${scenario.status === 'PASS' ? 'text-profit' : 'text-loss'}`}>
+                      {scenario.stressed_sharpe.toFixed(2)}
+                    </span>
+                    <span className={`text-xs font-mono ${scenario.status === 'PASS' ? 'text-profit/70' : 'text-loss/70'}`}>
+                      ({retentionPct.toFixed(0)}%)
+                    </span>
+                  </div>
+                </div>
+                <div className="relative h-4 bg-terminal-bg rounded-lg overflow-hidden border border-terminal-border/30">
+                  {/* Base Sharpe reference line */}
+                  <div className="absolute inset-y-0 right-0 w-px bg-terminal-muted/30" style={{ left: '100%' }} />
+                  {/* Stressed Sharpe bar */}
+                  <div 
+                    className={`absolute inset-y-0 left-0 rounded-lg transition-all duration-700 ease-out ${
+                      scenario.status === 'PASS' ? 'bg-gradient-to-r from-profit/80 to-profit' : 'bg-gradient-to-r from-loss/80 to-loss'
+                    }`}
+                    style={{ width: `${Math.max(5, Math.min(100, retentionPct))}%` }}
+                  />
+                  {/* Threshold line */}
+                  <div 
+                    className="absolute inset-y-0 w-0.5 bg-amber-400/60"
+                    style={{ left: `${(data.stress_config.min_sharpe_threshold / scenario.base_sharpe) * 100}%` }}
+                    title={`Threshold: ${data.stress_config.min_sharpe_threshold}`}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 pt-4 border-t border-terminal-border flex items-center justify-between text-xs text-terminal-muted">
+          <span>Bar shows % of base Sharpe retained under stress</span>
+          <span className="text-amber-400">Threshold: Sharpe ≥ {data.stress_config.min_sharpe_threshold}</span>
         </div>
       </div>
 

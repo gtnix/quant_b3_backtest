@@ -12,7 +12,7 @@ export default {
           bg: '#0a0a0f',
           surface: '#12121a',
           border: '#1e1e2e',
-          muted: '#3a3a4a',
+          muted: '#71717a',
         },
         profit: {
           DEFAULT: '#00ff88',

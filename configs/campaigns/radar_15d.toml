@@ -1,41 +1,45 @@
 # =============================================================================
-# SCG 4-Hour Audit Campaign
+# Radar 15 Dias - Campanha Padrão
 # =============================================================================
-# Runtime: 4 hours (14400 seconds)
-# Based on: scg_state_of_art.toml
+# Radar de oportunidades a cada 15 dias
+# Mercados: Brasil (B3) + Estados Unidos (S&P 500)
+# Long e Short habilitados
+# Recursos: 4 workers (25% CPU) para não atrapalhar uso da máquina
 # =============================================================================
 
 [campaign]
-name = "scg_2h_maxpower"
-description = "2-hour max power audit run"
+name = "radar_15d"
+description = "Radar de oportunidades 15 dias - BR e US - Long/Short"
 version = "1.0.0"
 
 [dataset]
 market = "BR"
-market_data_path = "data/market_data_ibov.csv"
+data_source = "database"
+initial_capital = 100000.0
 
 [risk_profile]
-name = "arrojado"
+name = "moderado"
 
 [evolution]
-population_size = 300
-max_generations = 150
-tournament_size = 5
-crossover_rate = 0.80
-elitism_rate = 0.05
-mutation_rate = 0.05
-convergence_generations = 15
-max_runtime_seconds = 7200
-workers = 0
-hall_of_fame_size = 50
+population_size = 100
+max_generations = 200
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08
+convergence_generations = 20
+max_runtime_seconds = 28800  # 8 horas max
+workers = 2                   # 2 de 16 cores (BR usa metade, US usa outra metade)
+hall_of_fame_size = 30
 
 [diversity]
 enabled = true
-sigma_share = 0.10
-sharing_alpha = 1.0
+sigma_share = 0.20
+sharing_alpha = 2.0
 fitness_sharing = true
 phenotypic_distance = true
-critical_threshold = 0.15
+critical_threshold = 0.25
+crowding_factor = 3
 
 [adaptation]
 enabled = true
@@ -51,19 +55,20 @@ improvement_threshold = 0.005
 restart_enabled = true
 restart_elite_ratio = 0.20
 post_restart_boost_generations = 5
-max_restarts = 5
+max_restarts = 3
 
 [execution]
 mode = "compiled"
 has_costs = true
-slippage_bps = 10.0
-commission_bps = 5.0
-emolument_bps = 2.5
+allow_short = true
+slippage_bps = 8.0
+commission_bps = 3.0
+emolument_bps = 1.5
 market_impact_model = "linear"
 
 [validation]
 enabled = true
-top_k = 30
+top_k = 15
 wfa_enabled = true
 wfa_num_folds = 5
 wfa_is_ratio = 0.6
@@ -75,11 +80,12 @@ stress_min_pass = 4
 
 [gates]
 gates_required = true
-min_oos_sharpe_net = 0.50
-max_pbo = 0.15
+min_oos_sharpe_net = 0.40
+max_pbo = 0.20
 min_stress_passed = 4
 max_degradation = 0.40
-min_oos_trades = 30
+min_oos_trades = 20
+max_drawdown = -0.25
 
 [data_integrity]
 enabled = true
@@ -90,15 +96,16 @@ survivorship_bias_check = true
 objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
 sharpe_weight = 1.5
 cagr_weight = 1.0
-drawdown_weight = 1.0
-calmar_weight = 0.5
+drawdown_weight = 2.5
+calmar_weight = 1.0
 sortino_weight = 0.5
 low_trades_penalty = true
-min_trades = 30
+min_trades = 20
 extreme_turnover_penalty = true
 max_turnover_annual = 500.0
 high_volatility_penalty = true
-max_volatility = 0.40
+max_volatility = 0.35
+drawdown_penalty_threshold = -0.18
 
 [output]
 artifact_format = "obfs"
@@ -106,4 +113,3 @@ save_generations = true
 save_all_genomes = false
 save_diversity_metrics = true
 save_restart_events = true
-

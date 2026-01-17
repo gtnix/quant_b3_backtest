@@ -152,3 +152,4 @@ export function GenerationChart({ data }: GenerationChartProps) {
 
 
 
+

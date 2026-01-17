@@ -1,7 +1,7 @@
 //! Market Data Provider for Experiment Runner.
 //!
 //! Provides market data for backtesting simulations.
-//! Supports loading from CSV files or in-memory data.
+//! Supports loading from CSV files, in-memory data, or Neon database.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -10,6 +10,14 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// Re-export market_data types for database loading
+pub use market_data::backtest_loader::{
+    BacktestMarketData, 
+    OhlcvBar as DbOhlcvBar,
+    load_ohlcv_for_backtest_with_market,
+    list_symbols_for_market,
+};
 
 /// Error types for market data loading.
 #[derive(Debug, Error)]
@@ -136,6 +144,53 @@ impl MarketDataProvider {
         }
         
         let trading_dates: Vec<NaiveDate> = bars_by_date.keys().copied().collect();
+        
+        Self {
+            bars_by_symbol,
+            trading_dates,
+            bars_by_date,
+        }
+    }
+    
+    /// Create from database-loaded BacktestMarketData.
+    ///
+    /// Converts from the market_data crate's BacktestMarketData type
+    /// which is loaded from Neon database (ohlcv_daily or ohlcv_daily_us).
+    pub fn from_backtest_data(data: BacktestMarketData) -> Self {
+        let mut bars_by_symbol: HashMap<String, Vec<OhlcvBar>> = HashMap::new();
+        let mut bars_by_date: BTreeMap<NaiveDate, HashMap<String, OhlcvBar>> = BTreeMap::new();
+        
+        // Convert DbOhlcvBar to local OhlcvBar and build indexes
+        for (symbol, db_bars) in data.bars_by_symbol {
+            let local_bars: Vec<OhlcvBar> = db_bars
+                .into_iter()
+                .map(|db_bar| {
+                    let bar = OhlcvBar {
+                        symbol: db_bar.symbol,
+                        date: db_bar.date,
+                        open: db_bar.open,
+                        high: db_bar.high,
+                        low: db_bar.low,
+                        close: db_bar.close,
+                        adj_close: db_bar.adj_close,
+                        volume: db_bar.volume,
+                    };
+                    
+                    // Also add to date index
+                    bars_by_date
+                        .entry(bar.date)
+                        .or_default()
+                        .insert(bar.symbol.clone(), bar.clone());
+                    
+                    bar
+                })
+                .collect();
+            
+            bars_by_symbol.insert(symbol, local_bars);
+        }
+        
+        // Use the trading dates from the database data (already sorted)
+        let trading_dates = data.trading_dates;
         
         Self {
             bars_by_symbol,

@@ -188,6 +188,29 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+
+    /// Extract pending .obfs artifacts to JSON (for recovery or analysis)
+    Extract {
+        /// Path to pending directory containing .obfs files
+        #[arg(short, long)]
+        pending_dir: String,
+
+        /// Specific run IDs to extract (comma-separated UUIDs). Extracts all if not provided.
+        #[arg(short, long, value_delimiter = ',')]
+        run_ids: Vec<String>,
+
+        /// Output directory for extracted JSON files
+        #[arg(short, long, default_value = "output/extracted")]
+        output: String,
+
+        /// Extract only top N artifacts by sharpe ratio
+        #[arg(short = 'n', long)]
+        top: Option<usize>,
+
+        /// Extract full artifact with timeseries (single UUID mode)
+        #[arg(long)]
+        full: bool,
+    },
 }
 
 /// Factory subcommands for campaign management.
@@ -574,6 +597,24 @@ fn main() -> Result<()> {
             stop_on_fail,
             verbose,
         } => commands::audit::execute(run_dir, output, strict, stop_on_fail, verbose),
+
+        Commands::Extract {
+            pending_dir,
+            run_ids,
+            output,
+            top,
+            full,
+        } => {
+            if full && run_ids.len() == 1 {
+                // Full extraction mode for single UUID
+                let output_file = format!("{}/{}_full.json", output, &run_ids[0]);
+                commands::extract::extract_full(&pending_dir, &run_ids[0], &output_file)
+            } else if full && run_ids.len() != 1 {
+                anyhow::bail!("--full requires exactly one --run-ids UUID");
+            } else {
+                commands::extract::execute(&pending_dir, &run_ids, &output, top)
+            }
+        }
     }
 }
 

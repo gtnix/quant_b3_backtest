@@ -239,6 +239,31 @@ impl PendingStore {
         
         Ok(count)
     }
+
+    /// Cleanup pending artifacts that are not in the keep set.
+    /// 
+    /// This is used for incremental cleanup during evolution to prevent
+    /// disk explosion. Only artifacts whose run_id is NOT in `keep_uuids`
+    /// will be removed.
+    /// 
+    /// # Returns
+    /// Tuple of (removed_count, kept_count)
+    pub fn cleanup_except(&self, keep_uuids: &std::collections::HashSet<Uuid>) -> Result<(usize, usize)> {
+        let all_uuids = self.list_pending()?;
+        let mut removed = 0;
+        let mut kept = 0;
+        
+        for uuid in all_uuids {
+            if keep_uuids.contains(&uuid) {
+                kept += 1;
+            } else {
+                self.remove_pending(uuid)?;
+                removed += 1;
+            }
+        }
+        
+        Ok((removed, kept))
+    }
 }
 
 #[cfg(test)]

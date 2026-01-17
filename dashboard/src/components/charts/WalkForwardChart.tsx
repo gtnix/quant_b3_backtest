@@ -51,27 +51,27 @@ export function WalkForwardChart({ windows, metric = 'sharpe' }: WalkForwardChar
   return (
     <div className="h-full flex flex-col">
       {/* Stats bar */}
-      <div className="flex items-center gap-6 mb-4 text-xs">
+      <div className="flex items-center gap-6 mb-4 text-xs flex-wrap">
         <div>
-          <span className="text-terminal-muted">Avg IS {metric === 'sharpe' ? 'Sharpe' : 'Return'}:</span>
+          <span className="text-terminal-muted">Média IS:</span>
           <span className="ml-1 font-mono text-accent-cyan">
             {metric === 'sharpe' ? avgIS.toFixed(2) : `${avgIS.toFixed(1)}%`}
           </span>
         </div>
         <div>
-          <span className="text-terminal-muted">Avg OOS {metric === 'sharpe' ? 'Sharpe' : 'Return'}:</span>
+          <span className="text-terminal-muted">Média OOS:</span>
           <span className={`ml-1 font-mono ${avgOOS >= 0 ? 'text-profit' : 'text-loss'}`}>
             {metric === 'sharpe' ? avgOOS.toFixed(2) : `${avgOOS.toFixed(1)}%`}
           </span>
         </div>
         <div>
-          <span className="text-terminal-muted">Degradation:</span>
-          <span className={`ml-1 font-mono ${avgDegradation >= 0.5 ? 'text-profit' : 'text-loss'}`}>
+          <span className="text-terminal-muted">WFE:</span>
+          <span className={`ml-1 font-mono font-bold ${avgDegradation >= 0.5 ? 'text-profit' : 'text-loss'}`}>
             {(avgDegradation * 100).toFixed(0)}%
           </span>
         </div>
         <div>
-          <span className="text-terminal-muted">Profit Periods:</span>
+          <span className="text-terminal-muted">Períodos Lucro:</span>
           <span className={`ml-1 font-mono ${profitPeriods > data.length / 2 ? 'text-profit' : 'text-loss'}`}>
             {profitPeriods}/{data.length}
           </span>
@@ -118,16 +118,31 @@ export function WalkForwardChart({ windows, metric = 'sharpe' }: WalkForwardChar
               formatter={(value) => (value === 'is' ? 'In-Sample' : 'Out-of-Sample')}
             />
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" />
+            {/* 50% WFE Threshold Line - shows minimum acceptable OOS performance */}
+            <ReferenceLine 
+              y={avgIS * 0.5} 
+              stroke="#f59e0b" 
+              strokeDasharray="5 5"
+              strokeWidth={2}
+              label={{ 
+                value: '50% WFE', 
+                position: 'right', 
+                fill: '#f59e0b',
+                fontSize: 10,
+              }}
+            />
             <Bar
               dataKey="is"
               fill="#00d4ff"
               opacity={0.6}
               radius={[4, 4, 0, 0]}
+              name="is"
             />
             <Bar
               dataKey="oos"
               fill="#00ff88"
               radius={[4, 4, 0, 0]}
+              name="oos"
             />
           </BarChart>
         </ResponsiveContainer>

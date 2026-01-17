@@ -155,6 +155,12 @@ pub struct MultiObjectiveFitness {
     /// Error message if evaluation failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    
+    // Artifact tracking
+    /// Run ID (UUID) for pending OBFS artifact cleanup.
+    /// Populated when backtest is executed via CLI.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub run_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -180,6 +186,7 @@ impl MultiObjectiveFitness {
             crowding_distance: 0.0,
             is_valid: false,
             error: Some(error.into()),
+            run_id: None,
         }
     }
 
@@ -217,6 +224,7 @@ impl MultiObjectiveFitness {
             crowding_distance: 0.0,
             is_valid: true,
             error: None,
+            run_id: None,
         };
 
         // Graduated penalty for low trade counts

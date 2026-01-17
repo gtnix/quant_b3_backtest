@@ -491,6 +491,7 @@ mod tests {
             penalty_low_trades: 0.0,
             penalty_extreme_turnover: 0.0,
             error: None,
+            run_id: None,
         });
         
         genome

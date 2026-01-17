@@ -1309,19 +1309,13 @@ impl DataHealthCheck for CorpActionCheck {
     fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
         let jumps: Vec<&PriceJumpEvent> = ctx.price_jumps.iter()
             .filter(|j| j.return_pct.abs() * 100.0 >= self.jump_threshold_pct)
-            .collect();
-
-        let jump_count = jumps.len();
+            .collect();        let jump_count = jumps.len();
         let samples: Vec<String> = jumps.iter()
             .take(5)
             .map(|j| format!("{}: {:.1}% on {} ({})", j.symbol, j.return_pct * 100.0, j.date, j.suspected_action))
-            .collect();
-
-        let evidence = Evidence::new("corp_actions.detection")
+            .collect();        let evidence = Evidence::new("corp_actions.detection")
             .with_current(Decimal::from(jump_count))
-            .with_sample(samples);
-
-        if jump_count > 0 {
+            .with_sample(samples);        if jump_count > 0 {
             let msg = format!(
                 "Detected {} suspicious price jumps (threshold: {:.0}%) for {:?}. \
                  This may indicate corporate actions (splits/dividends) without metadata. \
@@ -1339,32 +1333,20 @@ impl DataHealthCheck for CorpActionCheck {
                 .with_market(self.market)
         }
     }
-}
-
-/// Survivorship bias check - validates universe type.
+}/// Survivorship bias check - validates universe type.
 #[derive(Debug, Clone, Default)]
 pub struct SurvivorshipCheck {
     pub market: Market,
-}
-
-impl SurvivorshipCheck {
+}impl SurvivorshipCheck {
     pub fn new(market: Market) -> Self {
         Self { market }
     }
-}
-
-impl DataHealthCheck for SurvivorshipCheck {
+}impl DataHealthCheck for SurvivorshipCheck {
     fn name(&self) -> &str {
         "Survivorship"
-    }
-
-    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
-        let universe_type = ctx.universe_type;
-
-        let evidence = Evidence::new("survivorship.check")
-            .with_sample(vec![format!("universe_type: {:?}", universe_type)]);
-
-        match universe_type {
+    }    fn run(&self, ctx: &DataContext, _config: &DataHealthConfig) -> CheckResult {
+        let universe_type = ctx.universe_type;        let evidence = Evidence::new("survivorship.check")
+            .with_sample(vec![format!("universe_type: {:?}", universe_type)]);        match universe_type {
             UniverseType::PointInTime => {
                 CheckResult::pass(format!("Survivorship_{:?}", self.market), CheckCategory::DataIntegrity)
                     .with_evidence(evidence.with_context("Point-in-time universe - survivorship bias mitigated"))

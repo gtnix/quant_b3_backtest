@@ -19,10 +19,13 @@ export interface OmpResources {
   memoryUsagePct: number;
   memoryAvailableMb: number;
   diskFreeGb: number;
+  diskTotalGb?: number;
   diskFreePct?: number;
   diskWritten24h?: number;
   writeRateMbPerSec?: number;
   writeAcceleration?: number;
+  estimatedTimeToLimitHours?: number | null;
+  shouldAutoStop?: boolean;
   canStartCampaign: boolean;
 }
 

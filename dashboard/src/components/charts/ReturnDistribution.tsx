@@ -9,6 +9,7 @@ import {
   ReferenceLine,
   Area,
   ComposedChart,
+  Cell,
 } from 'recharts';
 
 interface ReturnDistributionProps {
@@ -63,22 +64,22 @@ export function ReturnDistribution({ returns, bins = 30, showNormal = true }: Re
     return histogram;
   }, [returns, bins, showNormal]);
 
-  // Calculate statistics
+  // Calculate statistics with proper guards
   const stats = useMemo(() => {
-    if (returns.length === 0) return { mean: 0, std: 0, skew: 0, kurt: 0 };
+    if (returns.length < 4) return { mean: 0, std: 0, skew: 0, kurt: 0 };
 
     const n = returns.length;
     const mean = returns.reduce((a, b) => a + b, 0) / n;
-    const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1);
+    const variance = n > 1 ? returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0;
     const std = Math.sqrt(variance);
 
-    // Skewness
-    const skew = std > 0
+    // Skewness (requires n >= 3)
+    const skew = std > 0 && n >= 3
       ? (returns.reduce((a, b) => a + ((b - mean) / std) ** 3, 0) * n) / ((n - 1) * (n - 2))
       : 0;
 
-    // Kurtosis (excess)
-    const kurt = std > 0
+    // Kurtosis (excess) - requires n >= 4
+    const kurt = std > 0 && n >= 4
       ? (returns.reduce((a, b) => a + ((b - mean) / std) ** 4, 0) * n * (n + 1)) /
         ((n - 1) * (n - 2) * (n - 3)) -
         (3 * (n - 1) ** 2) / ((n - 2) * (n - 3))
@@ -155,12 +156,15 @@ export function ReturnDistribution({ returns, bins = 30, showNormal = true }: Re
               labelFormatter={(label) => `Return: ${(label as number).toFixed(2)}%`}
             />
             <ReferenceLine x={0} stroke="#6b7280" strokeDasharray="3 3" />
-            <Bar
-              dataKey="pct"
-              fill="#00ff88"
-              opacity={0.7}
-              radius={[2, 2, 0, 0]}
-            />
+            <Bar dataKey="pct" radius={[2, 2, 0, 0]}>
+              {data.map((entry, index) => (
+                <Cell
+                  key={index}
+                  fill={entry.bin < 0 ? '#ff3366' : '#00ff88'}
+                  opacity={0.7}
+                />
+              ))}
+            </Bar>
             {showNormal && (
               <Area
                 type="monotone"

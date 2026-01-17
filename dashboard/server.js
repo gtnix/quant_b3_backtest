@@ -20,6 +20,8 @@ import ompRoutes from './server/routes/omp.js';
 import auditRoutes from './server/routes/audit.js';
 import universeRoutes from './server/routes/universe.js';
 import eventsRoutes from './server/routes/events.js';
+import analyticsRoutes from './server/routes/analytics.js';
+import { startAutoSync } from './server/services/hofSync.js';
 
 const app = express();
 const PORT = 3001;
@@ -37,6 +39,7 @@ app.use('/api', ompRoutes);
 app.use('/api', auditRoutes);
 app.use('/api', universeRoutes);
 app.use('/api', eventsRoutes);
+app.use('/api', analyticsRoutes);
 
 // Auto-detect paths on startup
 function autoInitialize() {
@@ -54,8 +57,12 @@ loadOmpConfig();
 loadCampaignQueue();
 autoInitialize();
 
+// Start HoF auto-sync for persistence (every 3 minutes)
+startAutoSync(3 * 60 * 1000);
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Quant Dashboard API Server`);
   console.log(`   http://localhost:${PORT}`);
-  console.log(`\n📊 Routes: health, strategies, campaigns, candidates, scg, omp, audit, universe, events`);
+  console.log(`\n📊 Routes: health, strategies, campaigns, candidates, scg, omp, audit, universe, events, analytics`);
+  console.log(`\n💾 HoF Auto-Sync: ENABLED (every 3min → Neon DB)`);
 });

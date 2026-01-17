@@ -19,13 +19,11 @@ import {
 export function StrategyComparison() {
   const {
     selectedCandidateIds,
-    candidates,
     comparisonResult,
     isLoading,
     error,
     compareCandidates,
     clearCandidateSelection,
-    artifactsRoot,
   } = useDataStore();
 
   // Run comparison when candidates change
@@ -34,21 +32,6 @@ export function StrategyComparison() {
       compareCandidates(selectedCandidateIds);
     }
   }, [selectedCandidateIds]);
-
-  // No artifacts root
-  if (!artifactsRoot) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <GitCompare className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
-          <p className="text-terminal-muted">
-            Select a project folder from the Candidates page first.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // Not enough candidates selected
   if (selectedCandidateIds.length < 2) {

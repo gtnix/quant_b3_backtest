@@ -117,8 +117,8 @@ export function RiskDecomposition({ dailyReturns, maxDrawdown, sharpe }: Props) 
     <div className="space-y-6">
       {/* Risk Score Gauge */}
       <div className="flex items-center gap-8 p-6 rounded-xl bg-terminal-surface border border-terminal-border">
-        <div className="relative w-32 h-32">
-          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+        <div className="relative w-32 h-32" role="meter" aria-label={`Risk Score: ${riskScore} out of 100`} aria-valuenow={riskScore} aria-valuemin={0} aria-valuemax={100}>
+          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
             {/* Background arc */}
             <circle
               cx="50" cy="50" r="40"
@@ -139,6 +139,7 @@ export function RiskDecomposition({ dailyReturns, maxDrawdown, sharpe }: Props) 
               strokeDasharray={251.2}
               strokeDashoffset={251.2 - (251.2 * riskScore / 100)}
               strokeLinecap="round"
+              style={{ transition: 'stroke-dashoffset 0.8s ease-out' }}
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">

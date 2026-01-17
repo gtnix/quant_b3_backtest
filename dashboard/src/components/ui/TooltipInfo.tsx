@@ -8,7 +8,7 @@
  * - Example: Practical example
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Info } from 'lucide-react';
 
 // =============================================================================
@@ -122,9 +122,11 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
     interpretation: 'Sharpe 1.5 significa 1.5% de retorno extra para cada 1% de risco. É a métrica mais usada para comparar estratégias.'
   },
   sharpe_oos: {
-    term: 'Sharpe Out-of-Sample',
-    definition: 'Sharpe Ratio calculado em dados que a estratégia nunca viu durante a otimização. É o teste real de qualidade da estratégia.',
-    benchmark: 'Deve ser próximo ao Sharpe In-Sample. Quedas grandes indicam overfitting.'
+    term: 'Sharpe Real (Out-of-Sample)',
+    definition: 'Sharpe Ratio calculado em dados que a estratégia NUNCA viu durante a otimização. Este é o teste REAL - representa a performance que você terá ao operar ao vivo.',
+    formula: 'Média dos Sharpes de todos os períodos OOS',
+    benchmark: 'Deve ser próximo ao Sharpe IS. WFE > 50% é robusto.',
+    interpretation: 'Se IS=1.0 e OOS=0.7, o WFE é 70% - a estratégia mantém boa parte da performance. Se OOS=0.3, WFE é 30% - provavelmente overfit.'
   },
   sharpe_net: {
     term: 'Sharpe Ratio Líquido',
@@ -327,13 +329,15 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
   // ═══════════════════════════════════════════════════════════════════════════
   wfa: {
     term: 'Análise Walk-Forward (WFA)',
-    definition: 'Técnica de validação que treina em dados passados e testa no período seguinte repetidamente. Simula trading real.',
-    interpretation: 'O padrão ouro para validação de estratégias. Testa como a estratégia se adapta ao longo do tempo.'
+    definition: 'Técnica padrão-ouro de validação que divide os dados em janelas sequenciais. Cada janela treina (IS) em dados passados e testa (OOS) no período seguinte - simulando exatamente como você operaria ao vivo.',
+    benchmark: 'WFE > 50% indica estratégia robusta',
+    interpretation: 'Baseado no trabalho de Robert Pardo. Se uma estratégia mantém boa performance em múltiplos períodos OOS, você pode confiar que ela funcionará ao vivo. Se só vai bem no IS, ela está apenas "decorando" os dados.'
   },
   is_oos: {
-    term: 'In-Sample / Out-of-Sample',
-    definition: 'IS = dados usados para otimização. OOS = dados nunca vistos durante o treino. OOS é o teste real.',
-    interpretation: 'Bom IS com OOS ruim = overfitting. Performance OOS é o que você realmente terá.'
+    term: 'In-Sample (IS) / Out-of-Sample (OOS)',
+    definition: 'IS = período de TREINO onde a estratégia "aprende" os parâmetros. OOS = período de TESTE com dados que a estratégia NUNCA viu - simula trading real.',
+    benchmark: 'Ideal: OOS retém >50% da performance IS',
+    interpretation: 'Se a estratégia vai bem no IS mas mal no OOS, ela "decorou" os dados históricos em vez de aprender padrões reais. A performance OOS é o que você terá ao operar de verdade.'
   },
   degradation_ratio: {
     term: 'Taxa de Degradação',
@@ -342,11 +346,19 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
     benchmark: '>50% é robusto, <30% é preocupante',
     interpretation: '70% de degradação = OOS mantém 70% da performance IS. Bom sinal.'
   },
+  wfe: {
+    term: 'WFE (Walk-Forward Efficiency)',
+    definition: 'Métrica de Robert Pardo que mede quanto da performance In-Sample se mantém Out-of-Sample. Indica robustez da estratégia.',
+    formula: 'WFE = Média(Sharpe_OOS) / Média(Sharpe_IS) × 100%',
+    benchmark: '>50% é robusto, 30-50% zona de alerta, <30% overfit',
+    interpretation: 'WFE 80% significa que a estratégia mantém 80% da performance quando testada em dados novos. É a métrica mais importante para validar se a estratégia vai funcionar ao vivo.'
+  },
   consistency_score: {
-    term: 'Score de Consistência',
-    definition: 'Percentual de janelas WFA que são lucrativas. Mede confiabilidade ao longo do tempo.',
+    term: 'Consistência Temporal',
+    definition: 'Percentual de janelas Walk-Forward onde o período OOS foi lucrativo. Mede estabilidade da estratégia ao longo do tempo.',
+    formula: 'Períodos OOS Positivos / Total de Períodos × 100%',
     benchmark: '>60% é bom, >80% é excelente',
-    interpretation: '75% consistência = lucrativo em 3 de 4 períodos testados.'
+    interpretation: 'Consistência 75% = a estratégia foi lucrativa em 3 de cada 4 períodos testados. Baixa consistência indica que a estratégia depende de condições específicas de mercado.'
   },
   wfa_window: {
     term: 'Tamanho da Janela WFA',
@@ -359,6 +371,46 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
     definition: 'Quanto avançar entre janelas WFA. Menor = mais testes mas mais sobreposição.',
     benchmark: '3-6 meses é típico',
     interpretation: 'Passos menores dão mais dados mas podem ser correlacionados.'
+  },
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ANÁLISE DE REGIMES
+  // ═══════════════════════════════════════════════════════════════════════════
+  regime_analysis: {
+    term: 'Análise de Regimes',
+    definition: 'Decomposição da performance da estratégia por condições de mercado. Classifica cada dia em um regime (Trend + Volatilidade) e calcula métricas separadas para cada um.',
+    benchmark: 'Estratégia robusta tem Sharpe positivo em todos os regimes',
+    interpretation: 'Responde a pergunta crucial: "Em quais condições de mercado minha estratégia funciona?" Uma estratégia com Sharpe 1.5 agregado mas -0.5 em Bear+HighVol vai te destruir em crashes.'
+  },
+  regime_heatmap: {
+    term: 'Matriz de Performance 3×5',
+    definition: 'Visualização em grid mostrando a performance em cada uma das 15 combinações de regime (3 trends × 5 níveis de volatilidade). Cores indicam qualidade do Sharpe.',
+    interpretation: 'Verde = regime favorável (Sharpe > 1). Vermelho = regime desfavorável (Sharpe < 0). Clique em uma célula para ver detalhes e filtrar a timeline.'
+  },
+  regime_timeline: {
+    term: 'Timeline de Regimes',
+    definition: 'Visualização temporal mostrando as transições entre regimes ao longo do backtest. Cores representam a combinação trend+volatilidade.',
+    interpretation: 'Identifica padrões de duração de regimes e transições. Regimes curtos frequentes podem indicar mercado instável.'
+  },
+  trend_state: {
+    term: 'Estado de Tendência',
+    definition: 'Classificação do mercado baseada na direção dos retornos acumulados. Usa regressão linear normalizada pela volatilidade.',
+    formula: 'slope = Cov(t, cumret) / Var(t), normalizado por vol',
+    benchmark: 'Uptrend, Sideways, ou Downtrend',
+    interpretation: 'Uptrend = mercado subindo consistentemente. Downtrend = queda. Sideways = sem direção clara.'
+  },
+  vol_quantile: {
+    term: 'Quantil de Volatilidade',
+    definition: 'Classificação da volatilidade atual em quintis (Q1-Q5) baseado no histórico. Usa janela expansiva para evitar look-ahead bias.',
+    formula: 'Percentil da vol atual vs histórico → Q1 (0-20%) a Q5 (80-100%)',
+    benchmark: 'Q1 = muito calmo, Q3 = normal, Q5 = muito volátil',
+    interpretation: 'Q1-Q2 geralmente são melhores para estratégias de momentum. Q4-Q5 podem ser melhores para mean-reversion.'
+  },
+  allocation_recommendation: {
+    term: 'Recomendação de Alocação',
+    definition: 'Sugestão de sizing baseada na performance histórica da estratégia no regime atual. Considera Sharpe e quantidade de dados disponíveis.',
+    benchmark: '100% = Full, 75% = Moderada, 50% = Reduzida, 25% = Cautela',
+    interpretation: 'Alta confiança requer Sharpe > 1 E pelo menos 50 dias de dados no regime. Poucos dados = baixa confiança mesmo com bom Sharpe.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
@@ -459,9 +511,16 @@ export const QUANT_TOOLTIPS: Record<string, QuickTooltipContent> = {
   },
   stress_degradation: {
     term: 'Degradação sob Estresse',
-    definition: 'Quanto a performance cai sob condições de estresse vs condições normais.',
-    benchmark: '<50% de degradação é bom',
-    interpretation: '30% de degradação = estratégia mantém 70% da performance sob estresse.'
+    definition: 'Quanto a performance (Sharpe) cai sob condições de estresse vs condições normais. Mostra resiliência da estratégia.',
+    formula: '(Sharpe_Estresse / Sharpe_Base) × 100%',
+    benchmark: '>50% retenção é bom, >70% é excelente',
+    interpretation: 'Uma barra de 70% significa que a estratégia mantém 70% do seu Sharpe original sob estresse. Barras curtas indicam vulnerabilidade.'
+  },
+  sharpe_impact: {
+    term: 'Impacto no Sharpe',
+    definition: 'Visualização de como cada cenário de estresse afeta o Sharpe Ratio. A barra mostra a porcentagem do Sharpe original que sobrevive.',
+    benchmark: 'Barra maior = mais resiliência',
+    interpretation: 'A linha amarela marca o threshold mínimo. Estratégias que ficam acima passam no cenário.'
   },
   
   // ═══════════════════════════════════════════════════════════════════════════
@@ -670,10 +729,35 @@ export const TOOLTIPS: Record<string, TooltipContent> = {
 /**
  * QuickTooltip - Compact inline tooltip for quant terms
  * Shows definition, formula, benchmark on hover with (?) icon
+ * Auto-detects best position based on viewport bounds
  */
-export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTooltipProps) {
+export function QuickTooltip({ termKey, position: preferredPosition = 'top', size = 'sm' }: QuickTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [actualPosition, setActualPosition] = useState<'top' | 'bottom' | 'left' | 'right'>(preferredPosition);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const content = QUANT_TOOLTIPS[termKey];
+  
+  // Auto-detect best position based on viewport bounds
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const tooltipHeight = 180; // approximate tooltip height
+      const tooltipWidth = 288; // w-72 = 18rem = 288px
+      
+      // Check if there's room at preferred position
+      if (preferredPosition === 'top' && rect.top < tooltipHeight + 20) {
+        setActualPosition('bottom');
+      } else if (preferredPosition === 'bottom' && window.innerHeight - rect.bottom < tooltipHeight + 20) {
+        setActualPosition('top');
+      } else if (preferredPosition === 'left' && rect.left < tooltipWidth + 20) {
+        setActualPosition('right');
+      } else if (preferredPosition === 'right' && window.innerWidth - rect.right < tooltipWidth + 20) {
+        setActualPosition('left');
+      } else {
+        setActualPosition(preferredPosition);
+      }
+    }
+  }, [isOpen, preferredPosition]);
   
   if (!content) return null;
   
@@ -696,6 +780,7 @@ export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTo
   return (
     <span className="relative inline-flex items-center ml-1">
       <button
+        ref={buttonRef}
         type="button"
         className={`inline-flex items-center justify-center ${sizeClasses} text-cyan-400/70 hover:text-cyan-400 transition-colors`}
         onMouseEnter={() => setIsOpen(true)}
@@ -707,7 +792,7 @@ export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTo
       </button>
       
       {isOpen && (
-        <div className={`absolute z-[100] ${positionClasses[position]} w-72 pointer-events-none`}>
+        <div className={`absolute z-[100] ${positionClasses[actualPosition]} w-72 pointer-events-none`}>
           <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-xl shadow-black/40 overflow-hidden">
             {/* Header */}
             <div className="px-3 py-2 bg-slate-700/50 border-b border-slate-600">
@@ -735,7 +820,7 @@ export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTo
               {content.interpretation && (
                 <div className="pt-1.5 border-t border-slate-700">
                   <p className="text-[11px] text-slate-400 italic leading-relaxed">
-                    💡 {content.interpretation}
+                    {content.interpretation}
                   </p>
                 </div>
               )}
@@ -743,7 +828,7 @@ export function QuickTooltip({ termKey, position = 'top', size = 'sm' }: QuickTo
           </div>
           
           {/* Arrow */}
-          <div className={`absolute w-0 h-0 border-[6px] ${arrowClasses[position]}`} />
+          <div className={`absolute w-0 h-0 border-[6px] ${arrowClasses[actualPosition]}`} />
         </div>
       )}
     </span>
@@ -833,7 +918,7 @@ export function SimpleTooltip({ text, children }: SimpleTooltipProps) {
       {children}
       
       {isOpen && (
-        <div className="absolute z-50 px-3 py-2 mt-1 left-1/2 transform -translate-x-1/2 bg-slate-800 border border-slate-600 rounded text-sm text-slate-200 whitespace-nowrap shadow-lg">
+        <div className="absolute z-50 px-3 py-2 mt-1 left-1/2 transform -translate-x-1/2 bg-slate-800 border border-slate-600 rounded-lg text-[11px] leading-relaxed text-slate-200 max-w-[280px] text-left whitespace-normal shadow-lg">
           {text}
           <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-slate-800 border-l border-t border-slate-600 rotate-45" />
         </div>

@@ -88,7 +88,7 @@ export function BloombergTooltip({
                 )}
               </div>
               {description && (
-                <p className="text-[10px] text-terminal-muted mt-0.5">{description}</p>
+                <p className="text-[11px] text-terminal-muted mt-1">{description}</p>
               )}
             </div>
             
@@ -132,7 +132,7 @@ export function BloombergTooltip({
               {/* Interpretation */}
               {interpretation && (
                 <div className="pt-2 border-t border-terminal-border/30">
-                  <div className="text-[10px] leading-relaxed text-terminal-muted">
+                  <div className="text-[11px] leading-relaxed text-terminal-muted whitespace-normal">
                     💡 {interpretation}
                   </div>
                 </div>

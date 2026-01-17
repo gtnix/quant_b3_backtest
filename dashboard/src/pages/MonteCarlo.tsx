@@ -27,23 +27,7 @@ export function MonteCarlo() {
     isLoading,
     error,
     runMonteCarlo,
-    artifactsRoot,
   } = useDataStore();
-
-  // No artifacts root
-  if (!artifactsRoot) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <Shuffle className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
-          <p className="text-terminal-muted">
-            Select a project folder from the Candidates page first.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   // No candidate selected
   if (!selectedCandidate) {

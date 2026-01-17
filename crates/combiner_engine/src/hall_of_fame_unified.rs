@@ -36,6 +36,7 @@ use uuid::Uuid;
 
 use combiner_core::StrategyGenome;
 use crate::evaluation::stage_b::ValidationResult;
+use crate::institutional_thresholds::InstitutionalThresholds;
 
 // =============================================================================
 // Strategy Trait
@@ -89,6 +90,8 @@ impl HofStrategy for BasicStrategy {
 // =============================================================================
 
 /// Institutional-grade acceptance criteria (OMP spec compliant)
+/// 
+/// Delegates to `InstitutionalThresholds` as the single source of truth.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstitutionalCriteria {
     pub min_oos_sharpe: f64,
@@ -105,29 +108,28 @@ impl Default for InstitutionalCriteria {
     }
 }
 
-impl InstitutionalCriteria {
-    /// Research-grade (relaxed for development)
-    pub fn research() -> Self {
+impl From<InstitutionalThresholds> for InstitutionalCriteria {
+    fn from(t: InstitutionalThresholds) -> Self {
         Self {
-            min_oos_sharpe: 0.2,
-            max_pbo: 0.50,
-            min_dsr: 0.0,
-            max_degradation_pct: 80.0,
-            min_split_pass_rate: 0.2,
-            max_oos_drawdown: -0.70,
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
+            max_degradation_pct: t.max_degradation_pct,
+            min_split_pass_rate: t.min_split_pass_rate,
+            max_oos_drawdown: t.max_oos_drawdown,
         }
     }
+}
+
+impl InstitutionalCriteria {
+    /// Research-grade (relaxed for development) - delegates to InstitutionalThresholds
+    pub fn research() -> Self {
+        Self::from(InstitutionalThresholds::research())
+    }
     
-    /// Production-grade (strict, matches OMP spec)
+    /// Production-grade (strict, matches OMP spec) - delegates to InstitutionalThresholds
     pub fn production() -> Self {
-        Self {
-            min_oos_sharpe: 1.0,
-            max_pbo: 0.10,
-            min_dsr: 0.8,
-            max_degradation_pct: 50.0,
-            min_split_pass_rate: 0.5,
-            max_oos_drawdown: -0.20,
-        }
+        Self::from(InstitutionalThresholds::production())
     }
 }
 
@@ -274,6 +276,8 @@ pub struct UnifiedHallOfFame<S: HofStrategy> {
     entries: Vec<UnifiedHofEntry>,
     max_size: usize,
     seen_hashes: HashSet<u64>,
+    /// Track seen metrics signatures to avoid functionally identical strategies
+    seen_metrics: HashSet<u64>,
     strategy: S,
 }
 
@@ -283,6 +287,7 @@ impl<S: HofStrategy + Clone> Clone for UnifiedHallOfFame<S> {
             entries: self.entries.clone(),
             max_size: self.max_size,
             seen_hashes: self.seen_hashes.clone(),
+            seen_metrics: self.seen_metrics.clone(),
             strategy: self.strategy.clone(),
         }
     }
@@ -295,8 +300,39 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
             entries: Vec::with_capacity(max_size),
             max_size,
             seen_hashes: HashSet::new(),
+            seen_metrics: HashSet::new(),
             strategy,
         }
+    }
+    
+    /// Compute a hash for fitness metrics to detect functionally identical strategies.
+    /// Two strategies with same Sharpe/CAGR/MaxDD (rounded to 4 decimals) are considered duplicates.
+    #[inline]
+    fn metrics_hash(genome: &StrategyGenome) -> Option<u64> {
+        genome.fitness.as_ref().map(|f| {
+            use std::hash::{Hash, Hasher};
+            use std::collections::hash_map::DefaultHasher;
+            let mut hasher = DefaultHasher::new();
+            // Round to 4 decimal places to catch near-identical strategies
+            ((f.sharpe_ratio * 10000.0).round() as i64).hash(&mut hasher);
+            ((f.cagr * 10000.0).round() as i64).hash(&mut hasher);
+            ((f.max_drawdown * 10000.0).round() as i64).hash(&mut hasher);
+            hasher.finish()
+        })
+    }
+    
+    /// Compute a hash for OOS validation metrics to detect functionally identical strategies.
+    /// Used by try_add_validated to prevent duplicates with same OOS performance.
+    #[inline]
+    fn validation_metrics_hash(result: &ValidationResult) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        let mut hasher = DefaultHasher::new();
+        // Round to 4 decimal places to catch near-identical strategies
+        ((result.oos_sharpe_median * 10000.0).round() as i64).hash(&mut hasher);
+        ((result.oos_cagr_median * 10000.0).round() as i64).hash(&mut hasher);
+        ((result.oos_max_dd_worst * 10000.0).round() as i64).hash(&mut hasher);
+        hasher.finish()
     }
     
     /// Update with genomes from current generation (basic mode)
@@ -315,6 +351,11 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
         let hash = genome.hash();
         if self.seen_hashes.contains(&hash) { return false; }
         
+        // Check for functionally identical strategies (same metrics)
+        if let Some(metrics_hash) = Self::metrics_hash(genome) {
+            if self.seen_metrics.contains(&metrics_hash) { return false; }
+        }
+        
         let score = self.strategy.score(genome);
         
         if self.entries.len() < self.max_size {
@@ -325,8 +366,13 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
         if let Some(worst) = self.entries.last() {
             if score > worst.score {
                 let worst_hash = worst.genome_hash;
+                // Get metrics hash before removing
+                let worst_metrics = Self::metrics_hash(&worst.genome);
                 self.entries.pop();
                 self.seen_hashes.remove(&worst_hash);
+                if let Some(mh) = worst_metrics {
+                    self.seen_metrics.remove(&mh);
+                }
                 self.add_entry(genome.clone(), generation, score, validation);
                 return true;
             }
@@ -338,6 +384,11 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
     fn add_entry(&mut self, genome: StrategyGenome, generation: u32, score: f64, validation: Option<&ValidationResult>) {
         let hash = genome.hash();
         self.seen_hashes.insert(hash);
+        
+        // Track metrics signature
+        if let Some(metrics_hash) = Self::metrics_hash(&genome) {
+            self.seen_metrics.insert(metrics_hash);
+        }
         
         self.entries.push(UnifiedHofEntry {
             genome_id: genome.id,
@@ -373,6 +424,7 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.seen_hashes.clear();
+        self.seen_metrics.clear();
     }
 }
 
@@ -384,24 +436,62 @@ impl<S: ValidatedHofStrategy> UnifiedHallOfFame<S> {
         let hash = genome.hash();
         if self.seen_hashes.contains(&hash) { return false; }
         
+        // Check for functionally identical strategies (same OOS metrics)
+        let metrics_hash = Self::validation_metrics_hash(result);
+        if self.seen_metrics.contains(&metrics_hash) { return false; }
+        
         let score = self.strategy.score_validation(result);
         
         if self.entries.len() < self.max_size {
-            self.add_entry(genome.clone(), generation, score, Some(result));
+            self.add_entry_validated(genome.clone(), generation, score, result, metrics_hash);
             return true;
         }
         
         if let Some(worst) = self.entries.last() {
             if score > worst.score {
                 let worst_hash = worst.genome_hash;
+                // Get worst metrics hash before removing (use validation if available, else genome fitness)
+                let worst_metrics = worst.validation.as_ref()
+                    .map(|v| {
+                        use std::hash::{Hash, Hasher};
+                        use std::collections::hash_map::DefaultHasher;
+                        let mut hasher = DefaultHasher::new();
+                        ((v.oos_sharpe_median * 10000.0).round() as i64).hash(&mut hasher);
+                        ((v.oos_cagr_median * 10000.0).round() as i64).hash(&mut hasher);
+                        ((v.oos_max_dd_worst * 10000.0).round() as i64).hash(&mut hasher);
+                        hasher.finish()
+                    })
+                    .or_else(|| Self::metrics_hash(&worst.genome));
                 self.entries.pop();
                 self.seen_hashes.remove(&worst_hash);
-                self.add_entry(genome.clone(), generation, score, Some(result));
+                if let Some(mh) = worst_metrics {
+                    self.seen_metrics.remove(&mh);
+                }
+                self.add_entry_validated(genome.clone(), generation, score, result, metrics_hash);
                 return true;
             }
         }
         
         false
+    }
+    
+    /// Add entry with pre-computed validation metrics hash
+    fn add_entry_validated(&mut self, genome: StrategyGenome, generation: u32, score: f64, result: &ValidationResult, metrics_hash: u64) {
+        let hash = genome.hash();
+        self.seen_hashes.insert(hash);
+        self.seen_metrics.insert(metrics_hash);
+        
+        self.entries.push(UnifiedHofEntry {
+            genome_id: genome.id,
+            genome_hash: hash,
+            genome,
+            added_generation: generation,
+            rank: 0,
+            score,
+            validation: Some(ValidationSummary::from(result)),
+        });
+        
+        self.rerank();
     }
     
     /// Check if validation meets criteria
@@ -598,6 +688,134 @@ mod tests {
         
         assert!(!added);
         assert_eq!(hof.len(), 1);
+    }
+
+    #[test]
+    fn test_validated_oos_metrics_deduplication() {
+        // Test that try_add_validated rejects strategies with identical OOS metrics
+        // even when genomes are structurally different
+        let mut hof = UnifiedHallOfFame::new(10, InstitutionalStrategy::research());
+        
+        // Create two DIFFERENT genomes (different block_id)
+        let g1 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Sizing, "equal_weight",
+            vec![("max_weight", ParamValue::float(0.20, 0.10, 0.40, 0.05))],
+        )]);
+        let g2 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Sizing, "risk_parity",
+            vec![("target_vol", ParamValue::float(0.15, 0.05, 0.30, 0.01))],
+        )]);
+        
+        // Verify genomes are structurally different
+        assert_ne!(g1.hash(), g2.hash());
+        
+        // Create ValidationResults with IDENTICAL OOS metrics
+        // Values must pass InstitutionalThresholds::research() criteria
+        let result1 = ValidationResult {
+            genome_index: 0,
+            genome_hash: g1.hash(),
+            oos_sharpe_median: 0.60,    // >= 0.5 (research threshold)
+            oos_sharpe_mean: 0.60,
+            oos_sharpe_std: 0.05,
+            oos_cagr_median: 0.12,
+            oos_max_dd_worst: -0.20,    // > -0.35 (research threshold)
+            degradation_pct: 20.0,
+            pbo: 0.15,                  // <= 0.20 (research threshold)
+            dsr: 0.55,                  // >= 0.5 (research threshold)
+            splits_evaluated: 5,
+            splits_passed: 4,           // 80% >= 40% (research threshold)
+            passed: true,
+            early_exit: false,
+            discard_reason: None,
+        };
+        
+        let result2 = ValidationResult {
+            genome_index: 1,
+            genome_hash: g2.hash(),
+            oos_sharpe_median: 0.60,   // Same as result1
+            oos_sharpe_mean: 0.60,
+            oos_sharpe_std: 0.06,
+            oos_cagr_median: 0.12,     // Same as result1
+            oos_max_dd_worst: -0.20,   // Same as result1
+            degradation_pct: 22.0,
+            pbo: 0.18,
+            dsr: 0.52,
+            splits_evaluated: 5,
+            splits_passed: 4,
+            passed: true,
+            early_exit: false,
+            discard_reason: None,
+        };
+        
+        // First genome should be added
+        let added1 = hof.try_add_validated(&g1, &result1, 0);
+        assert!(added1, "First genome should be added");
+        assert_eq!(hof.len(), 1);
+        
+        // Second genome with identical OOS metrics should be REJECTED
+        let added2 = hof.try_add_validated(&g2, &result2, 1);
+        assert!(!added2, "Second genome with identical OOS metrics should be rejected");
+        assert_eq!(hof.len(), 1, "HoF should still have only 1 entry");
+    }
+
+    #[test]
+    fn test_validated_different_oos_metrics_accepted() {
+        // Test that try_add_validated accepts strategies with different OOS metrics
+        let mut hof = UnifiedHallOfFame::new(10, InstitutionalStrategy::research());
+        
+        let g1 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Sizing, "equal_weight",
+            vec![("max_weight", ParamValue::float(0.20, 0.10, 0.40, 0.05))],
+        )]);
+        let g2 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Sizing, "risk_parity",
+            vec![("target_vol", ParamValue::float(0.15, 0.05, 0.30, 0.01))],
+        )]);
+        
+        // Values must pass InstitutionalThresholds::research() criteria
+        let result1 = ValidationResult {
+            genome_index: 0,
+            genome_hash: g1.hash(),
+            oos_sharpe_median: 0.55,    // >= 0.5 (research threshold)
+            oos_sharpe_mean: 0.55,
+            oos_sharpe_std: 0.05,
+            oos_cagr_median: 0.10,
+            oos_max_dd_worst: -0.20,    // > -0.35 (research threshold)
+            degradation_pct: 20.0,
+            pbo: 0.15,                  // <= 0.20 (research threshold)
+            dsr: 0.55,                  // >= 0.5 (research threshold)
+            splits_evaluated: 5,
+            splits_passed: 4,           // 80% >= 40% (research threshold)
+            passed: true,
+            early_exit: false,
+            discard_reason: None,
+        };
+        
+        let result2 = ValidationResult {
+            genome_index: 1,
+            genome_hash: g2.hash(),
+            oos_sharpe_median: 0.70,    // Different from result1
+            oos_sharpe_mean: 0.70,
+            oos_sharpe_std: 0.06,
+            oos_cagr_median: 0.15,      // Different from result1
+            oos_max_dd_worst: -0.15,    // Different from result1
+            degradation_pct: 15.0,
+            pbo: 0.10,
+            dsr: 0.65,
+            splits_evaluated: 5,
+            splits_passed: 5,
+            passed: true,
+            early_exit: false,
+            discard_reason: None,
+        };
+        
+        let added1 = hof.try_add_validated(&g1, &result1, 0);
+        assert!(added1);
+        
+        // Second genome with DIFFERENT OOS metrics should be accepted
+        let added2 = hof.try_add_validated(&g2, &result2, 1);
+        assert!(added2, "Second genome with different OOS metrics should be accepted");
+        assert_eq!(hof.len(), 2, "HoF should have 2 entries");
     }
 }
 

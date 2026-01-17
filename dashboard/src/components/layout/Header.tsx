@@ -38,7 +38,7 @@ export function Header({ sseConnected = false }: HeaderProps) {
           sseConnected ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'
         }`}>
           {sseConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-          <span>{sseConnected ? 'Connected' : 'Offline'}</span>
+          <span>{sseConnected ? 'API Online' : 'API Offline'}</span>
         </div>
       </div>
 

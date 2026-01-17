@@ -66,6 +66,35 @@ pub struct EvolutionConfig {
     /// Minimum stress scenarios that must pass (out of 5).
     #[serde(default = "default_min_stress_pass")]
     pub min_stress_scenarios_passed: usize,
+    
+    /// Validation tier for Stage B criteria.
+    /// Options: "production" (strictest), "research" (default), "lenient" (debugging)
+    /// Use "lenient" to diagnose why candidates aren't passing Stage B.
+    #[serde(default = "default_validation_tier")]
+    pub validation_tier: String,
+
+    /// Incremental cleanup interval (generations between pending file cleanups).
+    /// Set to 0 to disable. Default: 25 generations.
+    /// This prevents disk explosion during long runs by removing .obfs files
+    /// for genomes no longer in Hall of Fame.
+    #[serde(default = "default_incremental_cleanup_interval")]
+    pub incremental_cleanup_interval: u32,
+
+    /// Parquet compaction interval (generations between compaction runs).
+    /// Set to 0 to disable. Default: 500 generations.
+    /// Merges small Parquet files into larger ones to reduce file count.
+    #[serde(default = "default_compaction_interval")]
+    pub compaction_interval: u32,
+
+    /// Minimum number of Parquet files before compaction triggers.
+    /// Default: 50 files.
+    #[serde(default = "default_compaction_min_files")]
+    pub compaction_min_files: usize,
+
+    /// Target size for compacted Parquet files in MB.
+    /// Default: 50 MB.
+    #[serde(default = "default_compaction_target_size_mb")]
+    pub compaction_target_size_mb: f64,
 }
 
 fn default_population_size() -> usize {
@@ -81,10 +110,10 @@ fn default_crossover_rate() -> f64 {
     0.85
 }
 fn default_mutation_rate() -> f64 {
-    0.1
+    0.15 // Increased from 0.1 to improve exploration and avoid stagnation
 }
 fn default_elitism_rate() -> f64 {
-    0.1
+    0.08 // Reduced from 0.1 to allow more diversity
 }
 fn default_convergence_generations() -> u32 {
     10
@@ -97,6 +126,21 @@ fn default_hall_of_fame_size() -> usize {
 }
 fn default_min_stress_pass() -> usize {
     4
+}
+fn default_validation_tier() -> String {
+    "research".to_string()
+}
+fn default_incremental_cleanup_interval() -> u32 {
+    25
+}
+fn default_compaction_interval() -> u32 {
+    500
+}
+fn default_compaction_min_files() -> usize {
+    50
+}
+fn default_compaction_target_size_mb() -> f64 {
+    50.0
 }
 
 impl Default for EvolutionConfig {
@@ -117,6 +161,11 @@ impl Default for EvolutionConfig {
             gates: InstitutionalGatesConfig::default(),
             stress_testing_enabled: false,
             min_stress_scenarios_passed: default_min_stress_pass(),
+            validation_tier: default_validation_tier(),
+            incremental_cleanup_interval: default_incremental_cleanup_interval(),
+            compaction_interval: default_compaction_interval(),
+            compaction_min_files: default_compaction_min_files(),
+            compaction_target_size_mb: default_compaction_target_size_mb(),
         }
     }
 }

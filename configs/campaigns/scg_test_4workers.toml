@@ -1,0 +1,80 @@
+# =============================================================================
+# SCG Test - 4 Workers (25% CPU)
+# =============================================================================
+# Quick test with limited CPU to verify consolidation
+# =============================================================================
+
+[campaign]
+name = "scg_test_4workers"
+description = "Test with 4 workers - consolidation verification"
+version = "1.0.0"
+
+[dataset]
+market = "BR"
+market_data_path = "data/market_data_ibov.csv"
+
+[risk_profile]
+name = "arrojado"
+
+[evolution]
+population_size = 50
+max_generations = 50000
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08
+convergence_generations = 0  # Disabled - run full 4 hours
+max_runtime_seconds = 14400  # 4 hours
+workers = 4
+hall_of_fame_size = 10
+incremental_cleanup_interval = 10  # Test consolidation every 10 gens
+
+[evolution.gates]
+max_drawdown = -0.60
+
+[diversity]
+enabled = true
+sigma_share = 0.20
+sharing_alpha = 2.0
+fitness_sharing = true
+phenotypic_distance = true
+critical_threshold = 0.25
+crowding_factor = 3
+
+[adaptation]
+enabled = true
+base_mutation_rate = 0.05
+min_mutation_rate = 0.01
+max_mutation_rate = 0.30
+amplification_factor = 2.0
+
+[stagnation]
+detection_enabled = false
+
+[execution]
+mode = "compiled"
+has_costs = true
+slippage_bps = 10.0
+commission_bps = 5.0
+emolument_bps = 2.5
+market_impact_model = "linear"
+
+[validation]
+enabled = false
+
+[gates]
+gates_required = false
+
+[data_integrity]
+enabled = false
+
+[metrics]
+objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
+sharpe_weight = 1.5
+cagr_weight = 1.0
+drawdown_weight = 2.5
+
+[output]
+artifact_format = "obfs"
+save_generations = false
+save_all_genomes = false

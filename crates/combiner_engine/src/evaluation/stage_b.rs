@@ -20,6 +20,7 @@ use combiner_runner::{
 
 use super::split_plan::ValidationSplitPlan;
 use crate::statistics::{calculate_dsr, sample_variance};
+use crate::institutional_thresholds::InstitutionalThresholds;
 
 /// Configuration for Stage B validation
 #[derive(Debug, Clone)]
@@ -48,16 +49,21 @@ pub struct StageBConfig {
 
 impl Default for StageBConfig {
     fn default() -> Self {
-        // Research-grade defaults - permissive for discovery and testing
-        // Production uses InstitutionalCriteria::production() explicitly
+        // Research-grade defaults - delegates to InstitutionalThresholds
+        Self::research()
+    }
+}
+
+impl From<InstitutionalThresholds> for StageBConfig {
+    fn from(t: InstitutionalThresholds) -> Self {
         Self {
             max_failures_early_exit: 5,
-            min_oos_sharpe: 0.2,       // Research: relaxed for testing
-            max_oos_drawdown: -0.70,   // Research: 70% max drawdown acceptable
-            min_oos_trades: 3,         // Research: minimal trades required
-            max_degradation_pct: 80.0,
-            max_pbo: 0.50,             // Research: allow overfitting risk
-            min_dsr: 0.2,              // Research: lower threshold
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 3,
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
             use_cache: true,
             generation: 0,
             population_size: 100,
@@ -66,24 +72,66 @@ impl Default for StageBConfig {
 }
 
 impl StageBConfig {
-    /// Create a research-grade config (same as default - less strict for discovery)
+    /// Create a research-grade config - delegates to InstitutionalThresholds::research()
     pub fn research() -> Self {
-        Self::default()
-    }
-    
-    /// Create production-grade config (strictest, matches OMP spec)
-    pub fn production() -> Self {
+        let t = InstitutionalThresholds::research();
         Self {
-            max_failures_early_exit: 3,
-            min_oos_sharpe: 1.0,       // OMP spec: min_oos_sharpe_net = 1.0
-            max_oos_drawdown: -0.20,   // OMP spec: max_drawdown_net = 0.20
-            min_oos_trades: 30,
-            max_degradation_pct: 50.0,
-            max_pbo: 0.10,             // OMP spec: max_pbo = 0.10
-            min_dsr: 0.8,              // OMP spec: min_dsr = 0.8
+            max_failures_early_exit: 5,
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 3,
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
             use_cache: true,
             generation: 0,
             population_size: 100,
+        }
+    }
+    
+    /// Create production-grade config - delegates to InstitutionalThresholds::production()
+    pub fn production() -> Self {
+        let t = InstitutionalThresholds::production();
+        Self {
+            max_failures_early_exit: 3,
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 30,
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
+            use_cache: true,
+            generation: 0,
+            population_size: 100,
+        }
+    }
+    
+    /// Create lenient config for debugging/discovery - delegates to InstitutionalThresholds::lenient()
+    /// WARNING: Strategies passing lenient thresholds should NOT be deployed.
+    pub fn lenient() -> Self {
+        let t = InstitutionalThresholds::lenient();
+        Self {
+            max_failures_early_exit: 10, // Allow more failures
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 1, // Just need some trades
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
+            use_cache: true,
+            generation: 0,
+            population_size: 100,
+        }
+    }
+    
+    /// Create config from a tier name string
+    /// Valid tiers: "production", "research", "lenient"
+    pub fn from_tier(tier: &str) -> Self {
+        match tier.to_lowercase().as_str() {
+            "production" | "prod" => Self::production(),
+            "research" | "dev" => Self::research(),
+            "lenient" | "debug" | "discovery" => Self::lenient(),
+            _ => Self::research(), // Default to research
         }
     }
     

@@ -227,6 +227,7 @@ impl BlockGene {
     }
 
     /// Compute a deterministic hash for this gene.
+    /// Floats are rounded to 4 decimal places to avoid floating-point noise.
     pub fn compute_hash(&self) -> u64 {
         let mut hasher = FxHasher::default();
         self.block_type.as_str().hash(&mut hasher);
@@ -238,10 +239,12 @@ impl BlockGene {
 
         for (key, value) in params {
             key.hash(&mut hasher);
-            // Hash the value based on type
+            // Hash the value based on type - round floats to avoid FP noise
             match value {
                 ParamValue::Float { value, .. } => {
-                    value.to_bits().hash(&mut hasher);
+                    // Round to 4 decimal places before hashing
+                    let rounded = (*value * 10000.0).round() as i64;
+                    rounded.hash(&mut hasher);
                 }
                 ParamValue::Int { value, .. } => {
                     value.hash(&mut hasher);
@@ -253,6 +256,27 @@ impl BlockGene {
         }
 
         hasher.finish()
+    }
+    
+    /// Round all float parameters to avoid floating-point noise.
+    /// Returns true if any parameter was modified.
+    #[inline]
+    pub fn sanitize_params(&mut self) -> bool {
+        let mut modified = false;
+        for (_, param) in &mut self.params {
+            if let ParamValue::Float { value, min, max, step } = param {
+                // Round to step precision, minimum 4 decimal places
+                let precision = step.log10().abs().ceil() as i32 + 1;
+                let factor = 10_f64.powi(precision.min(4));
+                let rounded = (*value * factor).round() / factor;
+                let clamped = rounded.clamp(*min, *max);
+                if (*value - clamped).abs() > 1e-10 {
+                    *value = clamped;
+                    modified = true;
+                }
+            }
+        }
+        modified
     }
 }
 
@@ -338,6 +362,37 @@ impl StrategyGenome {
     pub fn sort_genes(&mut self) {
         self.genes.sort_by_key(|g| g.block_type.order());
         self.cached_hash = None; // Invalidate cache
+    }
+    
+    /// Remove duplicate consecutive blocks of the same type and id.
+    /// Keeps max 2 blocks of each (block_type, block_id) combination.
+    /// Returns number of blocks removed.
+    pub fn deduplicate_blocks(&mut self) -> usize {
+        use std::collections::HashMap;
+        let mut counts: HashMap<(BlockType, String), usize> = HashMap::new();
+        let original_len = self.genes.len();
+        
+        self.genes.retain(|gene| {
+            let key = (gene.block_type, gene.block_id.clone());
+            let count = counts.entry(key).or_insert(0);
+            *count += 1;
+            // Keep max 2 of each (block_type, block_id) combo
+            *count <= 2
+        });
+        
+        let removed = original_len - self.genes.len();
+        if removed > 0 {
+            self.cached_hash = None;
+        }
+        removed
+    }
+    
+    /// Sanitize all gene parameters (round floats).
+    pub fn sanitize(&mut self) {
+        for gene in &mut self.genes {
+            gene.sanitize_params();
+        }
+        self.cached_hash = None;
     }
 
     /// Compute a stable hash for deduplication and caching.

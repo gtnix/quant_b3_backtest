@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
 import { useStrategyStore } from '../stores/strategyStore';
+import { useDataStore } from '../stores/dataStore';
 import type { HallOfFameEntry } from '../stores/ompStore';
 
 // =============================================================================
@@ -138,6 +139,8 @@ function validateMetrics(m: HallOfFameEntry['metrics']) {
 
 function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
   const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { setSelectedCandidate } = useDataStore();
   
   const metrics = entry.metrics;
   const validation = entry.validation;
@@ -322,23 +325,42 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
           {/* Ações */}
           <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end gap-3">
             <button
-              onClick={(e) => {
+              disabled={loading}
+              onClick={async (e) => {
                 e.stopPropagation();
-                // Navega para página de backtest com este candidato
-                window.dispatchEvent(new CustomEvent('navigate', { detail: 'backtest' }));
-                // Define candidato selecionado no data store via API
-                fetch(`/api/candidate/${entry.candidateId}`)
-                  .then(res => res.json())
-                  .then(data => {
-                    // Dispara seleção de candidato no dataStore
-                    window.dispatchEvent(new CustomEvent('select-candidate', { detail: data }));
-                  })
-                  .catch(err => console.error('Falha ao carregar candidato:', err));
+                setLoading(true);
+                try {
+                  const res = await fetch(`/api/candidate/${entry.candidateId}`);
+                  if (!res.ok) throw new Error('Falha ao carregar candidato');
+                  const data = await res.json();
+                  // Mapeia para o formato esperado pelo Backtest (snake_case)
+                  const mapped = {
+                    candidate_id: data.candidate_id || entry.candidateId,
+                    genome_hash: data.genome_hash || entry.genomeHash,
+                    display_name: data.display_name || entry.strategyName || entry.candidateId.slice(-12),
+                    candidate_class: data.candidate_class || 'validated',
+                    oos_sharpe_net: data.oos_sharpe_net ?? entry.metrics.oosSharpeNet,
+                    oos_cagr_net: data.oos_cagr_net ?? entry.metrics.cagrNet ?? 0,
+                    max_drawdown_net: data.max_drawdown_net ?? entry.metrics.maxDrawdownNet ?? 0,
+                    pbo: data.pbo ?? entry.metrics.pbo ?? 0,
+                    dsr: data.dsr ?? entry.metrics.dsr ?? 0,
+                    gates_passed: data.gates_passed ?? entry.validation.gatesPassed ?? true,
+                    stress_passed: data.stress_passed ?? entry.validation.stressPassed ?? 0,
+                    stress_total: data.stress_total ?? entry.validation.stressTotal ?? 8,
+                    ...data,
+                  };
+                  setSelectedCandidate(mapped);
+                  window.dispatchEvent(new CustomEvent('navigate', { detail: 'backtest' }));
+                } catch (err) {
+                  console.error('Falha ao carregar candidato:', err);
+                } finally {
+                  setLoading(false);
+                }
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-cyan/20 text-accent-cyan rounded-lg hover:bg-accent-cyan/30 transition-colors text-sm font-medium"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-cyan/20 text-accent-cyan rounded-lg hover:bg-accent-cyan/30 transition-colors text-sm font-medium disabled:opacity-50"
             >
-              <LineChart className="w-4 h-4" />
-              Abrir Backtest
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LineChart className="w-4 h-4" />}
+              {loading ? 'Carregando...' : 'Abrir Backtest'}
             </button>
           </div>
         </div>

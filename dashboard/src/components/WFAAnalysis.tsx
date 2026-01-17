@@ -75,13 +75,31 @@ export function WFAAnalysis({ candidateId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-terminal-muted" />
+      <div className="space-y-6 animate-pulse">
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
+              <div className="h-3 w-16 bg-terminal-border rounded mb-2" />
+              <div className="h-6 w-20 bg-terminal-border rounded" />
+            </div>
+          ))}
+        </div>
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
+              <div className="h-4 w-24 bg-terminal-border rounded mb-3" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-20 bg-terminal-border/50 rounded" />
+                <div className="h-20 bg-terminal-border/50 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
-  if (error || !data) {
+  if (error || !data || !data.folds || !data.summary || !data.wfa_config) {
     return (
       <div className="flex items-center justify-center h-64 text-terminal-muted">
         {error || 'No WFA data'}
@@ -137,19 +155,48 @@ export function WFAAnalysis({ candidateId }: Props) {
 
       {/* Degradation Chart */}
       <div className="p-4 rounded-xl bg-terminal-surface border border-terminal-border">
-        <h4 className="text-sm font-medium text-terminal-muted mb-4">Sharpe Degradation by Fold</h4>
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-sm font-medium text-terminal-muted">Sharpe Degradation by Fold</h4>
+          <div className="flex items-center gap-2 text-xs text-terminal-muted">
+            <span>Avg: </span>
+            <span className={`font-mono font-bold ${data.summary.avg_degradation < 40 ? 'text-profit' : data.summary.avg_degradation < 50 ? 'text-accent-yellow' : 'text-loss'}`}>
+              {data.summary.avg_degradation.toFixed(1)}%
+            </span>
+          </div>
+        </div>
         <div className="flex items-end gap-2 h-32">
           {data.folds.map((fold) => {
             const height = Math.min(100, Math.max(10, fold.degradation * 2.5));
             const color = fold.status === 'PASS' ? 'bg-profit' : fold.status === 'WARN' ? 'bg-accent-yellow' : 'bg-loss';
+            const hoverColor = fold.status === 'PASS' ? 'hover:bg-profit/80' : fold.status === 'WARN' ? 'hover:bg-accent-yellow/80' : 'hover:bg-loss/80';
             
             return (
-              <div key={fold.fold} className="flex-1 flex flex-col items-center gap-1">
+              <div key={fold.fold} className="flex-1 flex flex-col items-center gap-1 group relative">
                 <div className="w-full flex flex-col justify-end h-24">
                   <div 
-                    className={`w-full rounded-t ${color} transition-all`}
+                    className={`w-full rounded-t ${color} ${hoverColor} transition-all cursor-pointer`}
                     style={{ height: `${height}%` }}
                   />
+                </div>
+                {/* Tooltip on hover */}
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  <div className="bg-terminal-bg border border-terminal-border rounded-lg p-2 text-xs whitespace-nowrap shadow-lg">
+                    <div className="font-medium mb-1">Fold {fold.fold}</div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-terminal-muted">IS Sharpe:</span>
+                      <span className="font-mono text-profit">{fold.is_metrics.sharpe.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-terminal-muted">OOS Sharpe:</span>
+                      <span className="font-mono text-accent-cyan">{fold.oos_metrics.sharpe.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between gap-4 border-t border-terminal-border mt-1 pt-1">
+                      <span className="text-terminal-muted">Degradation:</span>
+                      <span className={`font-mono font-bold ${fold.status === 'PASS' ? 'text-profit' : fold.status === 'WARN' ? 'text-accent-yellow' : 'text-loss'}`}>
+                        -{fold.degradation.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 <span className="text-xs text-terminal-muted">F{fold.fold}</span>
                 <span className="text-xs font-mono">{fold.degradation.toFixed(0)}%</span>

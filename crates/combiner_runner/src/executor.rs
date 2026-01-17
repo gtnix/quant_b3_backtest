@@ -157,6 +157,18 @@ pub trait BacktestExecutor: Send + Sync {
     ) -> Vec<Result<BacktestOutput, ExecutionError>> {
         configs.iter().map(|c| self.execute(c)).collect()
     }
+
+    /// Get the pending directory path for OBFS artifacts.
+    /// Used for incremental cleanup during long-running evolution.
+    fn pending_dir(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// Get the consolidated output directory for Parquet + LMDB storage.
+    /// Used for safe incremental consolidation during evolution.
+    fn consolidated_dir(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// Library-based executor using ExperimentRunner directly.
@@ -205,6 +217,8 @@ pub struct CliExecutor {
     risk_profile: Option<String>,
     /// Use OBFS binary format for artifacts (90% storage reduction)
     use_obfs: bool,
+    /// Market identifier: "BR" or "US"
+    market: Option<String>,
 }
 
 impl CliExecutor {
@@ -228,6 +242,7 @@ impl CliExecutor {
             data_source: None,
             risk_profile: None,
             use_obfs: false,
+            market: None,
         }
     }
     
@@ -300,6 +315,14 @@ impl CliExecutor {
     pub fn with_risk_profile(mut self, profile: impl Into<String>) -> Self {
         self.risk_profile = Some(profile.into());
         info!("Risk profile set to: {:?}", self.risk_profile);
+        self
+    }
+    
+    /// Set the market for backtesting.
+    /// Passes --market <market> to the CLI (BR or US).
+    pub fn with_market(mut self, market: impl Into<String>) -> Self {
+        self.market = Some(market.into());
+        info!("Market set to: {:?}", self.market);
         self
     }
     
@@ -505,6 +528,13 @@ impl BacktestExecutor for CliExecutor {
             args.push("--obfs".to_string());
             debug!("Using OBFS artifact format");
         }
+        
+        // Add market if configured
+        if let Some(ref market) = self.market {
+            args.push("--market".to_string());
+            args.push(market.clone());
+            debug!("Using market: {}", market);
+        }
 
         // Execute CLI
         let output = Command::new(&self.cli_path)
@@ -642,6 +672,22 @@ impl BacktestExecutor for CliExecutor {
             duration_ms: start.elapsed().as_millis() as u64,
             source: EvaluationSource::Real,
         })
+    }
+
+    fn pending_dir(&self) -> Option<std::path::PathBuf> {
+        if self.use_obfs {
+            Some(self.output_dir.join("pending"))
+        } else {
+            None
+        }
+    }
+
+    fn consolidated_dir(&self) -> Option<std::path::PathBuf> {
+        if self.use_obfs {
+            Some(self.output_dir.join("consolidated"))
+        } else {
+            None
+        }
     }
 }
 

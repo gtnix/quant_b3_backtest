@@ -88,6 +88,10 @@ enum Commands {
         #[arg(long)]
         data_source: Option<String>,
         
+        /// Market: "BR" or "US" (selects ohlcv_daily vs ohlcv_daily_us table)
+        #[arg(long)]
+        market: Option<String>,
+        
         /// Risk profile name (muito_conservador, conservador, moderado, arrojado, muito_arrojado)
         #[arg(long)]
         risk_profile: Option<String>,
@@ -398,6 +402,7 @@ fn run_command(
     execution_config: Option<PathBuf>,
     market_data: Option<PathBuf>,
     data_source: Option<String>,
+    market: Option<String>,
     risk_profile: Option<String>,
     obfs: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -426,6 +431,11 @@ fn run_command(
         }
     }
     
+    // Log market if provided (BR or US)
+    if let Some(ref mkt) = market {
+        println!("Market: {} (table: {})", mkt, if mkt.to_uppercase() == "US" { "ohlcv_daily_us" } else { "ohlcv_daily" });
+    }
+    
     // Log risk profile if provided
     if let Some(ref rp) = risk_profile {
         println!("Risk profile: {}", rp);
@@ -444,6 +454,8 @@ fn run_command(
         output_dir: output_dir.to_string_lossy().into(),
         market_data_csv_path: market_data.map(|p| p.to_string_lossy().into_owned()),
         artifact_format,
+        data_source: data_source.clone(),
+        market: market.clone(),
         ..Default::default()
     };
 
@@ -943,9 +955,10 @@ fn main() {
             execution,
             market_data,
             data_source,
+            market,
             risk_profile,
             obfs,
-        } => run_command(config, output, dry_run, strict, execution, market_data, data_source, risk_profile, obfs),
+        } => run_command(config, output, dry_run, strict, execution, market_data, data_source, market, risk_profile, obfs),
         Commands::RunBatch {
             folder,
             output,
