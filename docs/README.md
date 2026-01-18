@@ -1,8 +1,8 @@
 # Quant B3 Backtester - Documentação Técnica
 
-**Versão**: 3.5.0  
-**Última Atualização**: 2026-01-05  
-**Status**: Produção (VPS + Neon + OBFS)
+**Versão**: 4.0.0  
+**Última Atualização**: 2026-01-18  
+**Status**: Produção (Local Ubuntu + Neon + OBFS + OMP)
 
 ---
 
@@ -34,8 +34,15 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                   CAMADA DE ORQUESTRAÇÃO                        │   │
+│  │                   ORQUESTRADOR (OMP) - 24/7                     │   │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │   │
+│  │  │  Campaign Queue │  │  Resource Mgr   │  │  Hall of Fame   │  │   │
+│  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │   │
+│  └───────────┼────────────────────┼────────────────────┼───────────┘   │
+│              │                    │                    │               │
+│  ┌───────────┼────────────────────┼────────────────────┼───────────┐   │
+│  │           │     CAMADA DE ORQUESTRAÇÃO             │            │   │
+│  │  ┌────────┴────────┐  ┌────────┴────────┐  ┌───────┴─────────┐  │   │
 │  │  │  backtester_cli │  │  combiner_cli   │  │ Strategy Factory│  │   │
 │  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │   │
 │  └───────────┼────────────────────┼────────────────────┼───────────┘   │
@@ -119,16 +126,22 @@ Sistema de backtesting institucional para o mercado B3 (Brasil) e US construído
 2. **[Data Providers Policy](data/data-providers-policy.md)** ← Política oficial
 3. [Provider Due Diligence](data/provider-due-diligence.md)
 4. [US DataHub Status](data/us-datahub-status.md)
+5. **[DataHub B3](data/datahub-b3.md)** ← Módulo Python B3
+6. **[DataHub US](data/datahub-us.md)** ← Módulo Python US
+7. **[DataHub FX](data/datahub-fx.md)** ← Módulo Python FX
 
 ### Para Operações/DevOps
 
 1. [Strategy Factory](strategy_factory.md)
 2. [Artefatos de Output](operations/artifacts.md)
-3. **[Análise de Armazenamento](operations/storage-analysis.md)** ← NOVO
-4. [Dashboard](dashboard/README.md)
-5. [Cockpit - Controle SCG](dashboard/cockpit.md)
-6. [API Server (Browser Mode)](dashboard/api-server.md)
-7. [VPS Deployment](dashboard/vps-deployment.md)
+3. [Análise de Armazenamento](operations/storage-analysis.md)
+4. **[Scripts Reference](operations/scripts-reference.md)** ← Scripts operacionais
+5. [Dashboard](dashboard/README.md)
+6. [Cockpit - Controle SCG](dashboard/cockpit.md)
+7. **[Hall of Fame](dashboard/hall-of-fame.md)** ← Elite strategies
+8. **[Miner Control](dashboard/miner-control.md)** ← Controle OMP
+9. [API Server (Browser Mode)](dashboard/api-server.md)
+10. [VPS Deployment](dashboard/vps-deployment.md) ← DEFERRED (see `docs/ops/local_only_policy.md`)
 
 ---
 
@@ -138,7 +151,7 @@ O sistema inclui um **dashboard institucional** com suporte a três modos de exe
 
 - **Desktop Mode (Tauri)**: Aplicação nativa com acesso direto ao filesystem
 - **Browser Mode (Local)**: Funciona em qualquer navegador via API Server + Neon DB
-- **VPS Mode (Production)**: Deploy em VPS com nginx reverse proxy + PM2
+- **VPS Mode**: DEFERRED - see `docs/ops/local_only_policy.md`
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -195,14 +208,14 @@ Ver [Cockpit Documentation](dashboard/cockpit.md) para detalhes.
 
 | Stack | Tecnologia |
 |-------|------------|
-| Framework | Tauri 2.x (Desktop) / Express (Browser/VPS) |
+| Framework | Tauri 2.x (Desktop) / Express (Browser) |
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS (terminal theme) |
 | State | Zustand |
 | Charts | Recharts + D3 |
 | Database | Neon PostgreSQL (cloud) |
 | Real-time | Tauri Events / SSE + Polling fallback |
-| Deploy VPS | nginx + PM2 |
+| Deploy | Local execution (VPS DEFERRED) |
 
 ### Executar
 
@@ -218,66 +231,27 @@ npm install
 node server.js &       # API em http://localhost:3001
 npm run dev            # Frontend em http://localhost:5173
 
-# VPS Mode (Production)
-# Ver docs/dashboard/vps-deployment.md
+# VPS Mode - DEFERRED
+# Ver docs/ops/local_only_policy.md
 ```
 
 Ver [Dashboard README](dashboard/README.md) para documentação completa
 
 ---
 
-## Ambiente de Produção (VPS)
+## Ambiente de Produção
 
-### Infraestrutura
+> **NOTA**: VPS deployment is DEFERRED. See `docs/ops/local_only_policy.md`.
+> Current target: **Local Ubuntu workstation**.
+
+### Infraestrutura Local
 
 | Componente | Tecnologia |
 |------------|------------|
-| VPS | Vultr vc2-1c-1gb (Ubuntu 24.04) |
-| Reverse Proxy | nginx |
-| Process Manager | PM2 |
+| Environment | Local Ubuntu workstation |
+| Process | Direct execution (no PM2) |
 | Database | Neon PostgreSQL (cloud) |
-| Auth | HTTP Basic Auth (nginx) |
-
-### Acesso
-
-```
-URL: http://149.28.39.194
-User: admin
-Pass: quant123
-```
-
-### Arquitetura VPS
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        INTERNET                               │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                     NGINX (port 80)                           │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  location / → proxy_pass 5173 (vite preview)           │  │
-│  │  location /api/ → proxy_pass 3001 (no auth)            │  │
-│  │  location /api/events → SSE proxy                      │  │
-│  └────────────────────────────────────────────────────────┘  │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-          ┌───────────────┴───────────────┐
-          │                               │
-          ▼                               ▼
-┌─────────────────────┐         ┌─────────────────────┐
-│  alpha-dashboard    │         │    api-server       │
-│  PM2: vite preview  │         │  PM2: node server   │
-│  port: 5173         │         │  port: 3001         │
-└─────────────────────┘         └──────────┬──────────┘
-                                           │
-                                           ▼
-                                ┌─────────────────────┐
-                                │   Neon PostgreSQL   │
-                                │   (cloud database)  │
-                                └─────────────────────┘
-```
+| Dashboard | Browser mode (localhost) |
 
 ---
 
@@ -368,6 +342,63 @@ Ver [Strategy Factory Runbook](strategy_factory.md) para detalhes.
 
 ---
 
+## Orquestrador de Mineração Perpétua (OMP)
+
+O **OMP** é o sistema de mineração contínua 24/7 que opera sobre o SCG:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    OMP - MINERAÇÃO PERPÉTUA                       │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│  │ Campaign Queue  │  │  Resource Mgr   │  │ Promotion Gate  │   │
+│  │  (JSON file)    │  │  (CPU/Mem/Disk) │  │  (HOF criteria) │   │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘   │
+│           │                    │                    │            │
+│           └──────────┬─────────┴────────────────────┘            │
+│                      │                                           │
+│                      ▼                                           │
+│           ┌─────────────────────────────────────┐                │
+│           │       combiner factory run          │                │
+│           │      (campanhas automáticas)        │                │
+│           └─────────────────────────────────────┘                │
+│                      │                                           │
+│                      ▼                                           │
+│           ┌─────────────────────────────────────┐                │
+│           │         HALL OF FAME               │                │
+│           │  (estratégias elite promovidas)    │                │
+│           └─────────────────────────────────────┘                │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Características OMP
+
+| Feature | Descrição |
+|---------|-----------|
+| **Operação 24/7** | Daemon de longa duração via PM2 |
+| **Fila de Campanhas** | `campaign_queue.json` com prioridades |
+| **Gestão de Recursos** | Limites de CPU, memória e disco configuráveis |
+| **Promoção Automática** | Estratégias que passam gates → Hall of Fame |
+| **Auditabilidade** | Provenance completa (genome hash, config hash, git SHA) |
+
+### Hall of Fame
+
+Repositório de estratégias de elite com critérios rigorosos:
+
+| Critério | Threshold |
+|----------|-----------|
+| OOS Sharpe Net | >= 1.0 |
+| PBO | <= 0.10 |
+| DSR | >= 0.8 |
+| Max Drawdown | <= 20% |
+| Stress Tests | 5/5 pass |
+
+Ver [OMP Specification](architecture/omp-specification.md) para arquitetura completa.
+
+---
+
 ## Estrutura da Documentação
 
 ```
@@ -388,13 +419,18 @@ docs/
 ├── dashboard/                   # Dashboard Tauri/Browser/VPS
 │   ├── README.md               # Arquitetura e componentes
 │   ├── cockpit.md              # Cockpit - Controle SCG
+│   ├── hall-of-fame.md         # Hall of Fame (elite strategies)
+│   ├── miner-control.md        # Controle OMP
 │   ├── api-server.md           # API Server (Browser Mode)
-│   └── vps-deployment.md       # Deploy VPS (nginx + PM2) ← NOVO
+│   └── vps-deployment.md       # Deploy VPS (nginx + PM2)
 ├── data/                        # Documentação de dados
 │   ├── README.md               # Índice e overview
 │   ├── data-providers-policy.md # Política oficial de data providers
 │   ├── provider-due-diligence.md  # Avaliação de providers
-│   └── us-datahub-status.md    # Status do DataHub US
+│   ├── us-datahub-status.md    # Status do DataHub US
+│   ├── datahub-b3.md           # Módulo Python para B3
+│   ├── datahub-us.md           # Módulo Python para US
+│   └── datahub-fx.md           # Módulo Python para FX
 ├── components/                  # Especificações técnicas
 │   ├── engines.md              # UnifiedEngine
 │   ├── strategy-compositor.md  # DSL de estratégias
@@ -402,7 +438,8 @@ docs/
 ├── operations/                  # Manual de operações
 │   ├── cli-reference.md        # Comandos backtester_cli
 │   ├── artifacts.md            # Estrutura de output/artifacts
-│   └── storage-analysis.md     # Análise de consumo de espaço ← NOVO
+│   ├── storage-analysis.md     # Análise de consumo de espaço
+│   └── scripts-reference.md    # Scripts operacionais
 ├── validation/                  # Relatório de validação
 │   ├── determinism.md          # Invariantes
 │   └── benchmarks.md           # Baselines de performance
@@ -496,8 +533,10 @@ cargo run -p combiner_cli -- factory promote --run run_abc123 --top 3
 | **SCG** | `combiner_core` | Genome, Fitness, SIMD metrics |
 | **SCG** | `combiner_engine` | Evolution, Pareto, Hall of Fame |
 | **SCG** | `combiner_runner` | Parallel executor |
-| **SCG** | `combiner_cli` | CLI + Factory commands |
+| **SCG** | `combiner_cli` | CLI + Factory + Audit + Extract |
 | **Data** | `market_data` | Calendar, FX, universe |
+| **Storage** | `obfs` | Binary storage (Parquet + Zstd + LMDB) |
+| **Validation** | `backtester_validation` | Golden tests, crosscheck |
 | **Tests** | `backtester_tests` | Integration, determinism |
 
 ---

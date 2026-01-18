@@ -5,7 +5,22 @@
 
 ---
 
-## Visão Geral
+## ⚠️ DEFERRED - NOT IN SCOPE
+
+> **This document is DEFERRED and for historical reference only.**
+> 
+> **VPS deployment is NOT in scope for current operations.**
+> 
+> Current target: **Local Ubuntu workstation**
+> 
+> See: `docs/ops/local_only_policy.md`
+> 
+> The content below is retained for future reference but should NOT generate
+> any active tasks, TODOs, or work items.
+
+---
+
+## Visão Geral (Historical)
 
 Este guia documenta o deploy do Dashboard Quant B3 em ambiente VPS com:
 

@@ -500,6 +500,7 @@ mod tests {
             max_slippage_pct_of_pnl: 20.0,  // Stricter: 20% vs 30%
             min_capacity_usd: 10_000_000.0, // Stricter: $10M vs $5M
             max_avg_slippage_bps: 15.0,     // Stricter: 15bps vs 25bps
+            max_drawdown: -0.20,            // Stricter: 20% vs 30%
         };
         let checker = GateChecker::new(config);
         

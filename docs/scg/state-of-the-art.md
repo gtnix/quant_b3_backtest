@@ -1,7 +1,7 @@
 # Estado da Arte: Algoritmos Genéticos para Trading
 
-**Versão**: 1.0.0  
-**Última Atualização**: 2026-01-02  
+**Versão**: 1.1.0  
+**Última Atualização**: 2026-01-18  
 **Autor**: SCG Research Team
 
 ---
@@ -383,17 +383,17 @@ Ajusta o Sharpe pelo número de estratégias testadas.
 
 ## 9. Próximos Passos (Roadmap)
 
-### Fase 1: Implementação Core (Atual)
+### Fase 1: Implementação Core ✅
 - [x] Documentação de estado da arte
-- [ ] DiversityMonitor
-- [ ] AdaptiveMutation
-- [ ] Phenotypic Distance
-- [ ] Fitness Sharing
-- [ ] StagnationDetector
+- [x] DiversityMonitor
+- [x] AdaptiveMutation
+- [x] Phenotypic Distance
+- [x] Fitness Sharing
+- [x] StagnationDetector
 
-### Fase 2: Novos Blocos de Trading
-- [ ] `multi_factor` (Fama-French)
-- [ ] `volatility_stop` (ATR-based)
+### Fase 2: Novos Blocos de Trading (Em Progresso)
+- [x] `multi_factor` (Fama-French)
+- [x] `volatility_stop` (ATR-based)
 - [ ] `regime_exit` (Hamilton switching)
 
 ### Fase 3: Técnicas Avançadas
@@ -401,6 +401,45 @@ Ajusta o Sharpe pelo número de estratégias testadas.
 - [ ] MOEA/D decomposition
 - [ ] Island Model parallelism
 - [ ] Novelty Search híbrido
+
+### Fase 4: Infraestrutura (Completo)
+- [x] OBFS storage (7.1x compressão)
+- [x] OMP (Orquestrador de Mineração Perpétua)
+- [x] Hall of Fame automático
+- [x] Auditoria institucional 6-marcos
+- [x] Dashboard Miner Control
+
+---
+
+## 10. Métricas de Produção
+
+### Performance OBFS (2026-01-18)
+
+| Métrica | Valor |
+|---------|-------|
+| Compressão Média | 7.1x |
+| Tamanho por Estratégia | 8 KB |
+| Write Speed | 2,500 estratégias/s |
+| Read Speed | 5,000 estratégias/s |
+| Integridade | XXH3 + BLAKE3 |
+
+### Benchmarks SCG
+
+| Modo | Tempo (100 genomas) | Speedup |
+|------|---------------------|---------|
+| Standard | 850ms | 1x |
+| Ultra | 320ms | 2.7x |
+| Ultra + SIMD | 180ms | 4.7x |
+
+### Hall of Fame Stats
+
+| Critério | Threshold Produção |
+|----------|-------------------|
+| OOS Sharpe Net | >= 1.0 |
+| PBO | <= 0.10 |
+| DSR | >= 0.8 |
+| Max Drawdown | <= 20% |
+| Stress Tests | 5/5 pass |
 
 ---
 

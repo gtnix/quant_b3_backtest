@@ -1,7 +1,7 @@
 # Dashboard - Documentação Técnica
 
-**Versão**: 3.2.0  
-**Última Atualização**: 2025-12-29  
+**Versão**: 4.0.0  
+**Última Atualização**: 2026-01-18  
 **Framework**: Tauri 2.x / Express + React 18 + TypeScript
 
 ---
@@ -16,12 +16,12 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
 |------|-----------|---------|-----------|-----|
 | **Desktop** | Tauri 2.x | Rust + Filesystem | Tauri Events | Produção local |
 | **Browser** | Express | Node.js + Neon DB | SSE + Polling | Desenvolvimento |
-| **VPS** | Express + nginx | Node.js + Neon DB | SSE + Polling | Produção cloud |
+| **VPS** | DEFERRED | - | - | See `docs/ops/local_only_policy.md` |
 
 ### Características
 
 - **Terminal Theme** - Background escuro, cores neon, tipografia monospace
-- **Tri-Mode** - Funciona em Tauri (desktop), Browser (local) ou VPS (production)
+- **Dual-Mode** - Funciona em Tauri (desktop) ou Browser (local). VPS DEFERRED.
 - **Unified Command Layer** - Abstração única para todos os modos
 - **State Management** - Zustand com cache LRU
 - **Real-time Updates** - SSE com fallback para polling
@@ -62,11 +62,11 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
                     Local Filesystem (artifacts/)
 ```
 
-### Browser/VPS Mode (Express + Neon)
+### Browser Mode (Express + Neon)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    BROWSER / VPS APPLICATION                    │
+│                    BROWSER APPLICATION                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │                    REACT FRONTEND                           ││
@@ -97,37 +97,10 @@ O Dashboard é uma aplicação institucional para visualização e controle de e
     (artifacts/)                               (cloud DB)
 ```
 
-### VPS Production (nginx + PM2)
+### VPS Production - DEFERRED
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        INTERNET                               │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                     NGINX (port 80)                           │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  location / → proxy_pass 5173 (auth required)          │  │
-│  │  location /api/ → proxy_pass 3001 (no auth)            │  │
-│  │  location /api/events → SSE with buffering off         │  │
-│  └────────────────────────────────────────────────────────┘  │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-          ┌───────────────┴───────────────┐
-          │                               │
-          ▼                               ▼
-┌─────────────────────┐         ┌─────────────────────┐
-│  alpha-dashboard    │         │    api-server       │
-│  PM2: vite preview  │         │  PM2: node server   │
-│  port: 5173         │         │  port: 3001         │
-└─────────────────────┘         └──────────┬──────────┘
-                                           │
-                                           ▼
-                                ┌─────────────────────┐
-                                │   Neon PostgreSQL   │
-                                └─────────────────────┘
-```
+> **NOTA**: VPS deployment is DEFERRED. See `docs/ops/local_only_policy.md`.
+> Current target: **Local Ubuntu workstation with Browser Mode**.
 
 ---
 
@@ -189,7 +162,7 @@ dashboard/
 │       ├── ranking.ts            # Candidate ranking
 │       └── utils.ts              # Formatters
 │
-├── server.js                     # Express API server (Browser/VPS Mode)
+├── server.js                     # Express API server (Browser Mode)
 │
 ├── src-tauri/                    # Rust backend (Desktop Mode)
 │   ├── Cargo.toml
@@ -214,6 +187,7 @@ dashboard/
 | **Campaigns** | `Campaigns.tsx` | Browser de campanhas e runs |
 | **Candidates** | `Candidates.tsx` | Tabela de candidatos com filtros |
 | **Backtest** | `Backtest.tsx` | Equity curve, drawdown, métricas |
+| **Hall of Fame** | `HallOfFame.tsx` | Estratégias elite promovidas |
 
 ### Analytics Pages
 
@@ -231,6 +205,18 @@ dashboard/
 |------|------------|-----------|
 | **Evolution** | `Evolution.tsx` | GA evolution monitor |
 | **Dashboard** | `Dashboard.tsx` | System overview |
+| **Miner Control** | `MinerControl.tsx` | Controle do OMP 24/7 |
+| **Strategy Selector** | `StrategySelector.tsx` | Seletor de estratégias |
+| **Audit Report** | `AuditReport.tsx` | Relatórios de auditoria |
+
+### Config Pages
+
+| Page | Componente | Descrição |
+|------|------------|-----------|
+| **Config Universe** | `ConfigUniverse.tsx` | Configuração de universo |
+| **Config Budget** | `ConfigBudget.tsx` | Configuração de compute |
+| **Config Gates** | `ConfigGates.tsx` | Configuração de gates |
+| **Config Trading** | `ConfigTrading.tsx` | Configuração de trading |
 
 ---
 
@@ -315,7 +301,7 @@ interface CockpitState {
 
 ## Unified Command Layer
 
-A camada `lib/commands.ts` abstrai diferenças entre Tauri, Browser e VPS:
+A camada `lib/commands.ts` abstrai diferenças entre Tauri e Browser modes:
 
 ```typescript
 import { cmd } from './lib/commands';
@@ -363,7 +349,7 @@ import { platform, config } from './lib/platform';
 platform.isTauri    // true se Tauri desktop
 platform.isBrowser  // true se browser mode
 platform.isDev      // true se desenvolvimento
-platform.isProd     // true se produção (VPS)
+platform.isProd     // true se produção
 
 // Endpoints (auto-configurados)
 config.apiBase      // "/api" (prod) ou "http://localhost:3001/api" (dev)
@@ -400,24 +386,11 @@ npm run dev         # Frontend em http://localhost:5173
 
 ---
 
-## VPS Deployment
+## VPS Deployment - DEFERRED
 
-Ver [vps-deployment.md](vps-deployment.md) para guia completo de deploy em produção.
+> **NOTA**: VPS deployment is DEFERRED. See `docs/ops/local_only_policy.md`.
 
-### Acesso VPS
-
-```
-URL:  http://149.28.39.194
-User: admin
-Pass: quant123
-```
-
-### PM2 Services
-
-| Service | Port | Descrição |
-|---------|------|-----------|
-| `alpha-dashboard` | 5173 | Vite preview (frontend) |
-| `api-server` | 3001 | Express API |
+For historical reference only: [vps-deployment.md](vps-deployment.md)
 
 ---
 
@@ -507,17 +480,17 @@ npm run dev          # Terminal 2: Frontend
 npm run tauri build
 ```
 
-### Build VPS
+### Build for Production
 
 ```bash
-NODE_OPTIONS='--max-old-space-size=768' npm run build
+npm run build
 ```
 
 ---
 
 ## Integração com Neon DB
 
-O browser/VPS mode usa Neon PostgreSQL para persistência:
+O Browser mode usa Neon PostgreSQL para persistência:
 
 ### Variável de Ambiente
 
@@ -538,6 +511,8 @@ DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
 ## Documentação Relacionada
 
 - [Cockpit](cockpit.md) - Painel de controle SCG
+- [Hall of Fame](hall-of-fame.md) - Estratégias elite
+- [Miner Control](miner-control.md) - Controle OMP
 - [API Server](api-server.md) - Referência da API REST
-- [VPS Deployment](vps-deployment.md) - Deploy em produção
+- [VPS Deployment](vps-deployment.md) - DEFERRED (historical reference)
 - [Artefatos](../operations/artifacts.md) - Estrutura de output

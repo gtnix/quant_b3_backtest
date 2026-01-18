@@ -1,11 +1,11 @@
 # CLI Reference - Combiner
 
-**Versão**: 1.2.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 2.0.0  
+**Última Atualização**: 2026-01-18
 
 ## Visão Geral
 
-O `combiner` CLI fornece comandos para execução de evolução genética, validação de estratégias, e orquestração de campanhas via Strategy Factory.
+O `combiner` CLI fornece comandos para execução de evolução genética, validação de estratégias, auditoria institucional, e orquestração de campanhas via Strategy Factory.
 
 O SCG também pode ser controlado via **Dashboard Cockpit** - ver [Cockpit Documentation](../dashboard/cockpit.md).
 
@@ -17,6 +17,8 @@ Commands:
   status      Check experiment status
   export-top  Export top strategies
   validate    Validate with Walk-Forward Analysis
+  extract     Extract OBFS artifacts to JSON
+  audit       Institutional 6-marco audit
   factory     Strategy Factory commands
   help        Print help
 ```
@@ -166,6 +168,119 @@ combiner validate scg_20251228_143022 --top-k 10 --full --stress-enabled
 # │ 002      │ 0.72    │ 1.15    │ 0.12  │ 4/5   │ ✓ PASS     │
 # │ 003      │ 0.45    │ 0.98    │ 0.22  │ 3/5   │ ✗ FAIL     │
 # └──────────┴─────────┴─────────┴───────┴───────┴────────────┘
+```
+
+---
+
+### `combiner extract`
+
+Extrai artefatos OBFS (formato binário) para JSON legível.
+
+```bash
+combiner extract --pending-dir <PATH> [OPTIONS]
+```
+
+#### Opções
+
+| Flag | Descrição | Default |
+|------|-----------|---------|
+| `--pending-dir <PATH>` | Diretório com arquivos .obfs | Obrigatório |
+| `--run-ids <ID1,ID2>` | UUIDs específicos para extrair | Todos |
+| `--output-dir <PATH>` | Diretório de saída | `./extracted` |
+| `--top-n <N>` | Extrair apenas top N por Sharpe | Todos |
+| `--full <UUID>` | Extrair artefato completo com timeseries | - |
+
+#### Exemplos
+
+```bash
+# Extrair todos os artefatos pendentes
+combiner extract --pending-dir artifacts/pending --output-dir ./extracted
+
+# Extrair top 100 por Sharpe
+combiner extract --pending-dir artifacts/pending --top-n 100
+
+# Extrair artefato completo (inclui timeseries)
+combiner extract --pending-dir artifacts/pending \
+  --full abc12345-6789-abcd-ef01-234567890abc \
+  --output-dir ./full_artifacts
+
+# Output:
+# Found 5000 artifacts to process
+# Successfully read 4998 artifacts (2 errors)
+# Exporting 100 artifacts to ./extracted
+#   [1] abc12345... - Sharpe: 1.45, CAGR: 18.50%, Trades: 245
+#   [2] def67890... - Sharpe: 1.38, CAGR: 16.20%, Trades: 189
+#   ...
+# Extraction complete.
+```
+
+---
+
+### `combiner audit`
+
+Executa auditoria institucional de 6 marcos em um run do SCG.
+
+```bash
+combiner audit --run-dir <PATH> [OPTIONS]
+```
+
+#### Opções
+
+| Flag | Descrição | Default |
+|------|-----------|---------|
+| `--run-dir <PATH>` | Diretório do run SCG | Obrigatório |
+| `--output <PATH>` | Diretório para relatórios | `artifacts/audits` |
+| `--strict` | Tratar warnings como failures | false |
+| `--stop-on-fail` | Parar no primeiro marco que falhar | false |
+| `--verbose` | Output detalhado | false |
+
+#### Marcos de Auditoria
+
+| Marco | Nome | Verificações |
+|-------|------|--------------|
+| 0 | Initialization | Seeds, hashes, dates, output structure |
+| 1 | Data Integrity | Anti-lookahead, universe, timestamps |
+| 2 | Evolution | Diversity >10%, fitness variance, convergence |
+| 3 | Validation | WFA, OOS Sharpe, PBO, DSR, stress tests |
+| 4 | Promotion Gates | Thresholds, bundles completos |
+| 5 | Artifacts | Provenance, files, ranking consistency |
+
+#### Códigos de Saída
+
+| Código | Significado |
+|--------|-------------|
+| 0 | Todos os marcos PASS |
+| 1 | Um ou mais marcos FAIL |
+| 2 | Erro (arquivos faltando, input inválido) |
+
+#### Exemplo
+
+```bash
+# Auditoria básica
+combiner audit --run-dir output/scg/run_abc123
+
+# Auditoria estrita (warnings = failures)
+combiner audit --run-dir output/scg/run_abc123 --strict --verbose
+
+# Output:
+# ======================================================================
+#   AUDIT COMPLETE
+# ======================================================================
+#   Audit ID:     audit_79946199
+#   Output:       artifacts/audits/audit_79946199
+#   Duration:     12.34s
+#   Final Verdict: Pass
+# ======================================================================
+#
+#   Marcos Summary:
+#     ✓ Marco 0: Initialization - Pass
+#     ✓ Marco 1: DataIntegrity - Pass
+#     ✓ Marco 2: Evolution - Pass
+#     ✓ Marco 3: Validation - Pass
+#     ✓ Marco 4: PromotionGates - Pass
+#     ✓ Marco 5: Artifacts - Pass
+#
+#   Recomendação: APROVAR - Estratégia passou em todos os marcos
 ```
 
 ---

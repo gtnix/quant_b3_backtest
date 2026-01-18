@@ -725,7 +725,8 @@ mod tests {
     
     #[test]
     fn test_universe_config_defaults() {
-        let universe = UniverseConfigRef::default();
+        // Use serde deserialization to get proper defaults
+        let universe: UniverseConfigRef = toml::from_str("").unwrap();
         assert_eq!(universe.training_strategy, "purged_kfold");
         assert_eq!(universe.training_tech, "cpu_parallel");
         assert!(matches!(universe.training_model, TrainingModelRef::Multiple(_)));

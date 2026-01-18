@@ -79,9 +79,23 @@ impl InstitutionalThresholds {
         }
     }
     
-    /// Create with production-grade thresholds (strictest)
+    /// Create with production-grade thresholds (strict)
     pub fn production() -> Self {
         Self::default()
+    }
+
+    /// Create with maximum rigor thresholds (strictest - for proven strategies)
+    /// Use for final promotion to live trading
+    pub fn strict() -> Self {
+        Self {
+            min_oos_sharpe: 1.0,      // Must have positive risk-adjusted return
+            max_pbo: 0.10,            // Less than 10% probability of overfitting
+            min_dsr: 0.9,             // High deflated sharpe required
+            max_degradation_pct: 40.0, // Only 40% degradation allowed
+            min_split_pass_rate: 0.7,  // 70% of splits must pass
+            max_oos_drawdown: -0.15,   // Only 15% max drawdown
+            min_profit_factor_oos: 1.8, // Strong edge required
+        }
     }
     
     /// Create with lenient thresholds (very relaxed, for debugging/discovery)
@@ -100,9 +114,10 @@ impl InstitutionalThresholds {
     }
     
     /// Create thresholds from a string tier name.
-    /// Valid tiers: "production", "research", "lenient"
+    /// Valid tiers: "strict", "production", "research", "lenient"
     pub fn from_tier(tier: &str) -> Self {
         match tier.to_lowercase().as_str() {
+            "strict" | "max" | "live" => Self::strict(),
             "production" | "prod" => Self::production(),
             "research" | "dev" => Self::research(),
             "lenient" | "debug" | "discovery" => Self::lenient(),

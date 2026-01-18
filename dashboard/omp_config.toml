@@ -5,20 +5,20 @@
 
 [orchestrator]
 name = "Alpha Forge Strategy Miner"
-version = "1.0.0"
-loop_interval_secs = 30
+version = "2.0.0"
+loop_interval_secs = 15           # Faster loop for quicker campaign pickup
 log_level = "INFO"
 enabled = true
 
 # =============================================================================
-# RESOURCE LIMITS
+# RESOURCE LIMITS (Tuned for max throughput)
 # =============================================================================
 [resource_limits]
-max_cpu_util_pct = 85.0           # Don't start new campaigns if CPU > 85%
+max_cpu_util_pct = 90.0           # Allow up to 90% CPU utilization
 min_mem_available_mb = 400        # Don't start if free memory < 400MB
-min_disk_free_gb = 1.0            # Pause mining if disk < 1GB
+min_disk_free_gb = 2.0            # Pause mining if disk < 2GB (increased margin)
 max_concurrent_campaigns = 1      # Max simultaneous campaigns
-check_interval_secs = 30          # Resource check interval
+check_interval_secs = 15          # Faster resource checks
 
 # =============================================================================
 # MARKET CONFIGURATIONS (GLOBAL)
@@ -62,36 +62,46 @@ hall_of_fame_size = 25
 # BUDGET DEFAULTS
 # =============================================================================
 [budget]
-max_runtime_seconds = 900         # 15 minutes default
-workers = 8                       # Parallel workers
+max_runtime_seconds = 1800        # 30 minutes default (more thorough)
+workers = 14                      # Parallel workers (cores - 2 for 16-core system)
 seeds = [42, 123, 456]            # Default seeds for reproducibility
-top_k = 10                        # Top candidates for Stage B validation
+top_k = 15                        # Top candidates for Stage B validation
 persist_stage_a_top_n = 100       # Research candidates to persist
 stress_enabled = true             # Enable stress testing
+
+# =============================================================================
+# CLEANUP AUTOMATION
+# =============================================================================
+[cleanup]
+enabled = true
+max_runs_to_keep = 5              # Keep only 5 most recent runs
+trigger_disk_free_gb = 5.0        # Trigger cleanup when disk < 5GB
+compress_after_days = 7           # Compress runs older than 7 days
+delete_compressed_after_days = 30 # Delete compressed runs after 30 days
 
 # =============================================================================
 # VALIDATION THRESHOLDS
 # =============================================================================
 [validation]
-min_oos_sharpe_net = 0.5          # Minimum Sharpe for passing
-max_pbo = 0.15                    # Maximum PBO (lower is better)
-min_dsr = 0.8                     # Minimum Deflated Sharpe Ratio
-max_degradation = 0.40            # Max IS->OOS degradation
+min_oos_sharpe_net = 0.8          # Minimum Sharpe for passing (increased)
+max_pbo = 0.10                    # Maximum PBO (lower is better)
+min_dsr = 0.9                     # Minimum Deflated Sharpe Ratio (increased)
+max_degradation = 0.30            # Max IS->OOS degradation (stricter)
 min_trades_oos = 30               # Minimum trades in OOS period
-min_stress_passed = 4             # Minimum stress scenarios passed
+min_stress_passed = 5             # Minimum stress scenarios passed (increased)
 stress_total = 8                  # Total stress scenarios
 
 # =============================================================================
-# HALL OF FAME PROMOTION CRITERIA
+# HALL OF FAME PROMOTION CRITERIA (Strict)
 # =============================================================================
 [promotion]
 enabled = true
-min_oos_sharpe_net = 0.5          # Minimum Sharpe for hall of fame
-max_pbo = 0.20                    # Maximum PBO (lower is better)
-min_dsr = 0.4                     # Minimum DSR (relaxed for Stage B data)
-max_drawdown_net = 0.30           # Maximum 30% drawdown
-require_all_stress_passed = false # Relaxed for now
-require_gates_passed = false      # Accept NULL gates_passed
+min_oos_sharpe_net = 0.8          # Minimum Sharpe for hall of fame (increased)
+max_pbo = 0.10                    # Maximum PBO (stricter)
+min_dsr = 0.8                     # Minimum DSR (increased)
+max_drawdown_net = 0.20           # Maximum 20% drawdown (stricter)
+require_all_stress_passed = false # Still relaxed for flexibility
+require_gates_passed = true       # Now require gates_passed
 auto_copy_artifacts = true        # Copy artifacts on promotion
 
 # =============================================================================

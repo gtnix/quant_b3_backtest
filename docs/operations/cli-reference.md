@@ -1,7 +1,7 @@
 # Referência CLI
 
-**Versão**: 2.1.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 2.2.0  
+**Última Atualização**: 2026-01-18
 
 ## Visão Geral
 

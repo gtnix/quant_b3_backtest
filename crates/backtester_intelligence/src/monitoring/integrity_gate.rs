@@ -167,11 +167,9 @@ impl DataIntegrityReport {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        // Use OBFS by default for ultra-performance
-        let obfs_path = path.with_extension("obfs");
-        obfs::write_artifact(&obfs_path, self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            .map(|_| ())
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        fs::write(path, json)
     }
 
     /// Load report from JSON file.

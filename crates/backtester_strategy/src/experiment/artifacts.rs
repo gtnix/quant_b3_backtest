@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn test_write_and_read_artifacts() {
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn test_list_runs() {
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         // Create two runs
         let metadata = sample_metadata();
@@ -590,7 +590,7 @@ mod tests {
     #[test]
     fn test_artifact_schema_version() {
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -614,7 +614,7 @@ mod tests {
         // Comprehensive roundtrip test: write all artifacts, read them back,
         // verify all fields match the original values
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         let original_metadata = sample_metadata();
         let original_metrics = sample_metrics();
@@ -687,7 +687,7 @@ mod tests {
     fn test_metadata_json_valid_structure() {
         // Verify metadata.json is valid JSON with expected structure
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();
@@ -715,7 +715,7 @@ mod tests {
     fn test_trace_jsonl_valid_lines() {
         // Verify each line in trace.jsonl is valid JSON
         let temp = tempdir().unwrap();
-        let mut writer = ArtifactWriter::new(temp.path());
+        let mut writer = ArtifactWriter::new(temp.path()).with_format(ArtifactFormat::Legacy);
 
         let metadata = sample_metadata();
         let metrics = sample_metrics();

@@ -66,7 +66,7 @@ impl ExecutionModelConfig {
     pub fn mvp() -> Self {
         Self {
             delay_bars: 1,
-            slippage: SlippageModelConfig::Constant { bps: 10.0 },
+            slippage: SlippageModelConfig::constant_conservative(),
             fees: FeeModelConfig::from_tier(FeeTier::B3Retail),
             fill_policy: FillPolicyConfig::default(),
             bypass_for_debug: false,
@@ -200,7 +200,32 @@ pub enum SlippageModelConfig {
 
 impl Default for SlippageModelConfig {
     fn default() -> Self {
+        // Use VolatilityAdaptive as default for more realistic execution modeling
+        Self::VolatilityAdaptive {
+            base_bps: 5.0,
+            vol_factor: 0.3,
+            regime_multiplier: 2.0,
+            regime_vol_threshold: 0.25,
+        }
+    }
+}
+
+impl SlippageModelConfig {
+    /// Conservative constant slippage for backward compatibility
+    #[must_use]
+    pub fn constant_conservative() -> Self {
         Self::Constant { bps: 10.0 }
+    }
+
+    /// Institutional-grade volatility-adaptive slippage
+    #[must_use]
+    pub fn institutional() -> Self {
+        Self::VolatilityAdaptive {
+            base_bps: 5.0,
+            vol_factor: 0.3,
+            regime_multiplier: 2.0,
+            regime_vol_threshold: 0.25,
+        }
     }
 }
 

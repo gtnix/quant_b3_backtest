@@ -29,15 +29,20 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
           
       - name: Format check
         run: cargo fmt --all -- --check
         
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
         env:
           # Tests use mocks, no real API calls needed
           FRED_API_KEY: "test_key_for_ci"
@@ -65,7 +70,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-realdata-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       
       - name: Check for cache data
         id: check-cache
@@ -134,7 +141,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       
       # Restore baseline from cache
       - name: Restore benchmark baseline
@@ -147,34 +156,31 @@ jobs:
             benchmark-baseline-${{ runner.os }}-main
             benchmark-baseline-${{ runner.os }}-
       
+      - name: Install jq
+        run: sudo apt-get install -y jq bc
+
       - name: Run benchmarks
         run: |
-          # Run essential benchmarks
+          # Save baseline for comparison before running new benchmarks
+          if [ -d "target/criterion" ]; then
+            cp -r target/criterion target/criterion-baseline
+          fi
+          
           cargo bench --bench strategy_bench -- \
             "fast_soa/1000" \
             "symbol_table/lookup_5000" \
             --noplot 2>&1 | tee bench_output.txt
         env:
           FRED_API_KEY: "test_key_for_ci"
-      
-      - name: Check for performance regression
+
+      - name: Check for 5% regression
+        id: regression-check
         run: |
-          # Parse criterion output for regressions
-          # Criterion reports "Performance has regressed" for significant slowdowns
-          
-          if grep -q "Performance has regressed" bench_output.txt; then
-            echo "::error::Performance regression detected in benchmarks"
-            echo ""
-            echo "=== Regression Details ==="
-            grep -A5 "Performance has regressed" bench_output.txt
-            echo ""
-            echo "See PERFORMANCE_BASELINE.md for threshold definitions."
-            echo "If this is expected, update the baseline with:"
-            echo "  cargo bench --bench strategy_bench -- --save-baseline main"
+          chmod +x scripts/check-benchmark-regression.sh
+          if ! ./scripts/check-benchmark-regression.sh 5.0 target/criterion target/criterion-baseline 2>&1 | tee regression_output.txt; then
+            echo "::error::Performance regression exceeds 5% threshold"
             exit 1
           fi
-          
-          echo "No performance regression detected"
       
       # Save new baseline on main branch pushes
       - name: Save benchmark baseline
@@ -184,6 +190,21 @@ jobs:
           path: target/criterion
           key: benchmark-baseline-${{ runner.os }}-main-${{ github.sha }}
       
+      - name: Add to Job Summary
+        if: always()
+        run: |
+          echo "## Benchmark Regression Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Threshold:** 5% maximum regression allowed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f regression_output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat regression_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No regression data available (first run or no baseline)_" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         if: always()
@@ -191,8 +212,9 @@ jobs:
           name: benchmark-results
           path: |
             bench_output.txt
-            target/criterion/**/report/
-          retention-days: 14
+            regression_output.txt
+            target/criterion/**/new/estimates.json
+          retention-days: 7
 
   # ============================================================================
   # Calendar Integrity Guard
@@ -221,7 +243,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-calendar-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       
       - name: Run Calendar Sync Check
         id: sync

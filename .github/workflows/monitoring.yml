@@ -166,7 +166,7 @@ jobs:
         with:
           name: freshness-report-${{ github.run_number }}
           path: freshness_report.json
-          retention-days: 30
+          retention-days: 7
 
   data-integrity:
     name: Data Integrity Check
@@ -327,7 +327,7 @@ jobs:
         with:
           name: integrity-report-${{ github.run_number }}
           path: integrity_report.json
-          retention-days: 30
+          retention-days: 7
 
   rust-tests:
     name: Rust Monitoring Tests
@@ -350,7 +350,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-monitoring-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
       

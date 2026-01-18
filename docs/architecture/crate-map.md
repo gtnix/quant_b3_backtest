@@ -1,11 +1,11 @@
 # Mapa de Crates
 
-**Versão**: 3.1.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 4.0.0  
+**Última Atualização**: 2026-01-18
 
 ## Workspace Overview
 
-O sistema é organizado em um workspace Rust com 14 crates especializados, divididos em dois subsistemas:
+O sistema é organizado em um workspace Rust com 17 crates especializados, divididos em três subsistemas:
 
 1. **Backtester** - Motor de simulação de estratégias
 2. **Combiner (SCG)** - Sistema Combinador Generativo para descoberta evolutiva
@@ -329,6 +329,8 @@ backtester_engine   │   backtester_reports    │                 │
 | `status` | Verificar status de experimento |
 | `export-top` | Exportar top estratégias |
 | `validate` | Validar com Walk-Forward |
+| `extract` | Extrair artefatos OBFS para JSON |
+| `audit` | Auditoria institucional 6-marcos |
 
 **Subcomandos Factory**:
 | Comando | Descrição |
@@ -340,7 +342,7 @@ backtester_engine   │   backtester_reports    │                 │
 | `factory show` | Detalhes de campanha/run |
 | `factory compare` | Comparar candidatos |
 | `factory promote` | Promover candidatos |
-| `factory audit-data` | Auditoria de integridade |
+| `factory audit-data` | Auditoria de integridade de dados |
 | `factory export-top` | Exportar top N candidatos |
 
 **Localização**: `crates/combiner_cli/src/`
@@ -372,6 +374,53 @@ backtester_engine   │   backtester_reports    │                 │
 - `integrity_checker` - Verificador de integridade
 
 **Localização**: `crates/market_data/src/`
+
+---
+
+## Crate de Storage
+
+### `obfs`
+
+**Responsabilidade**: Sistema de armazenamento binário de alta performance para artefatos de backtest.
+
+**Características**:
+- Two-phase write strategy (concurrent-safe)
+- Compressão 7.1x via Parquet + Zstd
+- 8 KB/estratégia média
+- XXH3 + BLAKE3 integrity validation
+- LMDB metadata store
+
+**Módulos**:
+| Módulo | Responsabilidade |
+|--------|------------------|
+| `types.rs` | Core data structures (rkyv-compatible) |
+| `writer.rs` | Write path with auto-rotation |
+| `reader.rs` | Mmap read with validation |
+| `compression.rs` | Delta + Zstd pipeline |
+| `timeseries.rs` | Parquet columnar storage |
+| `pending_store.rs` | Phase 1: Isolated pending storage |
+| `consolidator.rs` | Phase 2: Streaming consolidation |
+| `store/` | LMDB-based metadata |
+| `adapters/` | Project artifact converters |
+
+**Localização**: `crates/obfs/src/`
+
+Ver [OBFS Integration Guide](../../crates/obfs/INTEGRATION.md) para documentação completa.
+
+---
+
+## Crate de Validação
+
+### `backtester_validation`
+
+**Responsabilidade**: Golden tests, crosscheck e validação de artefatos.
+
+**Símbolos Principais**:
+- `GoldenTest` - Testes contra baselines conhecidos
+- `Crosscheck` - Validação cruzada de métricas
+- `ArtifactValidator` - Validação de estrutura de artefatos
+
+**Localização**: `crates/backtester_validation/src/`
 
 ---
 
@@ -445,12 +494,15 @@ cargo bench --bench performance_bench
 ```
 dashboard/
 ├── src/                    # React frontend
-│   ├── pages/              # 10 páginas (Campaigns, Candidates, etc)
+│   ├── pages/              # 17 páginas
 │   ├── components/         # Charts, layout, UI
-│   ├── stores/             # Zustand dataStore
+│   ├── stores/             # Zustand dataStore, ompStore
 │   └── lib/                # Utilities
+├── server/                 # Express API Server
+│   ├── routes/             # API endpoints (omp, analytics, etc)
+│   └── services/           # Background services (hofSync)
 ├── src-tauri/              # Rust backend
-│   └── src/lib.rs          # Tauri commands (~1080 lines)
+│   └── src/lib.rs          # Tauri commands
 └── index.html
 ```
 
@@ -477,7 +529,15 @@ dashboard/
 | Comparison | Comparação multi-estratégia |
 | Walk-Forward | Validação OOS |
 | Monte Carlo | Simulação bootstrap |
-| Regimes | Análise por regime de mercado |
+| Regime Analysis | Análise por regime de mercado |
+| **Hall of Fame** | Estratégias elite promovidas |
+| **Miner Control** | Controle do OMP |
+| **Strategy Selector** | Seletor de estratégias |
+| **Audit Report** | Relatórios de auditoria |
+| Config Universe | Configuração de universo |
+| Config Budget | Configuração de compute |
+| Config Gates | Configuração de gates |
+| Config Trading | Configuração de trading |
 
 **Localização**: `dashboard/`
 
@@ -499,11 +559,13 @@ Ver [Dashboard README](../dashboard/README.md) para documentação completa.
 | Strategy | `backtester_intelligence` | ~4000 | Entry/Exit, WFA |
 | CLI | `backtester_cli` | ~400 | CLI backtester |
 | Tests | `backtester_tests` | ~800 | Testes |
+| Validation | `backtester_validation` | ~600 | Golden tests |
 | **SCG** | `combiner_core` | ~1500 | Genome, fitness |
-| **SCG** | `combiner_engine` | ~3000 | Evolução, Pareto |
+| **SCG** | `combiner_engine` | ~3500 | Evolução, Pareto, Audit |
 | **SCG** | `combiner_runner` | ~600 | Executor paralelo |
-| **SCG** | `combiner_cli` | ~1200 | CLI + Factory |
+| **SCG** | `combiner_cli` | ~1500 | CLI + Factory + Audit |
 | Data | `market_data` | ~2000 | Calendars, FX |
-| **Dashboard** | `dashboard` | ~3500 | UI Tauri (Rust+React) |
+| **Storage** | `obfs` | ~1500 | Binary storage |
+| **Dashboard** | `dashboard` | ~5000 | UI Tauri (Rust+React) |
 
-**Total**: ~24.000 linhas de código (Rust + TypeScript)
+**Total**: ~28.000 linhas de código (Rust + TypeScript)

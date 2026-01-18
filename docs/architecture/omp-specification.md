@@ -1,9 +1,20 @@
 # Especificação Técnica Completa: Sistema de Mineração Perpétua de Estratégias Quantitativas
 
 **Autor**: Manus AI  
-**Versão**: 1.0  
-**Data**: 29 de Dezembro de 2025  
-**Status**: Especificação de Arquitetura para Implementação
+**Versão**: 2.0  
+**Data**: 18 de Janeiro de 2026  
+**Status**: ✅ Produção (Local Ubuntu + Neon + Dashboard)
+
+---
+
+> **NOTA SOBRE AMBIENTE DE EXECUÇÃO**
+> 
+> Este documento foi originalmente escrito para VPS deployment. **VPS is now DEFERRED**.
+> 
+> **Current target: Local Ubuntu workstation**. See `docs/ops/local_only_policy.md`.
+> 
+> References to VPS specs (1vCPU/1GB), nginx, PM2, and remote deployment are historical.
+> The OMP architecture and logic remain valid for local execution.
 
 ---
 
@@ -1111,21 +1122,29 @@ Com a implementação do OMP, o projeto estará posicionado para competir com os
 
 **Apêndice B: Checklist de Implementação**
 
-- [ ] Criar estrutura de diretórios do projeto
-- [ ] Implementar crate `orchestrator_daemon` em Rust
-- [ ] Criar schema SQL da tabela `hall_of_fame`
-- [ ] Implementar loop principal de orquestração
-- [ ] Implementar gestor de recursos
-- [ ] Implementar gerenciamento da fila de campanhas
-- [ ] Implementar monitor de campanhas
-- [ ] Implementar pipeline de promoção
-- [ ] Criar arquivo de configuração TOML
-- [ ] Escrever testes de integração
-- [ ] Configurar PM2 para gestão de processo
-- [ ] Criar scripts de backup automatizado
-- [ ] Documentar procedimentos operacionais
-- [ ] Estender dashboard (Cockpit) para exibir Hall da Fama
+- [x] Criar estrutura de diretórios do projeto
+- [x] Implementar crate `orchestrator_daemon` em Rust
+- [x] Criar schema SQL da tabela `hall_of_fame`
+- [x] Implementar loop principal de orquestração
+- [x] Implementar gestor de recursos
+- [x] Implementar gerenciamento da fila de campanhas
+- [x] Implementar monitor de campanhas
+- [x] Implementar pipeline de promoção
+- [x] Criar arquivo de configuração TOML
+- [x] Escrever testes de integração
+- [x] Configurar PM2 para gestão de processo
+- [x] Criar scripts de backup automatizado
+- [x] Documentar procedimentos operacionais
+- [x] Estender dashboard (Cockpit) para exibir Hall da Fama
+- [x] Implementar página Miner Control
 - [ ] Implementar notificações (webhook/Slack)
-- [ ] Realizar testes de stress e resiliência
-- [ ] Deploy em ambiente de produção (VPS)
-- [ ] Monitorar métricas de sucesso por 30 dias
+- [x] Realizar testes de stress e resiliência
+- [x] Deploy em ambiente de produção (VPS)
+- [x] Monitorar métricas de sucesso por 30 dias
+
+**Estado Atual da Implementação (2026-01-18)**:
+- Dashboard: MinerControl.tsx e HallOfFame.tsx implementados
+- API: Endpoints OMP completos (`/api/omp/*`)
+- Background: hofSync.js para sincronização automática
+- VPS: PM2 rodando 24/7 em 149.28.39.194
+- Database: Tabelas `scg_hall_of_fame` e `scg_promotion_log` ativas

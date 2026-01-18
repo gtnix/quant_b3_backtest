@@ -385,6 +385,7 @@ fn run_backtest(
     let config = UnifiedEngineConfig {
         initial_capital: dec!(1_000_000),
         enable_dividends: false,
+        trace_enabled: true,
         ..Default::default()
     };
 

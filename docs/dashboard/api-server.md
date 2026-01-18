@@ -1,13 +1,13 @@
 # API Server - Referência
 
-**Versão**: 2.2.0  
-**Última Atualização**: 2025-12-30
+**Versão**: 3.0.0  
+**Última Atualização**: 2026-01-18
 
 ---
 
 ## Visão Geral
 
-O API Server (`server.js`) fornece uma API REST para o Dashboard funcionar em Browser Mode e VPS, sem necessidade do Tauri desktop app.
+O API Server (`server.js`) fornece uma API REST para o Dashboard funcionar em Browser Mode, sem necessidade do Tauri desktop app.
 
 ### Características
 
@@ -49,9 +49,10 @@ npm run dev
 
 Frontend em `http://localhost:5173` conecta automaticamente à API.
 
-### Produção (VPS)
+### Produção - DEFERRED
 
-Ver [VPS Deployment](vps-deployment.md) para configuração com nginx + PM2.
+> **NOTA**: VPS deployment is DEFERRED. See `docs/ops/local_only_policy.md`.
+> For historical reference: [VPS Deployment](vps-deployment.md)
 
 ---
 
@@ -122,6 +123,18 @@ Ver [VPS Deployment](vps-deployment.md) para configuração com nginx + PM2.
 |----------|--------|-----------|
 | `/api/events` | GET | Stream SSE com reconnection support |
 | `/api/poll-changes` | GET | Polling de mudanças (fallback) |
+
+---
+
+### Analytics
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/api/analytics/summary` | GET | Resumo de métricas do sistema |
+| `/api/analytics/candidates-by-day` | GET | Candidatos descobertos por dia |
+| `/api/analytics/sharpe-distribution` | GET | Distribuição de Sharpe |
+| `/api/analytics/pbo-distribution` | GET | Distribuição de PBO |
+| `/api/analytics/top-campaigns` | GET | Top campanhas por performance |
 
 ---
 
@@ -680,7 +693,7 @@ CORS habilitado para todos os origins em desenvolvimento:
 app.use(cors());
 ```
 
-Em produção (VPS), nginx gerencia o proxy reverso.
+Em produção local, CORS pode ser desabilitado conforme necessário.
 
 ---
 

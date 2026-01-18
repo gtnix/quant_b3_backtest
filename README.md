@@ -29,7 +29,9 @@ Sistema de backtesting institucional de alta performance para os mercados B3 (Br
 - **Precisão**: Cálculos financeiros com `rust_decimal`
 - **Auditabilidade**: Rastreabilidade total de decisões e artefatos
 - **SCG**: Sistema Combinador Generativo com algoritmos genéticos
+- **OMP**: Orquestrador de Mineração Perpétua (24/7)
 - **OBFS**: Armazenamento binário otimizado (7.1x compressão, 8 KB/estratégia)
+- **Hall of Fame**: Repositório de estratégias elite validadas
 - **Dashboard**: Visualização terminal-style (Tauri + React)
 
 ---
@@ -78,10 +80,13 @@ npm run tauri dev
 | [Visão Geral](docs/architecture/system-overview.md) | Arquitetura do sistema |
 | [Mapa de Crates](docs/architecture/crate-map.md) | Responsabilidades de cada crate |
 | [SCG Overview](docs/scg/overview.md) | Sistema Combinador Generativo |
+| [OMP Specification](docs/architecture/omp-specification.md) | Orquestrador de Mineração Perpétua |
 | [Strategy Factory](docs/strategy_factory.md) | Orquestração de campanhas |
 | [OBFS Integration](crates/obfs/INTEGRATION.md) | Sistema de armazenamento binário |
 | [CLI Reference](docs/operations/cli-reference.md) | Comandos backtester |
-| [Combiner CLI](docs/scg/cli-reference.md) | Comandos combiner |
+| [Combiner CLI](docs/scg/cli-reference.md) | Comandos combiner (extract, audit) |
+| [Scripts Reference](docs/operations/scripts-reference.md) | Scripts operacionais |
+| [Hall of Fame](docs/dashboard/hall-of-fame.md) | Estratégias elite |
 | [Artefatos](docs/operations/artifacts.md) | Estrutura de output |
 
 ---
@@ -113,13 +118,14 @@ Terminal-style dashboard para visualização de estratégias e evolução do SCG
 - Candidate Explorer (tabela interativa)
 - Pareto Frontier 3D
 - Backtest Drilldown
+- **Hall of Fame** - Estratégias elite promovidas
+- **Miner Control** - Controle do OMP 24/7
+- **Audit Reports** - Auditoria institucional
 
 ```bash
 cd dashboard
 npm run tauri dev
 ```
-
-![Dashboard Preview](docs/images/dashboard-preview.png)
 
 ---
 

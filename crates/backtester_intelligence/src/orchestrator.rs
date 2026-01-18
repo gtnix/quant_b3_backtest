@@ -75,11 +75,45 @@ impl Default for OrchestratorConfig {
     }
 }
 
+/// Scratch buffers for zero-allocation hot path in orchestrator.
+///
+/// # Performance
+///
+/// Pre-allocated buffers that are cleared and reused each rebalance,
+/// avoiding HashMap/Vec allocations in the daily loop.
+#[derive(Debug, Default)]
+struct OrchestratorScratch {
+    /// Reusable buffer for position map (symbol -> shares)
+    position_map: HashMap<String, i64>,
+    /// Reusable buffer for order netting
+    order_map: HashMap<String, (i64, Price)>,
+    /// Reusable buffer for net orders
+    net_orders: Vec<Order>,
+}
+
+impl OrchestratorScratch {
+    fn new() -> Self {
+        Self {
+            position_map: HashMap::with_capacity(64),
+            order_map: HashMap::with_capacity(32),
+            net_orders: Vec::with_capacity(32),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.position_map.clear();
+        self.order_map.clear();
+        self.net_orders.clear();
+    }
+}
+
 /// Rebalance Orchestrator - coordinates Entry and Exit with netting.
 pub struct RebalanceOrchestrator {
     entry_engine: EntryEngine,
     exit_engine: ExitEngine,
     config: OrchestratorConfig,
+    /// Scratch buffers for hot path (avoids allocations)
+    scratch: std::cell::RefCell<OrchestratorScratch>,
 }
 
 impl RebalanceOrchestrator {
@@ -88,6 +122,7 @@ impl RebalanceOrchestrator {
             entry_engine: EntryEngine::new(config.entry.clone()),
             exit_engine: ExitEngine::new(config.exit.clone()),
             config,
+            scratch: std::cell::RefCell::new(OrchestratorScratch::new()),
         }
     }
 
@@ -113,12 +148,14 @@ impl RebalanceOrchestrator {
         equity: Money,
         peak_equity: Money,
     ) -> (RebalanceStepResult, RebalanceStepAudit) {
-        // Build position map for entry engine
-        let position_map: HashMap<String, i64> = positions
-            .iter()
-            .filter(|p| p.market == market)
-            .map(|p| (p.symbol.clone(), p.shares))
-            .collect();
+        // Use scratch buffers (hot path optimization - avoids allocations)
+        let mut scratch = self.scratch.borrow_mut();
+        scratch.clear();
+        
+        // Build position map for entry engine (reuses buffer)
+        for p in positions.iter().filter(|p| p.market == market) {
+            scratch.position_map.insert(p.symbol.clone(), p.shares);
+        }
 
         // Step 1: Evaluate exits (already uses Money)
         let exit_ctx = ExitContext {
@@ -142,10 +179,13 @@ impl RebalanceOrchestrator {
         // Step 3: Evaluate entries with updated cash
         let entry_ctx = EntryContext::new(date, available_cash, market);
         let (entry_result, entry_orders, entry_audit) = 
-            self.entry_engine.evaluate(&entry_ctx, candidates, &position_map);
+            self.entry_engine.evaluate(&entry_ctx, candidates, &scratch.position_map);
 
-        // Step 4: Net orders
-        let (net_orders, netting_count) = self.net_orders(&exit_orders, &entry_orders, market);
+        // Step 4: Net orders (uses scratch buffers)
+        // Decompose scratch to avoid multiple mutable borrows
+        let OrchestratorScratch { position_map: _, order_map, net_orders: net_orders_buf } = &mut *scratch;
+        let netting_count = self.net_orders_into(&exit_orders, &entry_orders, market, order_map, net_orders_buf);
+        let net_orders = net_orders_buf.clone();
 
         // Step 5: Calculate final cash (fixed-point)
         let orders_impact: Money = net_orders
@@ -187,65 +227,73 @@ impl RebalanceOrchestrator {
         (result, audit)
     }
 
-    /// Net orders: combine BUY and SELL for same symbol into single order.
+    /// Net orders into provided buffers (hot path - zero allocation).
     ///
-    /// Rules:
-    /// - If SELL 500 + BUY 300 = SELL 200 (net)
-    /// - If BUY 500 + SELL 300 = BUY 200 (net)  
-    /// - If SELL 500 + BUY 500 = no order (cancel out)
-    /// - Costs calculated on NET order only
+    /// # Performance
     ///
-    /// # Performance (Milestone 6)
-    ///
-    /// Uses fixed-point Price for netting calculations.
-    fn net_orders(
+    /// Uses pre-allocated buffers to avoid HashMap/Vec creation in daily loop.
+    fn net_orders_into(
         &self,
         exit_orders: &[Order],
         entry_orders: &[Order],
         market: Market,
-    ) -> (Vec<Order>, usize) {
-        let mut order_map: HashMap<String, (i64, Price)> = HashMap::new();
+        order_map: &mut HashMap<String, (i64, Price)>,
+        net_orders: &mut Vec<Order>,
+    ) -> usize {
+        order_map.clear();
+        net_orders.clear();
         let mut netting_count = 0;
 
         // Add exit orders (SELL = negative shares)
         for order in exit_orders {
             let entry = order_map.entry(order.symbol.clone()).or_insert((0, order.price));
-            entry.0 -= order.shares; // SELL reduces position
+            entry.0 -= order.shares;
         }
 
         // Add entry orders (BUY = positive shares)
         for order in entry_orders {
             let entry = order_map.entry(order.symbol.clone()).or_insert((0, order.price));
             let had_opposite = entry.0 != 0 && (entry.0 > 0) != (order.shares > 0);
-            entry.0 += order.shares; // BUY increases position
+            entry.0 += order.shares;
             if had_opposite {
                 netting_count += 1;
             }
         }
 
-        // Convert to net orders
         let cost_bps = match market {
             Market::BR => self.config.br_cost_bps,
             Market::US => self.config.us_cost_bps,
         };
 
-        let net_orders: Vec<Order> = order_map
-            .into_iter()
-            .filter(|(_, (shares, _))| *shares != 0)
-            .map(|(symbol, (net_shares, price))| {
-                let (side, shares) = if net_shares > 0 {
-                    (OrderSide::Buy, net_shares)
-                } else {
-                    (OrderSide::Sell, -net_shares)
-                };
+        for (symbol, (net_shares, price)) in order_map.iter() {
+            if *net_shares == 0 {
+                continue;
+            }
+            let (side, shares) = if *net_shares > 0 {
+                (OrderSide::Buy, *net_shares)
+            } else {
+                (OrderSide::Sell, -*net_shares)
+            };
+            let notional = price.mul_shares(shares);
+            let cost = notional.mul_f64(cost_bps / 10000.0);
+            net_orders.push(Order::new(symbol.clone(), side, shares, *price, cost));
+        }
 
-                let notional = price.mul_shares(shares);
-                let cost = notional.mul_f64(cost_bps / 10000.0);
+        netting_count
+    }
 
-                Order::new(symbol, side, shares, price, cost)
-            })
-            .collect();
-
+    /// Net orders: combine BUY and SELL for same symbol into single order.
+    /// (Used by tests - allocates new HashMap/Vec)
+    #[cfg(test)]
+    fn net_orders(
+        &self,
+        exit_orders: &[Order],
+        entry_orders: &[Order],
+        market: Market,
+    ) -> (Vec<Order>, usize) {
+        let mut order_map = HashMap::new();
+        let mut net_orders = Vec::new();
+        let netting_count = self.net_orders_into(exit_orders, entry_orders, market, &mut order_map, &mut net_orders);
         (net_orders, netting_count)
     }
 }

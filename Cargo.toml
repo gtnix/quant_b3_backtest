@@ -99,6 +99,7 @@ incremental = false    # Disable incremental compilation (saves ~50% disk)
 [profile.test]
 inherits = "dev"
 opt-level = 1         # Slightly faster tests
+debug = 0             # No debug symbols (saves ~2GB disk)
 
 # Ultra-performance profile for production runs
 [profile.ultra]
@@ -115,4 +116,11 @@ inherits = "dev"
 opt-level = 1          # Light optimization for faster execution
 incremental = false    # No incremental cache (saves disk space)
 debug = 0              # No debug symbols (saves disk space)
+
+# CI profile - optimized for GitHub Actions with caching
+[profile.ci]
+inherits = "dev"
+opt-level = 1          # Faster test execution
+incremental = true     # Leverage CI cache for faster rebuilds
+debug = 0              # No debug symbols (saves cache space)
 

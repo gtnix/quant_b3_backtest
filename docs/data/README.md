@@ -1,6 +1,6 @@
 # Documentação de Dados
 
-**Última Atualização**: 2025-12-30
+**Última Atualização**: 2026-01-18
 
 Esta seção contém documentação relacionada a fontes de dados, providers e status de ingestão.
 
@@ -13,6 +13,9 @@ Esta seção contém documentação relacionada a fontes de dados, providers e s
 | [Data Providers Policy](data-providers-policy.md) | **Política oficial** de providers por mercado |
 | [Provider Due Diligence](provider-due-diligence.md) | Avaliação de providers de dados US (yfinance, Alpha Vantage, etc) |
 | [US DataHub Status](us-datahub-status.md) | Status report do DataHub US (cobertura de símbolos, qualidade) |
+| **[DataHub B3](datahub-b3.md)** | Módulo Python para ingestão B3 (Brapi) |
+| **[DataHub US](datahub-us.md)** | Módulo Python para ingestão US (yfinance) |
+| **[DataHub FX](datahub-fx.md)** | Módulo Python para taxas de câmbio (BCB/FRED) |
 
 ---
 
@@ -46,14 +49,14 @@ Esta seção contém documentação relacionada a fontes de dados, providers e s
 
 ## DataHub Modules
 
-O sistema possui três módulos de ingestão de dados:
+O sistema possui três módulos de ingestão de dados Python + um crate Rust:
 
-| Módulo | Linguagem | Mercado | Descrição |
-|--------|-----------|---------|-----------|
-| `datahub_b3` | Python | B3 | OHLCV, índices, intraday via Brapi |
-| `datahub_us` | Python | US | OHLCV, índices, dividendos via yfinance |
-| `datahub_fx` | Python | FX | Taxas de câmbio via BCB/FRED |
-| `market_data` | Rust | Ambos | Calendários, universe, client Brapi |
+| Módulo | Linguagem | Mercado | Documentação |
+|--------|-----------|---------|--------------|
+| `datahub_b3` | Python | B3 | **[DataHub B3](datahub-b3.md)** |
+| `datahub_us` | Python | US | **[DataHub US](datahub-us.md)** |
+| `datahub_fx` | Python | FX | **[DataHub FX](datahub-fx.md)** |
+| `market_data` | Rust | Ambos | [Crate](../../crates/market_data/) |
 
 ### Comandos Principais
 
