@@ -274,10 +274,14 @@ router.post('/omp/resume', (req, res) => {
 router.post('/omp/quick-start', async (req, res) => {
   if (ompState.currentCampaign) return res.status(400).json({ error: 'Campaign already running' });
   
-  const mode = req.body.mode || 'quick'; // 'quick' (15min) or 'full' (1h)
-  const market = req.body.market || 'br';
-  const runtimeMins = mode === 'full' ? 60 : 15;
-  const workers = mode === 'full' ? 0 : Math.floor(os.cpus().length / 2); // full=auto, quick=50%
+  const mode = req.body.mode || 'quick'; // 'quick' (50% CPU) or 'full' (100% CPU)
+  const indefinite = req.body.indefinite || false; // true = roda até parar manualmente
+  const markets = req.body.markets || ['BR']; // Array de mercados
+  const market = markets.join('+');
+  
+  // Indefinite mode: 24h (86400 seg), senão usa os tempos padrão
+  const runtimeMins = indefinite ? 1440 : (mode === 'full' ? 60 : 15);
+  const workers = mode === 'full' ? 0 : Math.floor(os.cpus().length / 2); // full=auto (100%), quick=50%
   
   const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
   if (!fs.existsSync(combinerPath)) {
@@ -290,7 +294,8 @@ router.post('/omp/quick-start', async (req, res) => {
   }
   
   const runId = `run_${Date.now().toString(36)}`;
-  console.log(`\n🚀 [OMP] Quick start: ${mode} mode (${runtimeMins}min, ${workers || 'auto'} workers)`);
+  const cpuPercent = mode === 'full' ? '100%' : '50%';
+  console.log(`\n🚀 [OMP] Iniciando: ${mode === 'full' ? 'NOITE' : 'DIA'} (${cpuPercent} CPU, ${indefinite ? 'indefinido' : runtimeMins + 'min'}, ${market})`);
   
   // Build command with runtime override
   const args = ['run', '--config', configPath, '--ultra', '--seed', '42'];
@@ -307,9 +312,12 @@ router.post('/omp/quick-start', async (req, res) => {
   
   ompState.status = 'running';
   ompState.startedAt = new Date().toISOString();
+  
+  const modeName = mode === 'full' ? 'Noite (100% CPU)' : 'Dia (50% CPU)';
+  
   ompState.currentCampaign = {
     campaignId: `quick_${mode}`,
-    campaignName: mode === 'full' ? 'Completo (1h)' : 'Rápido (15min)',
+    campaignName: `${modeName} • ${market}`,
     runId,
     market,
     status: 'running',
@@ -319,7 +327,8 @@ router.post('/omp/quick-start', async (req, res) => {
     currentGeneration: 0,
     bestSharpe: null,
     candidatesEvaluated: 0,
-    mode
+    mode,
+    indefinite
   };
   
   scgProcess.stdout.on('data', (data) => {

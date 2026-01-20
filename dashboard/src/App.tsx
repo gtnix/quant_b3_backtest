@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { Candidates } from './pages/Candidates';
@@ -23,13 +22,6 @@ import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
 import { platform, features } from './lib/platform';
 import { createSSEConnection, type SSEEvent } from './lib/commands';
-
-// Page transition variants
-const pageVariants = {
-  initial: { opacity: 0, x: 10 },
-  animate: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: -10 },
-};
 
 export type Page = 
   | 'miner'
@@ -63,6 +55,15 @@ function App() {
       startWatcher();
     }
   }, [artifactsRoot]);
+
+  // Listen for navigation events from child components
+  useEffect(() => {
+    const handleNavigate = (e: CustomEvent<Page>) => {
+      setCurrentPage(e.detail);
+    };
+    window.addEventListener('navigate', handleNavigate as EventListener);
+    return () => window.removeEventListener('navigate', handleNavigate as EventListener);
+  }, []);
 
   // Initialize SSE connection for browser mode
   useEffect(() => {
@@ -164,19 +165,10 @@ function App() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header sseConnected={sseConnected} />
         <main className="flex-1 overflow-auto p-6 grid-bg">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentPage}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              variants={pageVariants}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="h-full"
-            >
-              {renderPage()}
-            </motion.div>
-          </AnimatePresence>
+          {/* Transição simples sem AnimatePresence para melhor compatibilidade Tauri */}
+          <div key={currentPage} className="h-full animate-fade-in">
+            {renderPage()}
+          </div>
         </main>
       </div>
       {/* Global Glossary Overlay (activated by '?' key) */}
