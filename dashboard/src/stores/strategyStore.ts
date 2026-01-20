@@ -85,7 +85,8 @@ interface StrategyState {
   getSelectedCount: () => number;
 }
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3001' : '';
+// Always use explicit localhost:3001 for API calls (works in Tauri and dev)
+const API_BASE = 'http://localhost:3001';
 
 export const useStrategyStore = create<StrategyState>()(
   persist(
