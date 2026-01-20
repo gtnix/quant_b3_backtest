@@ -1,0 +1,43 @@
+# =============================================================================
+# All Day Mining - 8 hours with 50% CPU, ephemeral artifacts
+# Run with: ./scripts/desktop_mining.sh
+# =============================================================================
+
+[campaign]
+name = "all_day_mining"
+description = "Long-running mining session (8h) with low resource usage"
+
+[evolution]
+population_size = 100          # Smaller population for smoother experience
+max_generations = 100000       # Very high, will use runtime limit
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08
+convergence_generations = 200  # Higher to prevent early stop
+max_runtime_seconds = 28800    # 8 hours
+workers = 8                    # 50% of 16 CPUs - adjust if needed
+hall_of_fame_size = 50         # Keep more candidates for analysis
+
+# Key: ephemeral mode for minimal disk usage
+ephemeral_artifacts = true
+
+[fitness]
+sharpe_weight = 1.0
+cagr_weight = 0.8
+drawdown_weight = 0.6
+sortino_weight = 0.4
+profit_factor_weight = 0.3
+
+[target]
+market_data = "data/market_data_ibov.csv"
+benchmark = "IBOV"
+start_date = "2020-01-01"
+end_date = "2024-12-31"
+initial_capital = 1000000.0
+currency = "BRL"
+
+[output]
+artifact_format = "obfs"
+save_generations = false       # Don't save every generation (saves disk)
+save_all_genomes = false       # Only save HoF

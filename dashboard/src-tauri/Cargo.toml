@@ -13,7 +13,7 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.3" }
+tauri-build = { version = "2.5.3", features = [] }
 
 [dependencies]
 serde_json = "1.0"
@@ -32,5 +32,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 lru = "0.12"
 parking_lot = "0.12"
-regex-lite = "0.1"[target.'cfg(unix)'.dependencies]
+regex-lite = "0.1"
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
