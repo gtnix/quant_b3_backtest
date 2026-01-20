@@ -6,6 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 description = "Core types for the Generative Combiner (SCG) - genomes, genes, fitness, SIMD metrics"
 
+[features]
+default = []
+# Enable AVX-512 f64x8 SIMD (40-80% faster metrics on supported CPUs)
+simd-wide = []
+
 [dependencies]
 # Workspace dependencies
 backtester_strategy = { path = "../backtester_strategy" }

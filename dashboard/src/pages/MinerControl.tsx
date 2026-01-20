@@ -1,15 +1,19 @@
 /**
- * MinerControl - Simple Strategy Mining Dashboard
- * 2 buttons: Quick (15min) or Full (1h)
+ * MinerControl - Premium Strategy Mining Dashboard
+ * Visual de alto nível com animações fluidas
  */
 
 import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Square, HardDrive, Trophy, Zap, 
   Rocket, Timer, Terminal, Settings
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
 import platformConfig from '../lib/platform';
+import { GlassPanel } from '../components/premium/GlassPanel';
+import { CountUp } from '../components/premium/CountUp';
+import { PulseIndicator } from '../components/premium/PulseIndicator';
 
 // =============================================================================
 // SIMPLE START BUTTONS
@@ -23,18 +27,42 @@ function StartButtons({
   isLoading: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center gap-6 py-8">
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="flex flex-col items-center gap-6 py-8"
+    >
       <div className="text-center mb-4">
-        <h2 className="text-2xl font-bold text-white mb-2">Iniciar Mining</h2>
-        <p className="text-slate-400 text-sm">Escolha o tempo de execução</p>
+        <motion.h2 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.1 }}
+          className="text-2xl font-bold text-white mb-2"
+        >
+          Iniciar Mining
+        </motion.h2>
+        <motion.p 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="text-slate-400 text-sm"
+        >
+          Escolha o tempo de execução
+        </motion.p>
       </div>
       
       <div className="flex gap-6">
         {/* Quick Start Button */}
-        <button
+        <motion.button
           onClick={() => onQuickStart('quick')}
           disabled={isLoading}
-          className="group flex flex-col items-center gap-4 p-8 bg-slate-800/50 hover:bg-emerald-600/20 border-2 border-slate-700 hover:border-emerald-500 rounded-2xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+          whileHover={{ scale: 1.05, y: -4 }}
+          whileTap={{ scale: 0.98 }}
+          className="group flex flex-col items-center gap-4 p-8 bg-slate-800/50 backdrop-blur-sm hover:bg-emerald-600/20 border-2 border-slate-700 hover:border-emerald-500 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)] rounded-2xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
             <Timer className="w-10 h-10 text-emerald-400" />
@@ -44,13 +72,18 @@ function StartButtons({
             <div className="text-3xl font-mono font-bold text-emerald-400">15 min</div>
             <div className="text-xs text-slate-500 mt-2">50% CPU • Exploração</div>
           </div>
-        </button>
+        </motion.button>
 
         {/* Full Start Button */}
-        <button
+        <motion.button
           onClick={() => onQuickStart('full')}
           disabled={isLoading}
-          className="group flex flex-col items-center gap-4 p-8 bg-slate-800/50 hover:bg-amber-600/20 border-2 border-slate-700 hover:border-amber-500 rounded-2xl transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
+          whileHover={{ scale: 1.05, y: -4 }}
+          whileTap={{ scale: 0.98 }}
+          className="group flex flex-col items-center gap-4 p-8 bg-slate-800/50 backdrop-blur-sm hover:bg-amber-600/20 border-2 border-slate-700 hover:border-amber-500 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)] rounded-2xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <div className="w-20 h-20 rounded-full bg-amber-500/20 flex items-center justify-center group-hover:bg-amber-500/30 transition-colors">
             <Rocket className="w-10 h-10 text-amber-400" />
@@ -60,9 +93,9 @@ function StartButtons({
             <div className="text-3xl font-mono font-bold text-amber-400">1 hora</div>
             <div className="text-xs text-slate-500 mt-2">Máximo CPU • Produção</div>
           </div>
-        </button>
+        </motion.button>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -167,35 +200,46 @@ function StatsBar({
   const isLow = diskFreeGb < 5;
 
   return (
-    <div className="grid grid-cols-2 gap-4 max-w-lg mx-auto">
+    <motion.div 
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="grid grid-cols-2 gap-4 max-w-lg mx-auto"
+    >
       {/* Hall of Fame */}
-      <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl">
+      <GlassPanel glow="gold" className="flex items-center gap-3 p-4">
         <Trophy className="w-6 h-6 text-amber-400" />
         <div>
-          <div className="text-2xl font-mono font-bold text-white">{hofCount}</div>
+          <CountUp value={hofCount} decimals={0} className="text-2xl font-mono font-bold text-white" />
           <div className="text-xs text-slate-500">Hall of Fame</div>
         </div>
-      </div>
+      </GlassPanel>
 
       {/* Disk */}
-      <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl">
-        <HardDrive className={`w-6 h-6 ${isLow ? 'text-rose-400' : 'text-slate-400'}`} />
+      <GlassPanel glow={isLow ? 'red' : 'green'} className="flex items-center gap-3 p-4">
+        <HardDrive className={`w-6 h-6 ${isLow ? 'text-rose-400' : 'text-emerald-400'}`} />
         <div className="flex-1">
           <div className="flex justify-between items-baseline">
-            <span className={`text-2xl font-mono font-bold ${isLow ? 'text-rose-400' : 'text-white'}`}>
-              {diskFreeGb.toFixed(1)}
-            </span>
-            <span className="text-xs text-slate-500">GB livres</span>
-          </div>
-          <div className="h-1.5 bg-slate-700 rounded-full mt-1 overflow-hidden">
-            <div 
-              className={`h-full ${isLow ? 'bg-rose-500' : 'bg-emerald-500'}`}
-              style={{ width: `${usedPct}%` }}
+            <CountUp 
+              value={diskFreeGb} 
+              decimals={1} 
+              suffix=" GB"
+              className={`text-2xl font-mono font-bold ${isLow ? 'text-rose-400' : 'text-white'}`}
             />
           </div>
+          <motion.div 
+            className="h-1.5 bg-slate-700 rounded-full mt-1 overflow-hidden"
+          >
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${usedPct}%` }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
+              className={`h-full ${isLow ? 'bg-rose-500' : 'bg-emerald-500'}`}
+            />
+          </motion.div>
         </div>
-      </div>
-    </div>
+      </GlassPanel>
+    </motion.div>
   );
 }
 
@@ -261,26 +305,41 @@ export function MinerControl() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       {/* Header */}
-      <div className="border-b border-slate-800 px-6 py-4">
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="border-b border-slate-800 px-6 py-4 backdrop-blur-sm bg-slate-900/50"
+      >
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Zap className="w-6 h-6 text-amber-400" />
-            <span className="font-bold text-xl tracking-tight">STRATEGY MINER</span>
+            <motion.div
+              animate={{ rotate: isRunning ? 360 : 0 }}
+              transition={{ duration: 2, repeat: isRunning ? Infinity : 0, ease: 'linear' }}
+            >
+              <Zap className="w-6 h-6 text-amber-400" />
+            </motion.div>
+            <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+              STRATEGY MINER
+            </span>
           </div>
           
-          {/* Status badge */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
-            isRunning 
-              ? 'bg-emerald-500/10 border border-emerald-500/30' 
-              : 'bg-slate-800/50 border border-slate-700'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`} />
+          {/* Status badge with PulseIndicator */}
+          <GlassPanel 
+            glow={isRunning ? 'green' : 'none'} 
+            intensity="low"
+            className="flex items-center gap-2 px-3 py-1.5"
+          >
+            <PulseIndicator 
+              status={isRunning ? 'running' : 'offline'} 
+              size="sm"
+            />
             <span className={`text-sm font-medium ${isRunning ? 'text-emerald-400' : 'text-slate-500'}`}>
               {isRunning ? (isExternal ? 'CLI Ativo' : 'Rodando') : 'Offline'}
             </span>
-          </div>
+          </GlassPanel>
         </div>
-      </div>
+      </motion.div>
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto p-6">
@@ -293,22 +352,40 @@ export function MinerControl() {
           />
         </div>
 
-        {/* Main Action Area */}
-        {isRunning ? (
-          <RunningStatus
-            campaignName={currentCampaign?.campaignName || 'Mining'}
-            elapsedSecs={uptimeSeconds}
-            currentGeneration={currentCampaign?.currentGeneration || 0}
-            bestSharpe={currentCampaign?.bestSharpe || null}
-            isExternal={isExternal}
-            onStop={stop}
-          />
-        ) : (
-          <StartButtons 
-            onQuickStart={handleQuickStart}
-            isLoading={isLoading}
-          />
-        )}
+        {/* Main Action Area with AnimatePresence */}
+        <AnimatePresence mode="wait">
+          {isRunning ? (
+            <motion.div
+              key="running"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
+            >
+              <RunningStatus
+                campaignName={currentCampaign?.campaignName || 'Mining'}
+                elapsedSecs={uptimeSeconds}
+                currentGeneration={currentCampaign?.currentGeneration || 0}
+                bestSharpe={currentCampaign?.bestSharpe || null}
+                isExternal={isExternal}
+                onStop={stop}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="idle"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
+            >
+              <StartButtons 
+                onQuickStart={handleQuickStart}
+                isLoading={isLoading}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Footer hint */}
         <div className="mt-12 text-center">

@@ -1,0 +1,40 @@
+# Nextest configuration for quant_b3_backtest
+# https://nexte.st/book/configuration.html
+
+[store]
+# Store test artifacts in target directory
+dir = "target/nextest"
+
+# Default profile
+[profile.default]
+# Use all available CPUs
+test-threads = "num-cpus"
+# Fail immediately on first failure in local dev
+fail-fast = true
+# No retries by default
+retries = 0
+# Status level for output
+status-level = "pass"
+# Final status level
+final-status-level = "fail"
+
+# CI profile - optimized for GitHub Actions
+[profile.ci]
+# Use all available CPUs
+test-threads = "num-cpus"
+# Fail fast to save CI time
+fail-fast = true
+# No retries - tests should be deterministic
+retries = 0
+# Show only failures to reduce log noise
+status-level = "fail"
+final-status-level = "fail"
+# Slower timeout for CI (some integration tests are slow)
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+# Release profile for benchmarking/stress tests
+[profile.release]
+test-threads = "num-cpus"
+fail-fast = false
+retries = 0
+status-level = "pass"

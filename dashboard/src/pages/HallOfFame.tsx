@@ -330,7 +330,7 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                 e.stopPropagation();
                 setLoading(true);
                 try {
-                  const res = await fetch(`/api/candidate/${entry.candidateId}`);
+                  const res = await fetch(`http://localhost:3001/api/candidate/${entry.candidateId}`);
                   if (!res.ok) throw new Error('Falha ao carregar candidato');
                   const data = await res.json();
                   // Mapeia para o formato esperado pelo Backtest (snake_case)
@@ -428,7 +428,7 @@ export function HallOfFame() {
             <button
               onClick={async () => {
                 try {
-                  const res = await fetch('/api/omp/promote-check', {
+                  const res = await fetch('http://localhost:3001/api/omp/promote-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ limit: 1000 }),

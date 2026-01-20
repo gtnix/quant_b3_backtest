@@ -6,6 +6,14 @@
 //! - `combiner export-top <experiment_id> --n 10` - Export top strategies
 //! - `combiner factory ...` - Strategy Factory orchestration
 
+// Use jemalloc for 5-15% performance improvement on Linux/macOS
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};

@@ -19,7 +19,7 @@ pub mod audit;
 // Re-export main types
 pub use types::{
     DrawdownAction, ExitContext, ExitDiagnostics, ExitReason, ExitResult,
-    ExitTarget, Position, RiskViolation,
+    ExitTarget, Position, PositionFast, RiskViolation, SymbolId,
 };
 
 pub use policy::{ExitPolicy, ExitPolicyConfig};

@@ -208,7 +208,7 @@ export function AuditReport() {
   const fetchAuditRuns = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/audits');
+      const response = await fetch('http://localhost:3001/api/audits');
       const data = await response.json();
       setRuns(data.runs || []);
       
@@ -227,7 +227,7 @@ export function AuditReport() {
   const fetchAuditDetail = async (runId: string) => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/audit/${runId}`);
+      const response = await fetch(`http://localhost:3001/api/audit/${runId}`);
       const data = await response.json();
       setAuditData(data);
     } catch {

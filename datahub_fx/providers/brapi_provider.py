@@ -47,7 +47,7 @@ class BrapiProvider(FxProvider):
         timeout: int = 60,
         max_retries: int = 5,
     ):
-        self.api_key = api_key or os.environ.get("BRAPI_API_KEY")
+        self.api_key = api_key or os.environ.get("BRAPI_API_KEY") or os.environ.get("BRAPI_TOKEN")
         self.timeout = timeout
         self.max_retries = max_retries
         self.session = requests.Session()
@@ -77,10 +77,9 @@ class BrapiProvider(FxProvider):
         brapi_pair = self.PAIRS_MAP[pair]
         
         params = {"currency": brapi_pair}
-        headers = {}
-        
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            params["token"] = self.api_key
+        headers = {}
         
         logger.info(f"Fetching {pair} from Brapi")
         
@@ -149,10 +148,9 @@ class BrapiProvider(FxProvider):
             return []
         
         params = {"currency": ",".join(brapi_pairs)}
-        headers = {}
-        
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            params["token"] = self.api_key
+        headers = {}
         
         logger.info(f"Fetching {len(brapi_pairs)} pairs from Brapi")
         

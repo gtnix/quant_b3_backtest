@@ -12,7 +12,10 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 
+pub mod csv_parallel;
 pub mod mmap;
+
+pub use csv_parallel::CsvParallelLoader;
 
 use std::collections::HashMap;
 use std::fs::File;

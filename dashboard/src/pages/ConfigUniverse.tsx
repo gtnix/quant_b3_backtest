@@ -361,7 +361,7 @@ export function ConfigUniverse() {
   useEffect(() => {
     const fetchCompatibilityMatrix = async () => {
       try {
-        const res = await fetch('/api/omp/universe/compatibility');
+        const res = await fetch('http://localhost:3001/api/omp/universe/compatibility');
         if (res.ok) {
           const data = await res.json();
           // Transform backend format to UI format
@@ -399,7 +399,7 @@ export function ConfigUniverse() {
   useEffect(() => {
     const fetchStrategyRegistry = async () => {
       try {
-        const res = await fetch('/api/omp/universe/strategies');
+        const res = await fetch('http://localhost:3001/api/omp/universe/strategies');
         if (res.ok) {
           const data = await res.json();
           setStrategyRegistry(data.strategies || {});
@@ -483,7 +483,7 @@ export function ConfigUniverse() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const response = await fetch('/api/omp/config/universe', {
+      const response = await fetch('http://localhost:3001/api/omp/config/universe', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ universe: universeAxes, markets }),

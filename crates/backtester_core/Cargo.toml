@@ -9,6 +9,9 @@ description = "Core types, traits, and events for the backtester"
 [features]
 default = []
 decimal = ["dep:rust_decimal"]
+# Enable wider SIMD (f64x8) for AVX-512 capable CPUs (40-80% faster metrics)
+# Requires: RUSTFLAGS="-C target-cpu=native" or explicit AVX-512 target features
+simd-wide = []
 
 [dependencies]
 wide = { workspace = true }

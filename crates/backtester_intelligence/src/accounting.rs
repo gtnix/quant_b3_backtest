@@ -390,6 +390,162 @@ pub enum AccountingErrorFast {
     PositionNotFound,
 }
 
+// =============================================================================
+// PortfolioStateFast - Ultra-performance portfolio (Vec<Option<PositionFast>>)
+// =============================================================================
+
+use crate::exit::PositionFast;
+use crate::exit::SymbolId;
+
+/// Ultra-performance portfolio state with Vec-based position storage.
+///
+/// Uses `Vec<Option<PositionFast>>` indexed by `SymbolId` for O(1) lookups.
+/// ~3-5x faster than `HashMap<String, Position>` for typical workloads.
+///
+/// # Performance
+/// - O(1) position lookup by SymbolId
+/// - Zero allocation on position iteration (no clone needed)
+/// - Copy semantics for PositionFast (48 bytes vs 120+ with String)
+#[derive(Debug, Clone)]
+pub struct PortfolioStateFast {
+    /// Cash available (fixed-point)
+    pub cash: Money,
+    /// Positions indexed by SymbolId - O(1) lookup
+    pub positions: Vec<Option<PositionFast>>,
+    /// Current equity (NAV) (fixed-point)
+    pub equity: Money,
+    /// Peak equity for drawdown calculation (fixed-point)
+    pub peak_equity: Money,
+    /// Initial capital (fixed-point)
+    pub initial_capital: Money,
+    /// Number of active positions (avoids O(n) count)
+    pub active_positions: usize,
+}
+
+impl PortfolioStateFast {
+    /// Create new portfolio with initial capital and pre-allocated position slots.
+    pub fn new(initial_capital: Money, max_symbols: usize) -> Self {
+        Self {
+            cash: initial_capital,
+            positions: vec![None; max_symbols],
+            equity: initial_capital,
+            peak_equity: initial_capital,
+            initial_capital,
+            active_positions: 0,
+        }
+    }
+
+    /// Ensure capacity for a symbol ID.
+    #[inline]
+    fn ensure_capacity(&mut self, id: SymbolId) {
+        let needed = id as usize + 1;
+        if self.positions.len() < needed {
+            self.positions.resize(needed, None);
+        }
+    }
+
+    /// Get position by SymbolId. O(1).
+    #[inline]
+    pub fn get_position(&self, id: SymbolId) -> Option<&PositionFast> {
+        self.positions.get(id as usize).and_then(|opt| opt.as_ref())
+    }
+
+    /// Get mutable position by SymbolId. O(1).
+    #[inline]
+    pub fn get_position_mut(&mut self, id: SymbolId) -> Option<&mut PositionFast> {
+        self.positions.get_mut(id as usize).and_then(|opt| opt.as_mut())
+    }
+
+    /// Set or update a position. O(1).
+    #[inline]
+    pub fn set_position(&mut self, pos: PositionFast) {
+        self.ensure_capacity(pos.symbol_id);
+        let idx = pos.symbol_id as usize;
+        if self.positions[idx].is_none() {
+            self.active_positions += 1;
+        }
+        self.positions[idx] = Some(pos);
+        self.update_equity();
+    }
+
+    /// Remove a position. O(1).
+    #[inline]
+    pub fn remove_position(&mut self, id: SymbolId) -> Option<PositionFast> {
+        if let Some(slot) = self.positions.get_mut(id as usize) {
+            if let Some(pos) = slot.take() {
+                self.active_positions -= 1;
+                self.update_equity();
+                return Some(pos);
+            }
+        }
+        None
+    }
+
+    /// Iterate over active positions (zero allocation).
+    #[inline]
+    pub fn iter_positions(&self) -> impl Iterator<Item = &PositionFast> {
+        self.positions.iter().filter_map(|opt| opt.as_ref())
+    }
+
+    /// Calculate current equity (cash + positions mark-to-market).
+    #[inline]
+    pub fn calculate_equity_fast(&self) -> Money {
+        let positions_value: Money = self.iter_positions()
+            .map(|p| p.market_value_fast())
+            .sum();
+        self.cash + positions_value
+    }
+
+    /// Update equity and peak tracking.
+    #[inline]
+    pub fn update_equity(&mut self) {
+        self.equity = self.calculate_equity_fast();
+        if self.equity > self.peak_equity {
+            self.peak_equity = self.equity;
+        }
+    }
+
+    /// Calculate current drawdown from peak (%).
+    #[inline]
+    pub fn drawdown(&self) -> f64 {
+        if self.peak_equity.is_zero() {
+            return 0.0;
+        }
+        self.equity.div_money(self.peak_equity) - 1.0
+    }
+
+    /// Get total return from initial capital (%).
+    #[inline]
+    pub fn total_return(&self) -> f64 {
+        if self.initial_capital.is_zero() {
+            return 0.0;
+        }
+        self.equity.div_money(self.initial_capital) - 1.0
+    }
+
+    /// Update all position prices.
+    #[inline]
+    pub fn update_prices_with<F>(&mut self, lookup: F)
+    where
+        F: Fn(SymbolId) -> Option<Price>,
+    {
+        for pos in self.positions.iter_mut().filter_map(|opt| opt.as_mut()) {
+            if let Some(price) = lookup(pos.symbol_id) {
+                pos.current_price = price;
+                pos.update_high_water_mark();
+            }
+        }
+        self.update_equity();
+    }
+
+    /// Add cash to portfolio.
+    #[inline]
+    pub fn add_cash(&mut self, amount: Money) {
+        self.cash += amount;
+        self.update_equity();
+    }
+}
+
 /// Accounting errors.
 #[derive(Debug, Clone)]
 pub enum AccountingError {

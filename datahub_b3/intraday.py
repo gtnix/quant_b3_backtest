@@ -13,7 +13,7 @@ from .db import get_connection
 logger = logging.getLogger(__name__)
 
 BRAPI_BASE_URL = "https://brapi.dev"
-BRAPI_TOKEN = os.getenv("BRAPI_API_KEY", "")
+BRAPI_TOKEN = os.getenv("BRAPI_API_KEY") or os.getenv("BRAPI_TOKEN", "")
 BATCH_SIZE = 20  # Brapi max tickers per request
 
 
@@ -239,23 +239,26 @@ def sync_daily(
             failed_symbols.extend(failed)
             
             if bars:
-                # Insert into ohlcv_daily
-                values = [(b[0], b[1].date(), b[2], b[3], b[4], b[5], b[6]) for b in bars]
-                with conn.cursor() as cur:
-                    execute_values(cur, """
-                        INSERT INTO ohlcv_daily 
-                        (symbol, trading_date, open, high, low, close, volume)
-                        VALUES %s
-                        ON CONFLICT (symbol, trading_date) DO UPDATE SET
-                            open = EXCLUDED.open,
-                            high = EXCLUDED.high,
-                            low = EXCLUDED.low,
-                            close = EXCLUDED.close,
-                            volume = EXCLUDED.volume,
-                            ingested_at = now()
-                    """, values)
-                    conn.commit()
-                all_bars += len(values)
+                # Filter out invalid rows (zero/null prices)
+                valid_bars = [b for b in bars if b[2] and b[3] and b[4] and b[5] 
+                              and float(b[2]) > 0 and float(b[3]) > 0 and float(b[4]) > 0 and float(b[5]) > 0]
+                if valid_bars:
+                    values = [(b[0], b[1].date(), b[2], b[3], b[4], b[5], b[6]) for b in valid_bars]
+                    with conn.cursor() as cur:
+                        execute_values(cur, """
+                            INSERT INTO ohlcv_daily 
+                            (symbol, trading_date, open, high, low, close, volume)
+                            VALUES %s
+                            ON CONFLICT (symbol, trading_date) DO UPDATE SET
+                                open = EXCLUDED.open,
+                                high = EXCLUDED.high,
+                                low = EXCLUDED.low,
+                                close = EXCLUDED.close,
+                                volume = EXCLUDED.volume,
+                                ingested_at = now()
+                        """, values)
+                        conn.commit()
+                    all_bars += len(values)
             
             processed += len(batch)
             

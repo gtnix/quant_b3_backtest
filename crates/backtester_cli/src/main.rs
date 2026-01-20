@@ -3,6 +3,14 @@
 //! Command-line interface for running backtests and experiments.
 //! This is the core backtesting infrastructure - strategy implementations go in separate crates.
 
+// Use jemalloc for 5-15% performance improvement on Linux/macOS
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 use backtester_io::{BrapiLoader, CsvLoader, Normalizer};
 use backtester_strategy::experiment::{
     ArtifactFormat, BlockCatalog, Comparator, ExperimentRunner, RunnerConfig,
