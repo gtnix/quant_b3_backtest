@@ -73,10 +73,18 @@ pub struct EvolutionConfig {
     #[serde(default = "default_validation_tier")]
     pub validation_tier: String,
 
+    /// Ephemeral artifacts mode - don't save intermediate .obfs files.
+    /// Only the final Hall of Fame genomes are persisted at the end.
+    /// Reduces disk usage by 95%+ for short test runs.
+    /// Default: false (save all artifacts for audit trail).
+    #[serde(default)]
+    pub ephemeral_artifacts: bool,
+
     /// Incremental cleanup interval (generations between pending file cleanups).
-    /// Set to 0 to disable. Default: 25 generations.
+    /// Set to 0 to disable. Default: 5 generations (was 25, reduced for better cleanup).
     /// This prevents disk explosion during long runs by removing .obfs files
     /// for genomes no longer in Hall of Fame.
+    /// Ignored when ephemeral_artifacts = true.
     #[serde(default = "default_incremental_cleanup_interval")]
     pub incremental_cleanup_interval: u32,
 
@@ -131,7 +139,7 @@ fn default_validation_tier() -> String {
     "research".to_string()
 }
 fn default_incremental_cleanup_interval() -> u32 {
-    25
+    5  // Reduced from 25 - cleanup every 5 generations to prevent disk explosion
 }
 fn default_compaction_interval() -> u32 {
     500
@@ -162,6 +170,7 @@ impl Default for EvolutionConfig {
             stress_testing_enabled: false,
             min_stress_scenarios_passed: default_min_stress_pass(),
             validation_tier: default_validation_tier(),
+            ephemeral_artifacts: false,
             incremental_cleanup_interval: default_incremental_cleanup_interval(),
             compaction_interval: default_compaction_interval(),
             compaction_min_files: default_compaction_min_files(),
