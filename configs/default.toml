@@ -1,0 +1,127 @@
+# =============================================================================
+# Default SCG Configuration
+# =============================================================================
+# Configuração universal que funciona para qualquer cenário.
+# Runtime e workers são controlados via variáveis de ambiente:
+#   SCG_MAX_RUNTIME_SECS - tempo máximo (default: 900 = 15min)
+#   SCG_WORKERS - número de workers (default: 0 = auto-detect)
+# =============================================================================
+
+[campaign]
+name = "default"
+description = "Configuração padrão com gates de integridade ativos"
+version = "1.0.0"
+
+[dataset]
+market = "BR"
+market_data_path = "data/market_data_ibov.csv"
+
+[risk_profile]
+name = "moderado"
+
+[evolution]
+population_size = 150
+max_generations = 500
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08
+convergence_generations = 15
+max_runtime_seconds = 900  # Overridden by SCG_MAX_RUNTIME_SECS
+workers = 0                # 0 = auto-detect (all cores - 2)
+hall_of_fame_size = 25
+
+[diversity]
+enabled = true
+sigma_share = 0.20
+sharing_alpha = 2.0
+fitness_sharing = true
+phenotypic_distance = true
+critical_threshold = 0.25
+crowding_factor = 3
+
+[genome_limits]
+max_blocks = 4
+max_dof_total = 35
+
+[adaptation]
+enabled = true
+base_mutation_rate = 0.05
+min_mutation_rate = 0.01
+max_mutation_rate = 0.30
+amplification_factor = 2.0
+
+[stagnation]
+detection_enabled = true
+window_size = 10
+improvement_threshold = 0.005
+restart_enabled = true
+restart_elite_ratio = 0.20
+post_restart_boost_generations = 3
+max_restarts = 5
+
+[execution]
+mode = "compiled"
+has_costs = true
+slippage_bps = 10.0
+commission_bps = 5.0
+emolument_bps = 2.5
+market_impact_model = "linear"
+
+[validation]
+enabled = true
+top_k = 15
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.6
+wfa_purge_days = 5
+pbo_enabled = true
+pbo_significance_level = 0.05
+stress_enabled = true
+stress_min_pass = 4
+
+[gates]
+gates_required = true
+min_oos_sharpe_net = 0.60
+max_pbo = 0.15
+min_dsr = 0.7
+min_stress_passed = 4
+max_degradation = 0.35
+min_oos_trades = 25
+max_drawdown = -0.25
+
+[data_integrity]
+enabled = true
+lookback_requirements = true
+survivorship_bias_check = true
+freshness_check = true
+coverage_check = true
+watermark_check = true
+nulls_check = true
+outliers_check = true
+schema_check = true
+dividends_check = true
+interest_rates_check = true
+fail_on_blocker = true
+
+[metrics]
+objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
+sharpe_weight = 1.5
+cagr_weight = 1.0
+drawdown_weight = 3.0
+calmar_weight = 1.2
+sortino_weight = 0.5
+low_trades_penalty = true
+min_trades = 25
+extreme_turnover_penalty = true
+max_turnover_annual = 400.0
+high_volatility_penalty = true
+max_volatility = 0.35
+drawdown_penalty_threshold = -0.15
+
+[output]
+artifact_format = "obfs"
+save_generations = true
+save_all_genomes = false
+save_diversity_metrics = true
+save_restart_events = true

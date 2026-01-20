@@ -10,6 +10,66 @@ import { runSync, scanLocalStrategies, scanLocalStrategiesQuick } from '../servi
 
 const router = Router();
 
+// =============================================================================
+// External CLI Process Detection
+// =============================================================================
+let externalProcess = null;
+
+function detectExternalCombiner() {
+  try {
+    const ps = execSync('pgrep -a combiner 2>/dev/null || true', { encoding: 'utf-8', timeout: 2000 });
+    if (ps.includes('combiner run') || ps.includes('combiner factory')) {
+      const match = ps.match(/(\d+)\s+.*combiner\s+(run|factory)/);
+      if (match) {
+        const pid = parseInt(match[1]);
+        // Get process start time
+        let startTime = Date.now();
+        let elapsed = 0;
+        try {
+          const stat = execSync(`ps -p ${pid} -o etimes= 2>/dev/null || echo 0`, { encoding: 'utf-8' });
+          elapsed = parseInt(stat.trim()) || 0;
+          startTime = Date.now() - (elapsed * 1000);
+        } catch {}
+        return { pid, startTime, elapsed, command: ps.trim().split('\n')[0] };
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+function syncExternalProcess() {
+  const ext = detectExternalCombiner();
+  if (ext && !ompState.currentCampaign) {
+    // External CLI is running, sync state
+    externalProcess = ext;
+    if (ompState.status === 'offline') {
+      ompState.status = 'running';
+      ompState.startedAt = new Date(ext.startTime).toISOString();
+    }
+    ompState.currentCampaign = {
+      campaignId: 'external_cli',
+      campaignName: 'CLI (Terminal)',
+      runId: `cli_${ext.pid}`,
+      market: 'br',
+      status: 'running',
+      startTime: ext.startTime,
+      external: true,
+      pid: ext.pid
+    };
+    broadcastSSE('omp-external-detected', { pid: ext.pid, elapsed: ext.elapsed });
+  } else if (!ext && externalProcess) {
+    // External process finished
+    externalProcess = null;
+    if (ompState.currentCampaign?.external) {
+      ompState.currentCampaign = null;
+      if (ompState.status === 'running' && !getOmpLoopInterval()) {
+        ompState.status = 'offline';
+      }
+      broadcastSSE('omp-external-finished', { timestamp: new Date().toISOString() });
+    }
+  }
+}
+
 // Disk I/O history for pace calculation
 const diskIoHistory = [];
 const DISK_HISTORY_MAX = 60; // Keep 60 samples (1 min at 1s interval)
@@ -141,16 +201,19 @@ async function ompLoop() {
 }
 
 function getOmpStatus() {
-  const currentCampaign = ompState.currentCampaign ? { 
-    campaignId: ompState.currentCampaign.campaignId, 
-    campaignName: ompState.currentCampaign.campaignName, 
-    runId: ompState.currentCampaign.runId, 
-    market: ompState.currentCampaign.market, 
-    status: ompState.currentCampaign.status, 
-    elapsedSecs: Math.floor((Date.now() - ompState.currentCampaign.startTime) / 1000), 
-    currentGeneration: ompState.currentCampaign.currentGeneration, 
-    bestSharpe: ompState.currentCampaign.bestSharpe,
-    candidatesEvaluated: ompState.currentCampaign.candidatesEvaluated || 0
+  const cc = ompState.currentCampaign;
+  const currentCampaign = cc ? { 
+    campaignId: cc.campaignId, 
+    campaignName: cc.campaignName, 
+    runId: cc.runId, 
+    market: cc.market, 
+    status: cc.status, 
+    elapsedSecs: Math.floor((Date.now() - cc.startTime) / 1000), 
+    currentGeneration: cc.currentGeneration || 0, 
+    bestSharpe: cc.bestSharpe || null,
+    candidatesEvaluated: cc.candidatesEvaluated || 0,
+    external: cc.external || false,
+    pid: cc.pid || null
   } : null;
   
   return { 
@@ -168,6 +231,7 @@ function getOmpStatus() {
 }
 
 router.get('/omp/status', async (req, res) => { 
+  syncExternalProcess(); // Detect CLI running externally
   await checkResources(); // Always update resources on status fetch
   res.json(getOmpStatus()); 
 });
@@ -202,6 +266,94 @@ router.post('/omp/resume', (req, res) => {
   if (ompState.status !== 'paused') return res.status(400).json({ error: 'OMP is not paused' });
   ompState.status = 'running'; broadcastSSE('omp-resumed', { resumedAt: new Date().toISOString() });
   res.json({ status: 'running' });
+});
+
+// =============================================================================
+// Simple Quick Start - No queue, just run!
+// =============================================================================
+router.post('/omp/quick-start', async (req, res) => {
+  if (ompState.currentCampaign) return res.status(400).json({ error: 'Campaign already running' });
+  
+  const mode = req.body.mode || 'quick'; // 'quick' (15min) or 'full' (1h)
+  const market = req.body.market || 'br';
+  const runtimeMins = mode === 'full' ? 60 : 15;
+  const workers = mode === 'full' ? 0 : Math.floor(os.cpus().length / 2); // full=auto, quick=50%
+  
+  const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
+  if (!fs.existsSync(combinerPath)) {
+    return res.status(400).json({ error: 'Combiner binary not found. Run: cargo build --release -p combiner_cli' });
+  }
+  
+  const configPath = path.join(PROJECT_ROOT, 'configs', 'default.toml');
+  if (!fs.existsSync(configPath)) {
+    return res.status(400).json({ error: 'Default config not found at configs/default.toml' });
+  }
+  
+  const runId = `run_${Date.now().toString(36)}`;
+  console.log(`\n🚀 [OMP] Quick start: ${mode} mode (${runtimeMins}min, ${workers || 'auto'} workers)`);
+  
+  // Build command with runtime override
+  const args = ['run', '--config', configPath, '--ultra', '--seed', '42'];
+  
+  const scgProcess = spawn(combinerPath, args, { 
+    cwd: PROJECT_ROOT, 
+    env: { 
+      ...process.env, 
+      RUST_LOG: 'combiner=info',
+      SCG_MAX_RUNTIME_SECS: String(runtimeMins * 60),
+      SCG_WORKERS: String(workers)
+    } 
+  });
+  
+  ompState.status = 'running';
+  ompState.startedAt = new Date().toISOString();
+  ompState.currentCampaign = {
+    campaignId: `quick_${mode}`,
+    campaignName: mode === 'full' ? 'Completo (1h)' : 'Rápido (15min)',
+    runId,
+    market,
+    status: 'running',
+    startTime: Date.now(),
+    output: [],
+    process: scgProcess,
+    currentGeneration: 0,
+    bestSharpe: null,
+    candidatesEvaluated: 0,
+    mode
+  };
+  
+  scgProcess.stdout.on('data', (data) => {
+    const line = data.toString();
+    ompState.currentCampaign.output.push(line);
+    const genMatch = line.match(/Generation\s+(\d+)/i);
+    if (genMatch) ompState.currentCampaign.currentGeneration = parseInt(genMatch[1]);
+    const sharpeMatch = line.match(/Best Sharpe[:\s]+(\d+\.?\d*)/i);
+    if (sharpeMatch) ompState.currentCampaign.bestSharpe = parseFloat(sharpeMatch[1]);
+  });
+  
+  scgProcess.stderr.on('data', (data) => {
+    ompState.currentCampaign.output.push(data.toString());
+  });
+  
+  scgProcess.on('close', (code) => {
+    const cc = ompState.currentCampaign;
+    if (cc) {
+      cc.status = code === 0 ? 'completed' : 'failed';
+      cc.endTime = Date.now();
+      if (code === 0) ompState.stats.campaignsCompleted++;
+      else ompState.stats.campaignsFailed++;
+      broadcastSSE('omp-campaign-completed', { 
+        runId: cc.runId, 
+        status: cc.status, 
+        duration: (cc.endTime - cc.startTime) / 1000 
+      });
+    }
+    ompState.currentCampaign = null;
+    ompState.status = 'offline';
+  });
+  
+  broadcastSSE('omp-started', { mode, runId, startedAt: ompState.startedAt });
+  res.json({ status: 'started', mode, runId, runtimeMins, workers: workers || 'auto' });
 });
 
 router.post('/omp/cleanup', async (req, res) => {

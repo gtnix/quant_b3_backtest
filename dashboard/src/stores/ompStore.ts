@@ -36,9 +36,12 @@ export interface CurrentCampaign {
   market: 'br' | 'us';
   status: string;
   elapsedSeconds: number;
+  elapsedSecs?: number;
   currentGeneration: number;
   bestSharpe: number | null;
   candidatesEvaluated: number;
+  external?: boolean;
+  pid?: number;
 }
 
 export interface OmpStats {
