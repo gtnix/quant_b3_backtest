@@ -548,8 +548,8 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   // ==========================================================================
   
   subscribeToUpdates: () => {
-    // Browser mode - use SSE
-    if (platform === 'browser') {
+    // Browser mode - use SSE, Desktop mode - use polling
+    if (platform.isBrowser) {
       const sse = createSSEConnection(
         (event) => {
           // Set connected on any event - KEEP previous state on reconnection
@@ -642,13 +642,8 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       };
     }
     
-    // Desktop mode - use polling
-    const pollInterval = setInterval(() => {
-      get().fetchStatus();
-      if (get().status === 'running') {
-        get().fetchPerformance();
-      }
-    }, 5000);
+    // Desktop mode - use polling (more aggressive for responsiveness)
+    console.log('[OMP Store] Desktop mode - using polling');
     
     // Initial fetch
     get().fetchStatus();
@@ -657,8 +652,24 @@ export const useOmpStore = create<OmpState>((set, get) => ({
     get().fetchActivityLog();
     get().fetchPerformance();
     
+    // Fast polling when running (every 2s), slower when idle (every 5s)
+    const pollInterval = setInterval(() => {
+      const status = get().status;
+      get().fetchStatus();
+      if (status === 'running') {
+        get().fetchPerformance();
+      }
+    }, 2000);
+    
+    // Slower polling for stats/queue (every 10s)
+    const statsInterval = setInterval(() => {
+      get().fetchStats();
+      get().fetchQueue();
+    }, 10000);
+    
     return () => {
       clearInterval(pollInterval);
+      clearInterval(statsInterval);
     };
   },
 }));
