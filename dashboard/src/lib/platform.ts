@@ -57,15 +57,23 @@ export const capabilities = {
 // API CONFIGURATION
 // =============================================================================
 
-// Detect if we're on a remote server (not localhost)
+// Detect if we're on a remote server (not localhost or Tauri)
 const isRemoteServer = (): boolean => {
-  return typeof window !== 'undefined' && 
-    !window.location.hostname.includes('localhost') &&
-    !window.location.hostname.includes('127.0.0.1');
+  if (typeof window === 'undefined') return false;
+  // Tauri uses tauri.localhost or localhost
+  if (platform.isTauri) return false;
+  const hostname = window.location.hostname;
+  return !hostname.includes('localhost') && 
+         !hostname.includes('127.0.0.1') &&
+         !hostname.includes('tauri');
 };
 
 // Determine API base URL based on environment
 const getApiBase = (): string => {
+  // Tauri always uses localhost:3001
+  if (platform.isTauri) {
+    return 'http://localhost:3001/api';
+  }
   // For remote VPS deployments, use explicit port 3001
   if (isRemoteServer()) {
     return `http://${window.location.hostname}:3001/api`;
@@ -75,6 +83,10 @@ const getApiBase = (): string => {
 };
 
 const getSseEndpoint = (): string => {
+  // Tauri uses polling, not SSE
+  if (platform.isTauri) {
+    return ''; // Empty = no SSE
+  }
   // For remote VPS deployments, use explicit port 3001
   if (isRemoteServer()) {
     return `http://${window.location.hostname}:3001/api/events`;
