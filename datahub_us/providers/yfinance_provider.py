@@ -15,6 +15,7 @@ from .base import (
     Provider, ProviderCapabilities, FetchResult,
     ProviderError, RateLimitError, NotFoundError
 )
+from ..symbols import SP500_SYMBOLS, TEST_SYMBOLS_US
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class YFinanceProvider(Provider):
             supports_splits=True,
             supports_adjusted=True,
             max_history_years=30,
-            rate_limit_per_minute=None,  # No hard limit, but be respectful
+            rate_limit_per_minute=None,
             requires_api_key=False,
         )
     
@@ -189,75 +190,21 @@ class YFinanceProvider(Provider):
         """Fetch list of symbols from an index.
         
         Args:
-            index: Index name ('sp500', 'nasdaq100', 'dow')
+            index: Index name ('sp500', 'sample', 'test')
             
         Returns:
             List of ticker symbols
         """
-        # Top 100 US stocks by market cap (hardcoded for reliability)
-        top100 = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "BRK-B", "TSLA",
-            "UNH", "XOM", "JPM", "JNJ", "V", "PG", "MA", "HD", "CVX", "MRK",
-            "ABBV", "LLY", "PEP", "KO", "COST", "AVGO", "MCD", "WMT", "CSCO",
-            "TMO", "ABT", "ACN", "CRM", "NKE", "DHR", "TXN", "NEE", "PM",
-            "LIN", "UNP", "VZ", "CMCSA", "HON", "RTX", "LOW", "INTC", "ORCL",
-            "AMD", "QCOM", "IBM", "CAT", "BA", "GE", "AMGN", "SBUX", "GS",
-            "BLK", "SPGI", "AXP", "DE", "ISRG", "MDT", "GILD", "ADI", "REGN",
-            "BKNG", "VRTX", "SYK", "MDLZ", "CI", "MMC", "CB", "SCHW", "ZTS",
-            "LRCX", "MO", "DUK", "SO", "PLD", "TJX", "CME", "APD", "ITW",
-            "PNC", "USB", "KLAC", "TGT", "CL", "NSC", "WM", "ICE", "EQIX",
-            "SHW", "AON", "MCK", "EMR", "FDX", "PCAR", "GM", "F"
-        ]
-        
         if index == "sp500":
-            return top100
+            return SP500_SYMBOLS[:100]  # Top 100 for performance
         elif index == "sample":
-            return top100[:10]
+            return TEST_SYMBOLS_US
+        elif index == "test":
+            return TEST_SYMBOLS_US[:5]
         else:
-            return top100
+            return SP500_SYMBOLS[:100]
     
     @property
     def request_count(self) -> int:
         """Total requests made."""
         return self._request_count
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

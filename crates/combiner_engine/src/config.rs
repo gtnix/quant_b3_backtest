@@ -103,6 +103,18 @@ pub struct EvolutionConfig {
     /// Default: 50 MB.
     #[serde(default = "default_compaction_target_size_mb")]
     pub compaction_target_size_mb: f64,
+
+    /// Path to Strategy Catalog directory (TOML templates).
+    /// Used for Template-First GA.
+    #[serde(default = "default_catalog_path")]
+    pub catalog_path: std::path::PathBuf,
+
+    /// Template slugs to filter from the catalog.
+    /// If empty, all templates are used. If specified, only these templates
+    /// will be available for the GA to generate genomes from.
+    /// Example: ["orb_breakout_conservative", "vwap_mean_reversion_moderate"]
+    #[serde(default)]
+    pub template_slugs: Vec<String>,
 }
 
 fn default_population_size() -> usize {
@@ -150,6 +162,9 @@ fn default_compaction_min_files() -> usize {
 fn default_compaction_target_size_mb() -> f64 {
     50.0
 }
+fn default_catalog_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("configs/strategies/")
+}
 
 impl Default for EvolutionConfig {
     fn default() -> Self {
@@ -175,6 +190,8 @@ impl Default for EvolutionConfig {
             compaction_interval: default_compaction_interval(),
             compaction_min_files: default_compaction_min_files(),
             compaction_target_size_mb: default_compaction_target_size_mb(),
+            catalog_path: default_catalog_path(),
+            template_slugs: Vec::new(),
         }
     }
 }

@@ -1,16 +1,8 @@
 /**
- * Unified Command Abstraction Layer
- * 
- * Provides a single interface for all commands that works seamlessly
- * in both Tauri (desktop) and Browser modes.
- * 
- * Usage:
- *   import { cmd } from './lib/commands';
- *   const index = await cmd.loadIndex();
+ * Command API Layer - Web Only
  */
 
-import { invoke } from '@tauri-apps/api/core';
-import { platform, config } from './platform';
+import { config } from './platform';
 
 // =============================================================================
 // TYPES
@@ -319,25 +311,11 @@ async function apiCall<T>(
 // =============================================================================
 
 export const cmd = {
-  // -------------------------------------------------------------------------
-  // ARTIFACTS ROOT
-  // -------------------------------------------------------------------------
-  
   async getArtifactsRoot(): Promise<PathInfo> {
-    if (platform.isTauri) {
-      const path = await invoke<string | null>('get_artifacts_root');
-      return {
-        path: path || '',
-        valid: !!path,
-      };
-    }
     return apiCall<PathInfo>('/artifacts-root');
   },
   
   async setArtifactsRoot(path: string): Promise<string> {
-    if (platform.isTauri) {
-      return invoke<string>('set_artifacts_root', { path });
-    }
     const result = await apiCall<PathInfo>('/artifacts-root', {
       method: 'POST',
       body: JSON.stringify({ path }),
@@ -345,25 +323,11 @@ export const cmd = {
     return result.path;
   },
   
-  // -------------------------------------------------------------------------
-  // WORKSPACE ROOT
-  // -------------------------------------------------------------------------
-  
   async getWorkspaceRoot(): Promise<PathInfo> {
-    if (platform.isTauri) {
-      const path = await invoke<string | null>('get_workspace_root');
-      return {
-        path: path || '',
-        valid: !!path,
-      };
-    }
     return apiCall<PathInfo>('/workspace-root');
   },
   
   async setWorkspaceRoot(path: string): Promise<string> {
-    if (platform.isTauri) {
-      return invoke<string>('set_workspace_root', { path });
-    }
     const result = await apiCall<PathInfo>('/workspace-root', {
       method: 'POST',
       body: JSON.stringify({ path }),
@@ -371,150 +335,59 @@ export const cmd = {
     return result.path;
   },
   
-  // -------------------------------------------------------------------------
-  // SITE INDEX & NAVIGATION
-  // -------------------------------------------------------------------------
-  
   async loadIndex(): Promise<SiteIndex> {
-    if (platform.isTauri) {
-      return invoke<SiteIndex>('load_index');
-    }
     return apiCall<SiteIndex>('/index');
   },
   
   async listCampaigns(): Promise<CampaignSummary[]> {
-    if (platform.isTauri) {
-      const index = await invoke<SiteIndex>('load_index');
-      return index.campaigns;
-    }
     const result = await apiCall<{ campaigns: CampaignSummary[] }>('/campaigns');
     return result.campaigns;
   },
   
   async loadCampaign(campaignId: string): Promise<CampaignDetail> {
-    if (platform.isTauri) {
-      return invoke<CampaignDetail>('load_campaign', { campaignId });
-    }
     return apiCall<CampaignDetail>(`/campaign/${campaignId}`);
   },
   
   async loadRun(runId: string): Promise<RunDetail> {
-    if (platform.isTauri) {
-      return invoke<RunDetail>('load_run', { runId });
-    }
     return apiCall<RunDetail>(`/run/${runId}`);
   },
   
   async listRecentRuns(limit = 10): Promise<RecentRun[]> {
-    if (platform.isTauri) {
-      // Tauri: aggregate from local artifacts
-      const index = await invoke<SiteIndex>('load_index');
-      const runs: RecentRun[] = [];
-      for (const campaign of index.campaigns.slice(0, 5)) {
-        try {
-          const detail = await invoke<CampaignDetail>('load_campaign', { campaignId: campaign.campaign_id });
-          for (const run of detail.runs.slice(0, 3)) {
-            runs.push({
-              run_id: run.run_id,
-              campaign_name: campaign.name,
-              created_at: campaign.created_at,
-              status: run.status,
-              best_oos_sharpe_net: run.best_oos_sharpe_net,
-              candidates_count: run.candidates_count || 0,
-            });
-          }
-        } catch {
-          // Skip failed campaigns
-        }
-      }
-      return runs.slice(0, limit);
-    }
     const result = await apiCall<{ runs: RecentRun[] }>(`/runs/recent?limit=${limit}`);
     return result.runs;
   },
   
-  // -------------------------------------------------------------------------
-  // CANDIDATES
-  // -------------------------------------------------------------------------
-  
   async listCandidates(
     runId: string,
-    options: {
-      limit?: number;
-      search?: string;
-      candidateClass?: string;
-      maxPbo?: number;
-    } = {}
+    options: { limit?: number; search?: string; candidateClass?: string; maxPbo?: number } = {}
   ): Promise<CandidateListItem[]> {
-    if (platform.isTauri) {
-      return invoke<CandidateListItem[]>('list_candidates_v2', {
-        runId,
-        search: options.search,
-        candidateClass: options.candidateClass,
-        maxPbo: options.maxPbo,
-        limit: options.limit,
-      });
-    }
-    
     const params = new URLSearchParams();
     if (options.limit) params.set('limit', String(options.limit));
     if (options.search) params.set('search', options.search);
     if (options.candidateClass) params.set('candidate_class', options.candidateClass);
     if (options.maxPbo) params.set('max_pbo', String(options.maxPbo));
-    
-    // API returns array directly, not wrapped in { candidates: [...] }
-    const result = await apiCall<CandidateListItem[]>(
-      `/candidates/${runId}?${params.toString()}`
-    );
+    const result = await apiCall<CandidateListItem[]>(`/candidates/${runId}?${params.toString()}`);
     return Array.isArray(result) ? result : [];
   },
   
   async listRecentCandidates(limit = 20): Promise<CandidateListItem[]> {
-    if (platform.isTauri) {
-      // Tauri: get from latest run
-      const runs = await this.listRecentRuns(1);
-      if (runs.length > 0) {
-        return this.listCandidates(runs[0].run_id, { limit });
-      }
-      return [];
-    }
-    // API returns array directly
-    const result = await apiCall<CandidateListItem[]>(
-      `/candidates/recent?limit=${limit}`
-    );
+    const result = await apiCall<CandidateListItem[]>(`/candidates/recent?limit=${limit}`);
     return Array.isArray(result) ? result : [];
   },
   
   async loadCandidateDetail(candidateId: string): Promise<CandidateDetail> {
-    if (platform.isTauri) {
-      return invoke<CandidateDetail>('load_candidate_detail', { candidateId });
-    }
     return apiCall<CandidateDetail>(`/candidate/${candidateId}`);
   },
   
-  // -------------------------------------------------------------------------
-  // BACKTEST
-  // -------------------------------------------------------------------------
-  
   async loadBacktestSeries(candidateId: string): Promise<BacktestResult> {
-    if (platform.isTauri) {
-      return invoke<BacktestResult>('load_backtest_series', { candidateId });
-    }
     return apiCall<BacktestResult>(`/backtest/${candidateId}`);
   },
   
-  async loadSimulatedEquity(candidateId: string): Promise<{
-    timeseries: TimeseriesPoint[];
-    metrics: BacktestMetrics;
-  }> {
-    // Browser mode only - simulated equity from Neon data
+  async loadSimulatedEquity(candidateId: string): Promise<{ timeseries: TimeseriesPoint[]; metrics: BacktestMetrics }> {
     return apiCall(`/candidate/${candidateId}/simulated-equity`);
   },
   
-  async loadCandidatePipeline(candidateId: string): Promise<{
-    blocks: PipelineBlock[];
-    strategy_toml?: string;
-  }> {
+  async loadCandidatePipeline(candidateId: string): Promise<{ blocks: PipelineBlock[]; strategy_toml?: string }> {
     return apiCall(`/candidate/${candidateId}/pipeline`);
   },
   
@@ -526,79 +399,39 @@ export const cmd = {
     return apiCall(`/candidate/${candidateId}/stress`);
   },
   
-  // -------------------------------------------------------------------------
-  // SCG RUN CONTROL
-  // -------------------------------------------------------------------------
-  
-  async startScgRun(config: Partial<ScgRunConfig>): Promise<string> {
-    if (platform.isTauri) {
-      return invoke<string>('start_scg_run', { config });
-    }
-    const result = await apiCall<{ runId: string }>('/scg/start', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
+  async startScgRun(cfg: Partial<ScgRunConfig>): Promise<string> {
+    const result = await apiCall<{ runId: string }>('/scg/start', { method: 'POST', body: JSON.stringify(cfg) });
     return result.runId;
   },
   
   async stopScgRun(runId: string): Promise<void> {
-    if (platform.isTauri) {
-      return invoke('stop_scg_run', { runId });
-    }
     await apiCall(`/scg/stop/${runId}`, { method: 'POST' });
   },
   
   async getRunStatus(runId: string): Promise<RunProgress> {
-    if (platform.isTauri) {
-      return invoke<RunProgress>('get_run_status', { runId });
-    }
     return apiCall<RunProgress>(`/scg/progress/${runId}`);
   },
   
   async listActiveRuns(): Promise<RunProgress[]> {
-    if (platform.isTauri) {
-      return invoke<RunProgress[]>('list_active_runs');
-    }
     const result = await apiCall<{ runs: RunProgress[] }>('/scg/active-runs');
     return result.runs;
   },
   
   async loadCockpitCandidates(runId: string): Promise<CandidateListItem[]> {
-    if (platform.isTauri) {
-      return invoke<CandidateListItem[]>('load_cockpit_candidates', { runId });
-    }
-    const result = await apiCall<{ candidates: CandidateListItem[] }>(
-      `/cockpit-candidates/${runId}`
-    );
+    const result = await apiCall<{ candidates: CandidateListItem[] }>(`/cockpit-candidates/${runId}`);
     return result.candidates;
   },
   
-  // -------------------------------------------------------------------------
-  // CACHE & UPDATES
-  // -------------------------------------------------------------------------
-  
   async invalidateCache(): Promise<{ cleared: string[] }> {
-    if (platform.isTauri) {
-      await invoke('invalidate_cache');
-      return { cleared: ['all'] };
-    }
     return apiCall('/invalidate-cache', { method: 'POST' });
   },
   
   async watchArtifacts(): Promise<void> {
-    if (platform.isTauri) {
-      return invoke('watch_artifacts');
-    }
-    // Browser mode: SSE is handled separately in App.tsx
-    console.log('[Browser Mode] File watching via SSE');
+    console.log('[Web] File watching via SSE');
   },
   
-  async pollChanges(since?: number): Promise<{
-    changes: Array<{ type: string; path: string; modified: string }>;
-    has_changes: boolean;
-  }> {
-    const params = since ? `?since=${since}` : '';
-    return apiCall(`/poll-changes${params}`);
+  async pollChanges(since?: number): Promise<{ changes: Array<{ type: string; path: string; modified: string }>; has_changes: boolean }> {
+    return apiCall(`/poll-changes${since ? `?since=${since}` : ''}`);
   },
 };
 
@@ -625,13 +458,8 @@ export function createSSEConnection(
   onError?: (error: Event) => void,
   onReconnect?: () => void
 ): EventSource | null {
-  if (platform.isTauri) {
-    console.log('[Tauri Mode] SSE not needed, using native events');
-    return null;
-  }
-  
   if (!config.sseEndpoint) {
-    console.warn('[SSE] No endpoint configured, using polling only');
+    console.warn('[SSE] No endpoint configured');
     return null;
   }
   
@@ -639,31 +467,21 @@ export function createSSEConnection(
   let reconnectAttempts = 0;
   
   eventSource.onopen = () => {
-    console.log('[SSE] Connected');
-    if (reconnectAttempts > 0) {
-      onReconnect?.();
-    }
+    if (reconnectAttempts > 0) onReconnect?.();
     reconnectAttempts = 0;
   };
   
   eventSource.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data) as SSEEvent;
-      onEvent(data);
+      onEvent(JSON.parse(event.data) as SSEEvent);
     } catch (e) {
-      console.error('[SSE] Failed to parse event:', e);
+      console.error('[SSE] Parse error:', e);
     }
   };
   
   eventSource.onerror = (error) => {
     reconnectAttempts++;
-    console.warn(`[SSE] Connection error (attempt ${reconnectAttempts}), browser will auto-reconnect`);
     onError?.(error);
-    
-    // EventSource auto-reconnects, but we log the attempt
-    if (reconnectAttempts > 5) {
-      console.warn('[SSE] Multiple reconnect attempts, polling should take over');
-    }
   };
   
   return eventSource;

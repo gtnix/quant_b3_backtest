@@ -1,0 +1,20 @@
+=== EVIDÊNCIA DE AUDITORIA - DISK USAGE ===
+Data: $(date)
+
+PROBLEMA IDENTIFICADO:
+- A mineração estava salvando backtests em output/scg/backtests/consolidated/
+- O modo ephemeral_artifacts NÃO estava habilitado no configs/default.toml
+- Isso causou acúmulo de 3.7 GB em poucos minutos de mineração
+
+CAUSA RAIZ:
+- O quick-start usa configs/default.toml
+- Essa config não tinha ephemeral_artifacts = true
+- Cada backtest gerava ~50KB de dados persistidos
+
+CORREÇÃO APLICADA:
+- Adicionado ephemeral_artifacts = true em configs/default.toml [output]
+
+ESTRUTURA ANTES DA LIMPEZA:
+3.6G	/home/bahuan/Documents/GitHub/quant_b3_backtest/output/scg/backtests/consolidated
+83M	/home/bahuan/Documents/GitHub/quant_b3_backtest/output/scg/backtests/pending
+

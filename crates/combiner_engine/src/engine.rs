@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use thiserror::Error;
@@ -12,8 +12,9 @@ use tracing::{info, debug, warn};
 use combiner_core::{
     FitnessConfig, GenomeValidator, MultiObjectiveFitness, ParamRanges,
     PopulationFitnessSoA, repair_genome, RepairConfig, GenomeRepairStats,
+    StrategyGenome,
 };
-use combiner_runner::{BacktestExecutor, BacktestOutput, ValidationCache};
+use combiner_runner::{BacktestExecutor, BacktestOutput, ValidationCache, InProcessExecutor};
 
 use crate::config::EvolutionConfig;
 use crate::hall_of_fame::HallOfFame;
@@ -27,6 +28,7 @@ use crate::evaluation::{
     StageBConfig, ValidationResult, ValidationSplitPlan,
     split_plan::SplitPlanConfig,
 };
+use crate::strategy_catalog::StrategyCatalog;
 
 /// Evolution engine errors.
 #[derive(Debug, Error)]
@@ -72,6 +74,8 @@ pub struct EvolutionEngine<E: BacktestExecutor> {
     repair_stats: GenomeRepairStats,
     /// Repair configuration
     repair_config: RepairConfig,
+    /// Strategy catalog - SINGLE source of templates for Template-First GA
+    catalog: StrategyCatalog,
 }
 
 impl<E: BacktestExecutor> EvolutionEngine<E> {
@@ -80,11 +84,22 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         let seed = config.seed.unwrap_or(42);
         let rng = ChaCha8Rng::seed_from_u64(seed);
 
+        // Initialize catalog from builtin templates, filtered by config
+        let catalog = StrategyCatalog::from_builtin()
+            .filter_by_slugs(&config.template_slugs);
+        
+        info!(
+            "Strategy Catalog initialized: {} templates (filter: {})",
+            catalog.len(),
+            if config.template_slugs.is_empty() { "none" } else { "active" }
+        );
+
         Self {
             param_ranges: ParamRanges::new(),
             fitness_config: FitnessConfig::default(),
             validator: GenomeValidator::new(),
             hall_of_fame: HallOfFame::with_capacity(config.hall_of_fame_size),
+            catalog,
             config,
             executor,
             rng,
@@ -114,13 +129,19 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         info!("Starting evolution with {} generations, population {}", 
               self.config.max_generations, self.config.population_size);
 
-        // Generate initial population
-        self.population = Population::random(
+        // Generate initial population from Strategy Catalog (Template-First GA)
+        self.population = Population::from_catalog(
+            &self.catalog,
             self.config.population_size,
             &mut self.rng,
             &self.param_ranges,
+            0,
         );
-        info!("Generated initial population of {} genomes", self.population.len());
+        info!(
+            "Generated initial population of {} genomes from {} templates",
+            self.population.len(),
+            self.catalog.len()
+        );
 
         // Main evolution loop
         for gen in 0..self.config.max_generations {
@@ -284,49 +305,76 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         fitness
     }
 
-    /// Create the next generation.
+    /// Create the next generation (optimized hot path).
     fn create_next_generation(&mut self, next_gen: u32) {
         let selection = Selection::new(self.config.tournament_size);
         let crossover = Crossover::new(self.config.crossover_rate);
-        let mutation = Mutation::new(self.config.mutation_rate, self.param_ranges.clone());
+        let mutation = Mutation::new(self.config.mutation_rate);
 
-        let mut new_genomes = Vec::with_capacity(self.config.population_size);
+        let pop_size = self.config.population_size;
+        let mut new_genomes = Vec::with_capacity(pop_size);
 
-        // Elitism: copy top individuals
-        let elite_count = (self.config.population_size as f64 * self.config.elitism_rate) as usize;
-        let mut elite: Vec<_> = self.population.genomes
+        // Fast Template-Aware Elitism using indices instead of HashMap<String>
+        let elite_count = (pop_size as f64 * self.config.elitism_rate) as usize;
+        
+        // Collect valid genome indices with their fitness score for fast sorting
+        let mut valid_indices: Vec<(usize, u32, f64)> = self.population.genomes
             .iter()
-            .filter(|g| g.fitness.as_ref().map_or(false, |f| f.is_valid))
+            .enumerate()
+            .filter_map(|(i, g)| {
+                g.fitness.as_ref().and_then(|f| {
+                    if f.is_valid {
+                        Some((i, f.pareto_rank, f.crowding_distance))
+                    } else {
+                        None
+                    }
+                })
+            })
             .collect();
-        elite.sort_by(|a, b| {
-            let fa = a.fitness.as_ref().unwrap();
-            let fb = b.fitness.as_ref().unwrap();
-            // Sort by Pareto rank, then crowding distance
-            match fa.pareto_rank.cmp(&fb.pareto_rank) {
-                std::cmp::Ordering::Equal => fb.crowding_distance
-                    .partial_cmp(&fa.crowding_distance)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                ord => ord,
-            }
-        });
-
-        for genome in elite.into_iter().take(elite_count) {
-            let mut clone = genome.clone_with_new_id();
-            clone.fitness = None; // Will be re-evaluated
+        
+        // Sort by (pareto_rank ASC, crowding_distance DESC) - only need top elite_count
+        if valid_indices.len() > elite_count {
+            valid_indices.select_nth_unstable_by(elite_count, |a, b| {
+                match a.1.cmp(&b.1) {
+                    std::cmp::Ordering::Equal => b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal),
+                    ord => ord,
+                }
+            });
+            valid_indices.truncate(elite_count);
+        }
+        
+        // Clone elite genomes (fitness cleared for re-evaluation)
+        for (idx, _, _) in valid_indices.iter().take(elite_count) {
+            let mut clone = self.population.genomes[*idx].clone_with_new_id();
+            clone.fitness = None;
             new_genomes.push(clone.with_generation(next_gen));
         }
 
+        // Cache templates slice outside loop
+        let templates = self.catalog.templates();
+        let templates_len = templates.len();
+
         // Generate rest through selection, crossover, mutation
-        while new_genomes.len() < self.config.population_size {
+        while new_genomes.len() < pop_size {
             let parents = selection.select(&self.population.genomes, 2, &mut self.rng);
 
             if parents.len() < 2 {
-                // Not enough parents, generate random
-                new_genomes.push(Population::random_genome(
-                    &mut self.rng,
-                    &self.param_ranges,
-                    next_gen,
-                ));
+                // Not enough parents, generate from catalog template
+                if templates_len > 0 {
+                    let template = &templates[self.rng.gen_range(0..templates_len)];
+                    new_genomes.push(StrategyCatalog::to_genome(
+                        template,
+                        &mut self.rng,
+                        &self.param_ranges,
+                        next_gen,
+                    ));
+                } else {
+                    new_genomes.push(Population::random_genome(
+                        &mut self.rng,
+                        &self.param_ranges,
+                        next_gen,
+                    ));
+                }
                 continue;
             }
 
@@ -343,7 +391,7 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             self.repair_stats.merge(&stats2);
 
             new_genomes.push(child1);
-            if new_genomes.len() < self.config.population_size {
+            if new_genomes.len() < pop_size {
                 new_genomes.push(child2);
             }
         }
@@ -498,6 +546,10 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
         institutional_criteria.max_oos_drawdown = self.config.gates.max_drawdown;
         let institutional_strategy = crate::hall_of_fame_unified::InstitutionalStrategy::new(institutional_criteria);
         let mut validated_hof = ValidatedHallOfFame::new(self.config.hall_of_fame_size, institutional_strategy);
+        
+        // Track failed candidates for diagnostics (homologation mode)
+        let mut failed_candidates: Vec<FailedCandidate> = Vec::new();
+        const MAX_FAILED_CANDIDATES: usize = 1000; // Limit to prevent memory issues
 
         // Create split plan for Stage B validation
         let split_config = SplitPlanConfig::default();
@@ -517,13 +569,19 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             stage_b_config.max_oos_drawdown * 100.0
         );
 
-        // Generate initial population
-        self.population = Population::random(
+        // Generate initial population from Strategy Catalog (Template-First GA)
+        self.population = Population::from_catalog(
+            &self.catalog,
             self.config.population_size,
             &mut self.rng,
             &self.param_ranges,
+            0,
         );
-        info!("Generated initial population of {} genomes", self.population.len());
+        info!(
+            "Generated initial population of {} genomes from {} templates",
+            self.population.len(),
+            self.catalog.len()
+        );
 
         // Main evolution loop
         for gen in 0..self.config.max_generations {
@@ -693,6 +751,9 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                                 passed: true,
                                 early_exit: false,
                                 discard_reason: None,
+                                stress_scenarios_passed: None,
+                                stress_scenarios_total: None,
+                                stress_test_passed: None,
                             };
                             validated_hof.try_add_validated(genome, &result, gen);
                             snapshot.genomes_validated += 1;
@@ -793,15 +854,77 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
                             passed: passes,
                             early_exit: false,
                             discard_reason: if passes { None } else { Some("Failed validation gates".into()) },
+                            stress_scenarios_passed: None,
+                            stress_scenarios_total: None,
+                            stress_test_passed: None,
                         };
 
                         // Cache the result
                         validation_cache.insert_validation(result.to_cache_entry());
                         snapshot.splits_evaluated += split_plan.num_splits();
                         
+                        // TRAIL LOG: Complete traceability for each strategy
+                        let strategy_id = &genome.id.to_string()[..8];
+                        let template = genome.template_slug.as_deref().unwrap_or("none");
+                        let stage_a_sharpe = genome.fitness.as_ref().map(|f| f.sharpe_ratio).unwrap_or(0.0);
+                        
+                        info!(
+                            "[TRAIL] Gen {} | {} | Template {} | A: sharpe={:.3} | B: sharpe={:.3} dd={:.3} pbo={:.3} | {}",
+                            gen,
+                            strategy_id,
+                            template,
+                            stage_a_sharpe,
+                            oos_sharpe,
+                            oos_max_dd,
+                            pbo,
+                            if passes { "PASS" } else { "FAIL" }
+                        );
+                        
                         if passes {
                             validated_hof.try_add_validated(genome, &result, gen);
                             snapshot.genomes_validated += 1;
+                        } else if failed_candidates.len() < MAX_FAILED_CANDIDATES {
+                            // Track failed candidate for diagnostics
+                            let mut failure_reasons = Vec::new();
+                            if !pass_sharpe { 
+                                failure_reasons.push(format!("sharpe {:.3} < {:.3}", oos_sharpe, stage_b_config.min_oos_sharpe)); 
+                            }
+                            if !pass_pbo { 
+                                failure_reasons.push(format!("pbo {:.3} > {:.3}", pbo, stage_b_config.max_pbo)); 
+                            }
+                            if !pass_degradation { 
+                                failure_reasons.push(format!("degrad {:.1}% > {:.1}%", degradation_pct, stage_b_config.max_degradation_pct)); 
+                            }
+                            if !pass_drawdown { 
+                                failure_reasons.push(format!("dd {:.3} < {:.3}", oos_max_dd, stage_b_config.max_oos_drawdown)); 
+                            }
+                            
+                            // Debug log with failure reasons
+                            debug!(
+                                "[TRAIL] {} FAIL reasons: {}",
+                                strategy_id,
+                                failure_reasons.join(", ")
+                            );
+                            
+                            // Determine market from validation tier
+                            let (market, universe) = if self.config.validation_tier.contains("brazil") || self.config.validation_tier.contains("br") {
+                                ("BR", "IBOV")
+                            } else {
+                                ("US", "SP500")
+                            };
+                            let identity = combiner_core::StrategyIdentity::from_genome(genome, market, universe);
+                            
+                            failed_candidates.push(FailedCandidate {
+                                genome: (*genome).clone(),
+                                identity,
+                                generation: gen,
+                                stage_a_sharpe,
+                                stage_b_sharpe: oos_sharpe,
+                                stage_b_max_dd: oos_max_dd,
+                                pbo,
+                                degradation_pct,
+                                failure_reasons,
+                            });
                         }
                     }
                 }
@@ -1020,9 +1143,33 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
             );
         }
 
+        // Log failed candidates summary for diagnostics
+        if !failed_candidates.is_empty() {
+            info!(
+                "Stage B diagnostics: {} failed candidates tracked (limit: {})",
+                failed_candidates.len(),
+                MAX_FAILED_CANDIDATES
+            );
+        }
+        
+        // Ensure all HoF entries have StrategyIdentity populated
+        let (market, universe) = if self.config.validation_tier.contains("brazil") || self.config.validation_tier.contains("br") {
+            ("BR", "IBOV")
+        } else {
+            ("US", "SP500")
+        };
+        for entry in validated_hof.entries_mut() {
+            entry.ensure_identity(market, universe);
+        }
+        // Also ensure Stage A HoF has identity
+        for entry in self.hall_of_fame.entries_mut() {
+            entry.ensure_identity(market, universe);
+        }
+        
         Ok(UltraEvolutionResult {
             validated_hall_of_fame: validated_hof,
             stage_a_hall_of_fame: self.hall_of_fame.clone(),
+            failed_candidates,
             performance_metrics: perf_metrics,
             total_generations: perf_summary.total_generations as u32,
             total_time_secs: total_elapsed.as_secs_f64(),
@@ -1031,17 +1178,75 @@ impl<E: BacktestExecutor> EvolutionEngine<E> {
 }
 
 /// Result from ultra-performance evolution
+/// Record of a failed Stage B candidate with failure reasons (for diagnostics)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FailedCandidate {
+    /// The genome that failed
+    pub genome: StrategyGenome,
+    /// Strategy identity for traceability
+    pub identity: combiner_core::StrategyIdentity,
+    /// Generation when evaluated
+    pub generation: u32,
+    /// Stage A Sharpe ratio
+    pub stage_a_sharpe: f64,
+    /// Stage B (OOS) Sharpe ratio
+    pub stage_b_sharpe: f64,
+    /// Stage B max drawdown
+    pub stage_b_max_dd: f64,
+    /// PBO (probability of backtest overfitting)
+    pub pbo: f64,
+    /// Degradation percentage
+    pub degradation_pct: f64,
+    /// List of failure reasons
+    pub failure_reasons: Vec<String>,
+}
+
 pub struct UltraEvolutionResult {
     /// Hall of Fame with validated strategies (Stage B - top_k only)
     pub validated_hall_of_fame: ValidatedHallOfFame,
     /// Hall of Fame from evolution (Stage A - all Pareto-optimal candidates)
     pub stage_a_hall_of_fame: HallOfFame,
+    /// Failed Stage B candidates with failure reasons (for diagnostics)
+    pub failed_candidates: Vec<FailedCandidate>,
     /// Performance metrics
     pub performance_metrics: Arc<PerformanceMetrics>,
     /// Total generations run
     pub total_generations: u32,
     /// Total time in seconds
     pub total_time_secs: f64,
+}
+
+// ============================================================================
+// InProcessExecutor-specific constructor
+// ============================================================================
+
+impl EvolutionEngine<InProcessExecutor> {
+    /// Create an ultra-fast evolution engine with in-process backtest execution.
+    /// 
+    /// This constructor pre-loads market data once and reuses it for all evaluations,
+    /// eliminating CSV parsing overhead. Target: < 20ms per backtest.
+    /// 
+    /// # Arguments
+    /// * `config` - Evolution configuration
+    /// * `market_data_path` - Path to market data CSV file
+    /// 
+    /// # Errors
+    /// Returns error if market data cannot be loaded.
+    pub fn with_in_process(
+        config: EvolutionConfig,
+        market_data_path: &std::path::Path,
+    ) -> Result<Self, EngineError> {
+        let executor = InProcessExecutor::from_csv(market_data_path)
+            .map_err(|e| EngineError::Execution(format!("Failed to load market data: {}", e)))?;
+        
+        info!(
+            "In-process executor initialized: {} days, {} symbols",
+            executor.market_data().num_days(),
+            executor.market_data().num_symbols()
+        );
+        
+        Ok(Self::new(config, executor))
+    }
 }
 
 #[cfg(test)]

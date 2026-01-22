@@ -1,0 +1,28 @@
+[strategy]
+id = "swing_ma_crossover_conservative"
+description = "MA Crossover conservador para swing trade"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+params = { lookback_days = 126, top_pct = 30, min_return = 0.0, skip_last_days = 21 }
+
+[[pipeline]]
+type = "entry"
+block_id = "ma_crossover"
+params = { fast_period = 20, slow_period = 50 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.08 }
+
+[[pipeline]]
+type = "exit"
+block_id = "time_exit"
+params = { max_days = 60 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 0.15, min_weight = 0.02, max_positions = 10 }

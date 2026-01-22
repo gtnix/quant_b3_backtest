@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import {
   Bell,
   AlertTriangle,

@@ -2,8 +2,8 @@
  * ConfigTrading - Configure trading parameters (fees, slippage, sizing)
  */
 
-import { useState } from 'react';
-import { DollarSign, Save, RefreshCw, Info } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { DollarSign, Save, RefreshCw, Info, Calculator, TrendingDown, ArrowRight } from 'lucide-react';
 import { QuickTooltip } from '../components/ui/TooltipInfo';
 
 interface TradingParams {
@@ -72,6 +72,119 @@ const POSITION_SIZING: Record<string, { label: string; description: string }> = 
   volatility: { label: 'Inverse Volatility', description: 'Weight inversely by volatility (lower vol = higher weight)' },
   risk_parity: { label: 'Risk Parity', description: 'Equal risk contribution per position' },
 };
+
+// Cost simulator component
+function CostSimulator({ params, market }: { params: TradingParams; market: 'br' | 'us' }) {
+  const [tradeValue, setTradeValue] = useState(market === 'br' ? 10000 : 5000);
+  
+  const costs = useMemo(() => {
+    // Fee cost (round-trip = entry + exit)
+    const feePerSide = tradeValue * params.feeRate;
+    const feeRoundTrip = feePerSide * 2;
+    
+    // Slippage cost (bps = basis points = 0.01%)
+    const slippagePerSide = tradeValue * (params.slippageBps / 10000);
+    const slippageRoundTrip = slippagePerSide * 2;
+    
+    // Total cost
+    const totalCost = feeRoundTrip + slippageRoundTrip;
+    const totalPct = (totalCost / tradeValue) * 100;
+    
+    // Break-even: minimum return to cover costs
+    const breakEvenPct = totalPct;
+    
+    // Annual impact (assuming 50 trades/year for swing, 200 for intraday)
+    const tradesPerYear = market === 'br' ? 50 : 100;
+    const annualCost = totalCost * tradesPerYear;
+    
+    return {
+      feePerSide,
+      feeRoundTrip,
+      slippagePerSide,
+      slippageRoundTrip,
+      totalCost,
+      totalPct,
+      breakEvenPct,
+      annualCost,
+      tradesPerYear,
+    };
+  }, [tradeValue, params.feeRate, params.slippageBps, market]);
+  
+  const currency = market === 'br' ? 'R$' : '$';
+  const formatCurrency = (val: number) => 
+    market === 'br' 
+      ? val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Calculator className="w-5 h-5 text-amber-400" />
+        <h3 className="text-lg font-semibold text-white">Simulador de Custos</h3>
+      </div>
+      
+      {/* Trade Value Input */}
+      <div className="mb-4">
+        <label className="text-sm text-slate-400 mb-2 block">Valor por Trade ({currency})</label>
+        <input
+          type="number"
+          value={tradeValue}
+          onChange={e => setTradeValue(parseInt(e.target.value) || 1000)}
+          className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-amber-500"
+        />
+      </div>
+      
+      {/* Cost Breakdown */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700">
+          <p className="text-xs text-slate-500 uppercase mb-1">Taxa (ida e volta)</p>
+          <p className="text-lg font-mono font-bold text-white">
+            {currency} {formatCurrency(costs.feeRoundTrip)}
+          </p>
+          <p className="text-xs text-slate-500">{(params.feeRate * 100 * 2).toFixed(3)}%</p>
+        </div>
+        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700">
+          <p className="text-xs text-slate-500 uppercase mb-1">Slippage (ida e volta)</p>
+          <p className="text-lg font-mono font-bold text-white">
+            {currency} {formatCurrency(costs.slippageRoundTrip)}
+          </p>
+          <p className="text-xs text-slate-500">{(params.slippageBps * 2 / 100).toFixed(2)}%</p>
+        </div>
+        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30">
+          <p className="text-xs text-slate-500 uppercase mb-1">Custo Total</p>
+          <p className="text-lg font-mono font-bold text-rose-400">
+            {currency} {formatCurrency(costs.totalCost)}
+          </p>
+          <p className="text-xs text-rose-400">{costs.totalPct.toFixed(3)}%</p>
+        </div>
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+          <p className="text-xs text-slate-500 uppercase mb-1">Break-even</p>
+          <p className="text-lg font-mono font-bold text-amber-400">
+            +{costs.breakEvenPct.toFixed(2)}%
+          </p>
+          <p className="text-xs text-slate-500">Mínimo para lucrar</p>
+        </div>
+      </div>
+      
+      {/* Annual Impact */}
+      <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <TrendingDown className="w-5 h-5 text-slate-500" />
+          <div>
+            <p className="text-sm text-white">Impacto Anual Estimado</p>
+            <p className="text-xs text-slate-500">Assumindo ~{costs.tradesPerYear} trades/ano</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xl font-mono font-bold text-rose-400">
+            {currency} {formatCurrency(costs.annualCost)}
+          </p>
+          <p className="text-xs text-slate-500">em custos de transação</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ConfigTrading() {
   const [params, setParams] = useState<Record<string, TradingParams>>({
@@ -299,15 +412,18 @@ export function ConfigTrading() {
               </div>
             </div>
           </div>
+          
+          {/* Cost Simulator */}
+          <CostSimulator params={current} market={activeMarket} />
         </div>
         
         {/* Info */}
         <div className="flex items-start gap-3 p-4 rounded-lg bg-slate-800/50 border border-slate-700 text-sm text-slate-400">
           <Info className="w-5 h-5 text-slate-500 mt-0.5 flex-shrink-0" />
           <p>
-            These parameters affect how backtests calculate costs and manage positions.
-            {activeMarket === 'br' && ' B3 requires trades in multiples of 100 shares (lote padrão).'}
-            {activeMarket === 'us' && ' US markets allow single-share trades.'}
+            Estes parâmetros afetam como os backtests calculam custos e gerenciam posições.
+            {activeMarket === 'br' && ' A B3 exige trades em múltiplos de 100 ações (lote padrão).'}
+            {activeMarket === 'us' && ' Mercados US permitem trades de ações unitárias.'}
           </p>
         </div>
       </div>

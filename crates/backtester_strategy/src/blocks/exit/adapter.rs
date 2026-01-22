@@ -344,10 +344,17 @@ impl StrategyBlock for TimeExitBlock {
 /// Create exit block from block_id.
 pub fn create_exit_block(block_id: &str) -> Option<Box<dyn StrategyBlock>> {
     match block_id {
+        // Basic exits
         "stop_loss" => Some(Box::new(StopLossBlock::new())),
         "take_profit" => Some(Box::new(TakeProfitBlock::new())),
         "trailing_stop" => Some(Box::new(TrailingStopBlock::new())),
         "time_exit" => Some(Box::new(TimeExitBlock::new())),
+        // Advanced exits (prop-trading level)
+        "chandelier_atr" => Some(Box::new(super::advanced::ChandelierAtrBlock::new())),
+        "volatility_spike" => Some(Box::new(super::advanced::VolatilitySpikeBlock::new())),
+        "time_atr_hybrid" => Some(Box::new(super::advanced::TimeAtrHybridBlock::new())),
+        "drawdown_limit" => Some(Box::new(super::advanced::DrawdownLimitBlock::new())),
+        "trend_reversal" => Some(Box::new(super::advanced::TrendReversalBlock::new())),
         _ => None,
     }
 }

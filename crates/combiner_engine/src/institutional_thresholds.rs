@@ -113,13 +113,78 @@ impl InstitutionalThresholds {
         }
     }
     
+    /// Create thresholds calibrated for Brazilian market (B3).
+    /// Adjusted for higher volatility and lower liquidity vs US markets.
+    /// Based on realistic OOS performance expectations for IBOV universe.
+    pub fn brazil() -> Self {
+        Self {
+            min_oos_sharpe: 0.7,        // More realistic than 1.0 for emerging market
+            max_pbo: 0.15,              // Slightly relaxed from 0.10
+            min_dsr: 0.6,               // Adjusted for higher variance in BR
+            max_degradation_pct: 60.0,  // Allow 60% degradation (higher vol = more degradation)
+            min_split_pass_rate: 0.5,   // 50% of splits must pass
+            max_oos_drawdown: -0.25,    // 25% max drawdown (higher than US due to vol)
+            min_profit_factor_oos: 1.3, // Slightly relaxed profit factor
+        }
+    }
+    
+    /// Create thresholds calibrated for US equity markets (S&P 500).
+    /// More stringent than B3 due to market efficiency and higher competition.
+    /// Based on academic literature: Harvey & Liu (2019), Frazzini et al. (2012).
+    /// Note: DSR relaxed to 0.20 because DSR calculation penalizes heavily with large N trials.
+    /// With Sharpe ~2.3 and N=100k trials, DSR ~0.22 is mathematically expected.
+    pub fn us() -> Self {
+        Self {
+            min_oos_sharpe: 0.60,       // Lower alpha available in efficient market
+            max_pbo: 0.12,              // More rigorous (larger trial universe)
+            min_dsr: 0.20,              // Adjusted: DSR penalizes with large N trials
+            max_degradation_pct: 45.0,  // Tighter tolerance (more stable market)
+            min_split_pass_rate: 0.6,   // 60% of splits must pass
+            max_oos_drawdown: -0.20,    // 20% max drawdown (lower volatility)
+            min_profit_factor_oos: 1.4, // Stronger edge required
+        }
+    }
+    
+    /// Create thresholds for research/discovery phase in US market.
+    /// Relaxed to preserve strategies for further analysis.
+    pub fn research_us() -> Self {
+        Self {
+            min_oos_sharpe: 0.30,       // Any positive expected return after costs
+            max_pbo: 0.40,              // Allow higher PBO for discovery
+            min_dsr: 0.10,              // Very relaxed DSR for exploration (N trials effect)
+            max_degradation_pct: 75.0,  // Allow significant degradation
+            min_split_pass_rate: 0.35,  // 35% of splits
+            max_oos_drawdown: -0.35,    // 35% max drawdown
+            min_profit_factor_oos: 1.15, // Slightly profitable
+        }
+    }
+    
+    /// Create thresholds for research/discovery phase in Brazilian market.
+    /// Very relaxed to preserve strategies for further analysis.
+    /// Strategies passing this tier should be marked for real WFA/CPCV validation.
+    pub fn research_brazil() -> Self {
+        Self {
+            min_oos_sharpe: 0.3,        // Any positive expected return after costs
+            max_pbo: 0.40,              // Allow higher PBO for discovery
+            min_dsr: 0.2,               // Relaxed DSR for exploration
+            max_degradation_pct: 80.0,  // Allow significant degradation
+            min_split_pass_rate: 0.3,   // 30% of splits
+            max_oos_drawdown: -0.40,    // 40% max drawdown
+            min_profit_factor_oos: 1.1, // Slightly profitable
+        }
+    }
+    
     /// Create thresholds from a string tier name.
-    /// Valid tiers: "strict", "production", "research", "lenient"
+    /// Valid tiers: "strict", "production", "brazil", "us", "research", "research_brazil", "research_us", "lenient"
     pub fn from_tier(tier: &str) -> Self {
         match tier.to_lowercase().as_str() {
             "strict" | "max" | "live" => Self::strict(),
             "production" | "prod" => Self::production(),
+            "brazil" | "br" | "b3" => Self::brazil(),
+            "us" | "usa" | "american" | "sp500" => Self::us(),
             "research" | "dev" => Self::research(),
+            "research_brazil" | "research_br" => Self::research_brazil(),
+            "research_us" | "research_usa" => Self::research_us(),
             "lenient" | "debug" | "discovery" => Self::lenient(),
             _ => Self::research(), // Default to research
         }

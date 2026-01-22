@@ -1,10 +1,13 @@
 """Abstract base class for data providers."""
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(Exception):
@@ -154,6 +157,16 @@ class Provider(ABC):
         # Volume as integer
         if 'volume' in df.columns:
             df['volume'] = df['volume'].fillna(0).astype(int)
+        
+        # Remove rows with missing OHLC data (critical fields)
+        ohlc_cols = ['open', 'high', 'low', 'close']
+        present_ohlc = [c for c in ohlc_cols if c in df.columns]
+        if present_ohlc:
+            rows_before = len(df)
+            df = df.dropna(subset=present_ohlc)
+            rows_after = len(df)
+            if rows_before != rows_after:
+                logger.warning(f"Removed {rows_before - rows_after} rows with missing OHLC data")
         
         return df.reset_index(drop=True)
 

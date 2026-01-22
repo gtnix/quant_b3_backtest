@@ -1,0 +1,28 @@
+[strategy]
+id = "swing_rsi_moderate"
+description = "RSI swing trade moderado"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+params = { lookback_days = 63, top_pct = 40, min_return = -0.10, skip_last_days = 5 }
+
+[[pipeline]]
+type = "entry"
+block_id = "rsi"
+params = { period = 14, oversold = 30, overbought = 70 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.10 }
+
+[[pipeline]]
+type = "exit"
+block_id = "take_profit"
+params = { target_pct = 0.25 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 0.20, min_weight = 0.02, max_positions = 10 }

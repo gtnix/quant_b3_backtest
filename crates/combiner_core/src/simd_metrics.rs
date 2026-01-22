@@ -332,8 +332,9 @@ pub fn sortino_simd(returns: &[f64], rf_rate: f64, target: f64) -> f64 {
     let downside_variance = total_downside_sq / n_f64;
     
     if downside_variance <= 1e-20 {
-        // No downside deviation - return high value if mean is positive
-        return if mean > 0.0 { 10.0 } else { 0.0 };
+        // No downside deviation - return 0.0 (undefined Sortino)
+        // Previously returned 10.0 which caused false positives with 0 trades
+        return 0.0;
     }
     
     let downside_dev = downside_variance.sqrt();
@@ -366,7 +367,8 @@ pub fn sortino_scalar(returns: &[f64], rf_rate: f64, target: f64) -> f64 {
     let downside_variance = downside_sq / n_f64;
     
     if downside_variance <= 1e-20 {
-        return if mean > 0.0 { 10.0 } else { 0.0 };
+        // No downside deviation - return 0.0 (undefined Sortino)
+        return 0.0;
     }
     
     let downside_dev = downside_variance.sqrt();
@@ -419,11 +421,11 @@ pub fn calmar_ratio(returns: &[f64]) -> f64 {
     let max_dd = max_drawdown_simd(returns);
     
     if max_dd >= -0.001 {
-        // No significant drawdown
-        return if cagr_val > 0.0 { 10.0 } else { 0.0 };
+        // No significant drawdown = undefined Calmar, return 0.0
+        return 0.0;
     }
 
-    cagr_val / max_dd.abs()
+    (cagr_val / max_dd.abs()).clamp(-10.0, 10.0)
 }
 
 /// Calculate profit factor (gross profit / gross loss).
@@ -534,9 +536,8 @@ pub fn calculate_all_metrics(returns: &[f64], rf_rate: f64) -> MetricsBatch {
     
     let sortino_raw = if downside_dev > 1e-20 {
         (mean / downside_dev) * SQRT_TRADING_DAYS
-    } else if mean > 0.0 {
-        10.0
     } else {
+        // No downside deviation = undefined Sortino, return 0.0
         0.0
     };
     let sortino = sortino_raw.clamp(-20.0, 20.0); // Sortino can be higher than Sharpe
@@ -546,18 +547,16 @@ pub fn calculate_all_metrics(returns: &[f64], rf_rate: f64) -> MetricsBatch {
     let cagr_val = if years > 0.01 { nav.powf(1.0 / years) - 1.0 } else { 0.0 };
 
     let calmar = if max_dd < -0.001 {
-        cagr_val / max_dd.abs()
-    } else if cagr_val > 0.0 {
-        10.0
+        (cagr_val / max_dd.abs()).clamp(-10.0, 10.0)
     } else {
+        // No drawdown = undefined Calmar, return 0.0
         0.0
     };
 
     let pf = if gross_loss > 1e-10 {
-        gross_profit / gross_loss
-    } else if gross_profit > 0.0 {
-        100.0
+        (gross_profit / gross_loss).min(100.0)
     } else {
+        // No losses = undefined profit factor, return 0.0
         0.0
     };
 
@@ -685,9 +684,8 @@ pub fn calculate_all_metrics_avx512(returns: &[f64], rf_rate: f64) -> MetricsBat
 
     let sortino = if downside_dev > 1e-20 {
         ((mean / downside_dev) * SQRT_TRADING_DAYS).clamp(-20.0, 20.0)
-    } else if mean > 0.0 {
-        10.0
     } else {
+        // No downside deviation = undefined Sortino, return 0.0
         0.0
     };
 
@@ -697,18 +695,16 @@ pub fn calculate_all_metrics_avx512(returns: &[f64], rf_rate: f64) -> MetricsBat
     let cagr_val = if years > 0.01 { nav.powf(1.0 / years) - 1.0 } else { 0.0 };
 
     let calmar = if max_dd < -0.001 {
-        cagr_val / max_dd.abs()
-    } else if cagr_val > 0.0 {
-        10.0
+        (cagr_val / max_dd.abs()).clamp(-10.0, 10.0)
     } else {
+        // No drawdown = undefined Calmar, return 0.0
         0.0
     };
 
     let pf = if gross_loss > 1e-10 {
-        gross_profit / gross_loss
-    } else if gross_profit > 0.0 {
-        100.0
+        (gross_profit / gross_loss).min(100.0)
     } else {
+        // No losses = undefined profit factor, return 0.0
         0.0
     };
 

@@ -1,0 +1,28 @@
+[strategy]
+id = "swing_macd_moderate"
+description = "MACD swing trade moderado"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+params = { lookback_days = 126, top_pct = 30, min_return = 0.0, skip_last_days = 21 }
+
+[[pipeline]]
+type = "entry"
+block_id = "macd"
+params = { fast_ema = 12, slow_ema = 26, signal = 9 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.10 }
+
+[[pipeline]]
+type = "exit"
+block_id = "take_profit"
+params = { target_pct = 0.30 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 0.20, min_weight = 0.02, max_positions = 10 }

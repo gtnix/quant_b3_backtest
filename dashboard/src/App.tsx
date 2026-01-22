@@ -18,14 +18,16 @@ import { ConfigBudget } from './pages/ConfigBudget';
 import { ConfigGates } from './pages/ConfigGates';
 import { AuditReport } from './pages/AuditReport';
 import { StrategySelector } from './pages/StrategySelector';
+import { Runs } from './pages/Runs';
 import { GlossaryOverlay } from './components/GlossaryOverlay';
 import { useDataStore } from './stores/dataStore';
-import { platform, features } from './lib/platform';
+import { features } from './lib/platform';
 import { createSSEConnection, type SSEEvent } from './lib/commands';
 
 export type Page = 
   | 'miner'
   | 'hall-of-fame'
+  | 'runs'
   | 'strategies'
   | 'config-universe'
   | 'config-trading'
@@ -49,9 +51,9 @@ function App() {
   const sseRef = useRef<EventSource | null>(null);
   const { startWatcher, artifactsRoot, loadIndex } = useDataStore();
 
-  // Start file watcher when artifacts root is set (Tauri mode)
+  // Start file watcher when artifacts root is set
   useEffect(() => {
-    if (artifactsRoot && platform.isTauri) {
+    if (artifactsRoot) {
       startWatcher();
     }
   }, [artifactsRoot]);
@@ -124,6 +126,8 @@ function App() {
         return <MinerControl />;
       case 'hall-of-fame':
         return <HallOfFame />;
+      case 'runs':
+        return <Runs />;
       case 'strategies':
         return <StrategySelector />;
       case 'config-universe':

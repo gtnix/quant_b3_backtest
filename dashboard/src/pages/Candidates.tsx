@@ -4,7 +4,6 @@ import { CandidateDetail } from '../components/CandidateDetail';
 import { ParetoScatter } from '../components/charts/ParetoScatter';
 import { useDataStore } from '../stores/dataStore';
 import type { CandidateListItem } from '../stores/dataStore';
-import { platform } from '../lib/platform';
 import { FolderSelector } from '../components/FolderSelector';
 import { QuickTooltip } from '../components/ui/TooltipInfo';
 import { 
@@ -68,18 +67,9 @@ export function Candidates() {
   }, [searchQuery, filterPbo, filterClass, selectedRunId]);
 
   const handleSelectFolder = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Select Project Root'
-      });
-      if (selected && typeof selected === 'string') {
-        await setArtifactsRoot(selected);
-      }
-    } catch (err) {
-      console.error('Failed to open folder dialog:', err);
+    const path = prompt('Enter artifacts path:');
+    if (path) {
+      await setArtifactsRoot(path);
     }
   };
 
@@ -287,32 +277,12 @@ export function Candidates() {
     ? candidatesList.reduce((sum, c) => sum + c.oos_sharpe_net, 0) / candidatesList.length 
     : 0;
 
-  // Auto-initialize in browser mode - fetch recent runs even without artifactsRoot
+  // Auto-initialize - fetch recent runs
   useEffect(() => {
-    if (!platform.isTauri && recentRuns.length === 0 && !selectedRunId) {
+    if (recentRuns.length === 0 && !selectedRunId) {
       fetchRecentRuns(10);
     }
   }, []);
-
-  // In browser mode, skip the artifactsRoot requirement - we can fetch directly from Neon
-  if (!artifactsRoot && platform.isTauri) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full space-y-6">
-        <FolderOpen className="w-16 h-16 text-terminal-muted" />
-        <div className="text-center max-w-lg">
-          <h2 className="text-xl font-semibold mb-2">Nenhum Projeto Selecionado</h2>
-          <p className="text-terminal-muted mb-4">Selecione uma pasta de projeto contendo artefatos SCG.</p>
-          <FolderSelector 
-            type="artifacts"
-            label="Pasta de Artefatos"
-            description="Selecione a pasta contendo o output do SCG"
-            onPathChange={(path) => setArtifactsRoot(path)}
-            className="mb-4"
-          />
-        </div>
-      </div>
-    );
-  }
 
   if (!selectedRunId) {
     return (

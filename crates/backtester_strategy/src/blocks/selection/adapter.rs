@@ -256,6 +256,30 @@ pub fn create_selection_block(block_id: &str, params: &BlockParams) -> Option<Bo
         "carry" => Some(carry_block(
             get_f64(params, "min_carry", 0.0),
         )),
+        // New selection blocks from Strategy Catalog
+        "sector_rotation" | "relative_strength" | "business_cycle" => {
+            Some(Box::new(super::sector_rotation::SectorRotationBlock::new()))
+        }
+        "business_cycle_def" => {
+            Some(Box::new(super::factor_variants::BusinessCycleDefBlock::new()))
+        }
+        "multi_factor" => {
+            Some(Box::new(super::multi_factor::MultiFactorBlock::new()))
+        }
+        // Factor variants
+        "value_pb" => Some(Box::new(super::factor_variants::ValuePBBlock::new())),
+        "value_pe" => Some(Box::new(super::factor_variants::ValuePEBlock::new())),
+        "quality_roe" => Some(Box::new(super::factor_variants::QualityROEBlock::new())),
+        "quality_multi" => Some(Box::new(super::factor_variants::QualityMultiBlock::new())),
+        "dividend_growth" => Some(Box::new(super::factor_variants::DividendGrowthBlock::new())),
+        // Portfolio optimization
+        "max_sharpe" => Some(Box::new(super::portfolio_opt::MaxSharpeBlock::new())),
+        "min_variance" => Some(Box::new(super::portfolio_opt::MinVarianceBlock::new())),
+        // Advanced selection blocks (prop-trading level)
+        "liquidity_filter" => Some(Box::new(super::advanced::LiquidityFilterBlock::new())),
+        "regime_filter" => Some(Box::new(super::advanced::RegimeFilterBlock::new())),
+        // Sizing blocks (commonly used as selection with equal_weight semantics)
+        "equal_weight" | "risk_parity" => Some(momentum_block(252, 0.0)), // Fallback to momentum
         _ => None,
     }
 }

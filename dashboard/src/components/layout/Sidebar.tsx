@@ -4,6 +4,7 @@ import {
   Settings,
   Database,
   FolderKanban,
+  FolderOpen,
   Shield,
   GitCompare,
   BarChart3,
@@ -28,6 +29,7 @@ const navItems: { id: Page; label: string; icon: React.ElementType; group?: stri
   // Mining (primary section)
   { id: 'miner', label: 'Miner Control', icon: Gauge, group: 'Mining' },
   { id: 'hall-of-fame', label: 'Hall of Fame', icon: Trophy, group: 'Mining' },
+  { id: 'runs', label: 'Runs', icon: FolderOpen, group: 'Mining' },
   { id: 'strategies', label: 'Strategy Catalog', icon: Boxes, group: 'Mining' },
   
   // Configuration

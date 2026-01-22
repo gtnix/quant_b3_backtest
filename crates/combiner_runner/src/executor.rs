@@ -656,6 +656,15 @@ impl BacktestExecutor for CliExecutor {
             debug!("Failed to cleanup temp TOML {:?}: {}", toml_path, e);
         }
 
+        // Clean up the run output directory after extracting metrics (ephemeral mode)
+        // This prevents disk explosion during long mining runs
+        // The metrics are already extracted, and OBFS pending files are handled separately
+        if output_path.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&output_path) {
+                debug!("Failed to cleanup run output dir {:?}: {}", output_path, e);
+            }
+        }
+
         info!(
             "Backtest successful: run_id={}, duration={}ms, sharpe={:.3}, cagr={:.2}%, trades={}",
             run_id,

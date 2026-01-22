@@ -6,6 +6,8 @@ use combiner_core::{
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
+use crate::strategy_catalog::StrategyCatalog;
+
 /// A population of genomes.
 #[derive(Debug, Clone)]
 pub struct Population {
@@ -41,6 +43,46 @@ impl Population {
         Self {
             genomes,
             generation: 0,
+        }
+    }
+
+    /// Generate a population from Strategy Catalog templates.
+    /// 
+    /// This is the RECOMMENDED way to generate initial population for Template-First GA.
+    /// Structure comes from templates, parameters are randomized within ranges.
+    /// 
+    /// # Arguments
+    /// * `catalog` - Strategy catalog with templates to use
+    /// * `size` - Population size
+    /// * `rng` - Random number generator
+    /// * `param_ranges` - Parameter specifications for randomization
+    /// * `generation` - Generation number (usually 0 for initial population)
+    pub fn from_catalog(
+        catalog: &StrategyCatalog,
+        size: usize,
+        rng: &mut ChaCha8Rng,
+        param_ranges: &ParamRanges,
+        generation: u32,
+    ) -> Self {
+        let templates = catalog.templates();
+        
+        if templates.is_empty() {
+            // Fallback to random generation if catalog is empty
+            tracing::warn!("Empty catalog, falling back to random generation");
+            return Self::random(size, rng, param_ranges);
+        }
+
+        let genomes: Vec<_> = (0..size)
+            .map(|_| {
+                // Pick a random template from the catalog
+                let template = &templates[rng.gen_range(0..templates.len())];
+                StrategyCatalog::to_genome(template, rng, param_ranges, generation)
+            })
+            .collect();
+
+        Self {
+            genomes,
+            generation,
         }
     }
 
@@ -382,6 +424,42 @@ mod tests {
             for (gene1, gene2) in g1.genes.iter().zip(g2.genes.iter()) {
                 assert_eq!(gene1.block_id, gene2.block_id);
             }
+        }
+    }
+
+    #[test]
+    fn test_from_catalog() {
+        let catalog = StrategyCatalog::from_builtin();
+        let param_ranges = ParamRanges::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        
+        let pop = Population::from_catalog(&catalog, 20, &mut rng, &param_ranges, 0);
+        
+        assert_eq!(pop.len(), 20);
+        assert_eq!(pop.generation, 0);
+        
+        // All genomes should have template_slug set (from catalog)
+        for genome in &pop.genomes {
+            assert!(genome.template_slug.is_some(), 
+                "Genome from catalog should have template_slug");
+        }
+    }
+
+    #[test]
+    fn test_from_catalog_deterministic() {
+        let catalog = StrategyCatalog::from_builtin();
+        let param_ranges = ParamRanges::new();
+        
+        let mut rng1 = ChaCha8Rng::seed_from_u64(42);
+        let pop1 = Population::from_catalog(&catalog, 10, &mut rng1, &param_ranges, 0);
+        
+        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
+        let pop2 = Population::from_catalog(&catalog, 10, &mut rng2, &param_ranges, 0);
+        
+        // Same seed should produce same population
+        for (g1, g2) in pop1.genomes.iter().zip(pop2.genomes.iter()) {
+            assert_eq!(g1.template_slug, g2.template_slug);
+            assert_eq!(g1.genes.len(), g2.genes.len());
         }
     }
 }

@@ -124,13 +124,51 @@ impl StageBConfig {
         }
     }
     
+    /// Create research_brazil config - relaxed thresholds with NO early exit (pursuit to completion)
+    pub fn research_brazil() -> Self {
+        let t = InstitutionalThresholds::research_brazil();
+        Self {
+            max_failures_early_exit: 999, // NO early exit - run all splits for homologation
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 1, // Very relaxed
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
+            use_cache: true,
+            generation: 0,
+            population_size: 100,
+        }
+    }
+    
+    /// Create research_us config - relaxed thresholds with NO early exit (pursuit to completion)
+    pub fn research_us() -> Self {
+        let t = InstitutionalThresholds::research_us();
+        Self {
+            max_failures_early_exit: 999, // NO early exit - run all splits for homologation
+            min_oos_sharpe: t.min_oos_sharpe,
+            max_oos_drawdown: t.max_oos_drawdown,
+            min_oos_trades: 1, // Very relaxed
+            max_degradation_pct: t.max_degradation_pct,
+            max_pbo: t.max_pbo,
+            min_dsr: t.min_dsr,
+            use_cache: true,
+            generation: 0,
+            population_size: 100,
+        }
+    }
+    
     /// Create config from a tier name string
-    /// Valid tiers: "production", "research", "lenient"
+    /// Valid tiers: "production", "research", "lenient", "brazil", "us", "research_brazil", "research_us"
     pub fn from_tier(tier: &str) -> Self {
         match tier.to_lowercase().as_str() {
             "production" | "prod" => Self::production(),
             "research" | "dev" => Self::research(),
             "lenient" | "debug" | "discovery" => Self::lenient(),
+            "brazil" | "br" | "b3" => Self::from(InstitutionalThresholds::brazil()),
+            "us" | "usa" | "american" | "sp500" => Self::from(InstitutionalThresholds::us()),
+            "research_brazil" | "research_br" => Self::research_brazil(),
+            "research_us" | "research_usa" => Self::research_us(),
             _ => Self::research(), // Default to research
         }
     }
@@ -198,6 +236,10 @@ pub struct ValidationResult {
     pub passed: bool,
     pub early_exit: bool,
     pub discard_reason: Option<String>,
+    /// Stress test results (if stress testing enabled)
+    pub stress_scenarios_passed: Option<u8>,
+    pub stress_scenarios_total: Option<u8>,
+    pub stress_test_passed: Option<bool>,
 }
 
 impl ValidationResult {
@@ -219,6 +261,9 @@ impl ValidationResult {
             passed: false,
             early_exit: false,
             discard_reason: Some(reason.into()),
+            stress_scenarios_passed: None,
+            stress_scenarios_total: None,
+            stress_test_passed: None,
         }
     }
 
@@ -227,6 +272,14 @@ impl ValidationResult {
         let mut result = Self::failed(genome_index, genome_hash, reason);
         result.early_exit = true;
         result
+    }
+
+    /// Set stress test results
+    pub fn with_stress_results(mut self, passed: usize, total: usize, min_required: usize) -> Self {
+        self.stress_scenarios_passed = Some(passed as u8);
+        self.stress_scenarios_total = Some(total as u8);
+        self.stress_test_passed = Some(passed >= min_required);
+        self
     }
 
     /// Convert to cache entry
@@ -372,6 +425,9 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
                     passed: cached.passed,
                     early_exit: false,
                     discard_reason: cached.discard_reason,
+                    stress_scenarios_passed: None, // Not available from cache
+                    stress_scenarios_total: None,
+                    stress_test_passed: None,
                 };
             }
         }
@@ -610,6 +666,9 @@ impl<E: BacktestExecutor + Send + Sync> StageBParallelValidator<E> {
             passed,
             early_exit: false,
             discard_reason,
+            stress_scenarios_passed: None,
+            stress_scenarios_total: None,
+            stress_test_passed: None,
         }
     }
 

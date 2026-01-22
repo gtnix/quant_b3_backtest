@@ -17,6 +17,7 @@ The Quant Finance Team is a coordinated set of AI agent skills designed for inst
 | [quant-engineer](quant-engineer/SKILL.md) | `/quant-engineer` | Rust performance engineering, zero-alloc hot paths, SIMD | Benchmark Report, Flamegraph, PR Checklist |
 | [quant-researcher](quant-researcher/SKILL.md) | `/quant-researcher` | Evolutionary strategy discovery, Block DSL, Pareto optimization | Research Hypothesis Card, Pareto Front Summary, Handoff Packet |
 | [risk-analyst](risk-analyst/SKILL.md) | `/risk-analyst` | Strategy validation, WFA/CPCV, PBO/DSR, stress testing | Validation Report, Promotion Memo, Overfitting Checklist |
+| [backtest-validator](backtest-validator/SKILL.md) | `/backtest-validator` | Metrics sanity, zero-trade detection, numerical edge cases | Metrics Audit, Anomaly Report |
 | [data-engineer](data-engineer/SKILL.md) | `/data-engineer` | Data quality, OHLCV ingestion, corporate actions, calendars | Data Quality Report, CA Ledger, Universe Snapshot |
 | [trader-expert](trader-expert/SKILL.md) | `/trader-expert` | Execution realism, slippage/costs, sessions, capacity | Execution Assumptions Card, Cost Report |
 | [devops-infra](devops-infra/SKILL.md) | `/devops-infra` | Local infrastructure, CI/CD, monitoring, health checks | Deployment Checklist, Runbook, Postmortem |
@@ -33,6 +34,7 @@ The Quant Finance Team is a coordinated set of AI agent skills designed for inst
 | Hot path bottleneck | `/quant-engineer` | "Profile process_day() and reduce allocations" |
 | Design new campaign | `/quant-researcher` | "Create momentum+value search space for IBOV" |
 | Validate before promotion | `/risk-analyst` | "Validate run_id X with WFA and stress suite" |
+| Sharpe=10 with 0 trades | `/backtest-validator` | "Investigate suspicious metrics in US mining run" |
 | Data looks wrong | `/data-engineer` | "Check PETR4 for missing bars and CA issues" |
 | Costs seem unrealistic | `/trader-expert` | "Review slippage assumptions for intraday strategy" |
 | Deploy failed | `/devops-infra` | "Rollback to previous version and investigate" |

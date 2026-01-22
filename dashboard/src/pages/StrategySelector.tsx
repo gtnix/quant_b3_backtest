@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react';
-import { Search, Filter, X, CheckCircle2, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, X, CheckCircle2, Trash2, ChevronDown, ChevronRight, Info, Eye, EyeOff } from 'lucide-react';
 import { useStrategyStore } from '../stores/strategyStore';
 import { StrategyCard } from '../components/strategy/StrategyCard';
 import { FamilyTabs } from '../components/strategy/FamilyTabs';
@@ -35,15 +35,40 @@ export function StrategySelector() {
     selectFamily,
     setFilter,
     clearSelection,
-    selectAll,
     selectCatalog,
     getFilteredTemplates,
     getFamilyBySlug,
   } = useStrategyStore();
 
+  // Collapsible state - all collapsed by default
+  const [collapsedFamilies, setCollapsedFamilies] = useState<Set<string>>(new Set());
+  const [showOnlySelected, setShowOnlySelected] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  
+  // Toggle family collapse
+  const toggleFamilyCollapse = (slug: string) => {
+    setCollapsedFamilies(prev => {
+      const next = new Set(prev);
+      if (next.has(slug)) {
+        next.delete(slug);
+      } else {
+        next.add(slug);
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+  
+  // Collapse all families by default after data loads
+  useEffect(() => {
+    if (families.length > 0 && !initialized) {
+      setCollapsedFamilies(new Set(families.map(f => f.slug)));
+      setInitialized(true);
+    }
+  }, [families, initialized]);
 
   const filteredTemplates = useMemo(() => getFilteredTemplates(), [
     templates,
@@ -151,6 +176,19 @@ export function StrategySelector() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+          
+          {/* Show only selected toggle */}
+          <button
+            onClick={() => setShowOnlySelected(!showOnlySelected)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              showOnlySelected 
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' 
+                : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
+            }`}
+          >
+            {showOnlySelected ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            {showOnlySelected ? 'Selecionadas' : 'Todas'}
+          </button>
         </div>
 
         {/* Family tabs */}
@@ -180,61 +218,83 @@ export function StrategySelector() {
           <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-3">
           {sortedFamilySlugs.map((familySlug) => {
             const family = getFamilyBySlug(familySlug);
-            const strategies = groupedTemplates[familySlug];
+            let strategies = groupedTemplates[familySlug];
             if (!family || !strategies?.length) return null;
+
+            // Filter to show only selected if enabled
+            if (showOnlySelected) {
+              strategies = strategies.filter(s => selectedStrategies.includes(s.slug));
+              if (strategies.length === 0) return null;
+            }
 
             const selectedInFamily = strategies.filter((s) =>
               selectedStrategies.includes(s.slug)
             ).length;
+            
+            const totalInFamily = groupedTemplates[familySlug]?.length || 0;
+            const isCollapsed = collapsedFamilies.has(familySlug);
 
             return (
-              <div key={familySlug} className="space-y-4">
-                {/* Family header */}
-                <div className="flex items-center justify-between">
+              <div key={familySlug} className="rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden">
+                {/* Collapsible Family header */}
+                <button
+                  onClick={() => toggleFamilyCollapse(familySlug)}
+                  className="w-full flex items-center justify-between p-4 hover:bg-slate-700/30 transition-colors"
+                >
                   <div className="flex items-center gap-3">
+                    {isCollapsed ? (
+                      <ChevronRight className="w-5 h-5 text-slate-500" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-slate-500" />
+                    )}
                     <div
                       className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: family.color }}
                     />
                     <h2 className="text-lg font-semibold text-white">{family.name}</h2>
                     <span className="text-sm text-slate-500">
-                      ({strategies.length} estratégias)
+                      ({totalInFamily})
                     </span>
                     {selectedInFamily > 0 && (
-                      <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full">
+                      <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full font-medium">
                         {selectedInFamily} selecionadas
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={() => {
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
                       strategies.forEach((s) => {
                         if (!selectedStrategies.includes(s.slug)) {
                           toggleStrategy(s.slug);
                         }
                       });
                     }}
-                    className="text-xs text-slate-400 hover:text-cyan-400 transition-colors"
+                    className="text-xs text-slate-400 hover:text-cyan-400 transition-colors px-3 py-1.5 hover:bg-slate-700 rounded"
                   >
                     Selecionar todas
-                  </button>
-                </div>
+                  </div>
+                </button>
 
-                {/* Strategy cards grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                  {strategies.map((strategy) => (
-                    <StrategyCard
-                      key={strategy.slug}
-                      strategy={strategy}
-                      family={family}
-                      selected={selectedStrategies.includes(strategy.slug)}
-                      onToggle={() => toggleStrategy(strategy.slug)}
-                    />
-                  ))}
-                </div>
+                {/* Strategy cards grid - collapsible */}
+                {!isCollapsed && (
+                  <div className="p-4 pt-0 border-t border-slate-700/50">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 mt-4">
+                      {strategies.map((strategy) => (
+                        <StrategyCard
+                          key={strategy.slug}
+                          strategy={strategy}
+                          family={family}
+                          selected={selectedStrategies.includes(strategy.slug)}
+                          onToggle={() => toggleStrategy(strategy.slug)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

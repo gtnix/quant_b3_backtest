@@ -1,38 +1,19 @@
 import { create } from 'zustand';
-import { listen } from '@tauri-apps/api/event';
 import { cmd, createSSEConnection, type SSEEvent } from '../lib/commands';
-import { platform, config, features } from '../lib/platform';
+import { config, features } from '../lib/platform';
 
-// =============================================================================
-// UNIFIED COMMAND SYSTEM
-// =============================================================================
-
-// Auto-initialize in browser mode
 async function initBrowserMode(): Promise<string | null> {
-  if (platform.isTauri) return null;
-  
   try {
     const response = await fetch(`${config.apiBase}/health`);
     if (response.ok) {
       const data = await response.json();
-      console.log('[Browser Mode] Connected to API, artifacts at:', data.artifacts_root);
+      console.log('[Web] Connected to API, artifacts at:', data.artifacts_root);
       return data.artifacts_root;
     }
   } catch (e) {
-    console.warn('[Browser Mode] API server not available');
+    console.warn('[Web] API server not available');
   }
   return null;
-}
-
-// Safe invoke wrapper - works in both Tauri and Browser modes
-async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (platform.isTauri) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke(command, args);
-  }
-  // Browser mode: these commands are not available, throw to trigger fallback
-  console.warn(`[Browser Mode] Command '${command}' not available in browser mode`);
-  throw new Error(`Command '${command}' not available in browser mode`);
 }
 
 // =============================================================================
@@ -1052,59 +1033,30 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   // ==========================================================================
-  // FILE WATCHER (Unified for Tauri and Browser)
+  // FILE WATCHER (SSE + Polling)
   // ==========================================================================
 
   startWatcher: async () => {
     try {
-      if (platform.isTauri) {
-        // Tauri: Use native file watcher
-        await cmd.watchArtifacts();
-        
-        // Listen for artifacts_changed events
-        await listen<{ paths: string[]; event_type: string }>('artifacts_changed', (event) => {
-          console.log('Artifacts changed:', event.payload);
-          
-          const { selectedRunId } = get();
-          
-          if (event.payload.paths.some(p => p.includes('index.json') || p.includes('campaign_'))) {
-            get().loadIndex();
-          }
-          
-          if (selectedRunId && event.payload.paths.some(p => p.includes('top1000'))) {
-            get().listCandidates(selectedRunId);
-          }
-        });
-      } else if (features.useSSE) {
-        // Browser: Use SSE for real-time updates
-        createSSEConnection((event: SSEEvent) => {
-          console.log('[SSE] Event:', event.type);
-          
-          const { selectedRunId } = get();
-          
-          if (event.type === 'artifact-change' || event.type === 'cache-invalidated') {
-            get().loadIndex();
-          }
-          
-          if (event.type === 'run-complete' && selectedRunId) {
-            get().listCandidates(selectedRunId);
-          }
-        });
-      } else if (features.usePolling) {
-        // Browser fallback: Use polling
-        let lastCheck = Date.now();
-        setInterval(async () => {
-          try {
-            const { has_changes } = await cmd.pollChanges(lastCheck);
-            if (has_changes) {
-              get().loadIndex();
-            }
-            lastCheck = Date.now();
-          } catch (e) {
-            console.warn('[Polling] Failed:', e);
-          }
-        }, config.pollIntervalMs);
-      }
+      createSSEConnection((event: SSEEvent) => {
+        const { selectedRunId } = get();
+        if (event.type === 'artifact-change' || event.type === 'cache-invalidated') {
+          get().loadIndex();
+        }
+        if (event.type === 'run-complete' && selectedRunId) {
+          get().listCandidates(selectedRunId);
+        }
+      });
+      
+      // Polling fallback
+      let lastCheck = Date.now();
+      setInterval(async () => {
+        try {
+          const { has_changes } = await cmd.pollChanges(lastCheck);
+          if (has_changes) get().loadIndex();
+          lastCheck = Date.now();
+        } catch {}
+      }, config.pollIntervalMs);
     } catch (error) {
       console.error('Failed to start watcher:', error);
     }
@@ -1121,47 +1073,23 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   // ==========================================================================
-  // LEGACY ACTIONS
+  // LEGACY ACTIONS (deprecated - use cmd.* methods instead)
   // ==========================================================================
 
   fetchExperiments: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const experiments = await safeInvoke<ExperimentListing[]>('list_experiments');
-      set({ experiments, isLoading: false });
-    } catch (error) {
-      set({ error: String(error), isLoading: false });
-    }
+    set({ experiments: [], isLoading: false });
   },
 
   fetchOverview: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const overview = await safeInvoke<DashboardOverview>('get_dashboard_overview');
-      set({ overview, isLoading: false });
-    } catch (error) {
-      set({ error: String(error), isLoading: false });
-    }
+    set({ overview: null, isLoading: false });
   },
 
-  loadExperiment: async (id: string) => {
-    set({ isLoading: true, error: null });
-    try {
-      const report = await safeInvoke<ScgReport>('load_scg_report', { experimentId: id });
-      set({ currentExperiment: report, isLoading: false });
-    } catch (error) {
-      set({ error: String(error), isLoading: false });
-    }
+  loadExperiment: async (_id: string) => {
+    set({ currentExperiment: null, isLoading: false });
   },
 
-  loadEquityData: async (path: string) => {
-    try {
-      const equityData = await safeInvoke<EquityPoint[]>('load_nav_history', { experimentPath: path });
-      set({ equityData });
-    } catch (error) {
-      console.warn('Using mock equity data:', error);
-      set({ equityData: generateMockEquityData() });
-    }
+  loadEquityData: async (_path: string) => {
+    set({ equityData: generateMockEquityData() });
   },
 
   // ==========================================================================

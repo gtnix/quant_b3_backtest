@@ -29,11 +29,28 @@ export interface OmpResources {
   canStartCampaign: boolean;
 }
 
+export interface MarketStats {
+  generation: number;
+  bestSharpe: number | null;
+  candidates: number;
+  hofSize: number;
+  paretoSize?: number;
+  meanSharpe?: number;
+  diversity?: number;
+  convergenceRate?: number;
+  stagnation?: number;
+  validatedCount?: number;
+  validatedTotal?: number;
+}
+
 export interface CurrentCampaign {
   campaignId: string;
   campaignName: string;
   runId: string;
-  market: 'br' | 'us';
+  experimentId?: string;      // NEW: Canonical experiment identifier
+  artifactsPath?: string;     // NEW: Path to outputs (output/scg/<experimentId>/)
+  market: string;
+  markets?: string[];         // NEW: Array of active markets
   status: string;
   elapsedSeconds: number;
   elapsedSecs?: number;
@@ -42,6 +59,18 @@ export interface CurrentCampaign {
   candidatesEvaluated: number;
   external?: boolean;
   pid?: number;
+  mode?: string;
+  // Evolution metrics
+  paretoSize?: number;
+  validatedCount?: number;
+  validatedTotal?: number;
+  hofSize?: number;
+  meanSharpe?: number;
+  diversity?: number;
+  convergenceRate?: number;
+  stagnation?: number;
+  // Per-market stats
+  marketStats?: Record<string, MarketStats>;
 }
 
 export interface OmpStats {
@@ -111,6 +140,29 @@ export interface HallOfFameEntry {
     datasetHash?: string;
   };
   notes: string;
+  // Strategy Catalog fields
+  strategyId?: string;
+  strategyFamily?: string;
+  strategyVariant?: string;
+  strategyHypothesis?: string;
+  // Strategy Identity (full traceability)
+  identity?: {
+    strategy_id: string;
+    strategy_name: string;
+    market: string;
+    universe: string;
+    timeframe: string;
+    strategy_type: string;
+    strategy_family: string;
+    blocks: Array<{ block_type: string; block_id: string; key_params: Record<string, string> }>;
+    effective_parameters: Record<string, number>;
+    entry_rules: string;
+    exit_rules: string;
+    slippage_bps: number;
+    commission_rate: number;
+    generation: number;
+    version: string;
+  };
 }
 
 export interface OmpConfig {
@@ -220,8 +272,19 @@ export interface OmpState {
   // Performance Metrics
   performance: PerformanceMetrics | null;
   
-  // Throughput History (for sparkline)
+  // History arrays for real-time charts (120 samples = 4 min at 2s interval)
   throughputHistory: number[];
+  cpuHistory: number[];
+  memoryHistory: number[];
+  sharpeHistory: number[];
+  generationHistory: number[];
+  candidatesHistory: number[];
+  // Evolution metrics history
+  diversityHistory: number[];
+  meanSharpeHistory: number[];
+  paretoSizeHistory: number[];
+  convergenceRateHistory: number[];
+  stagnationHistory: number[];
   
   // Actions
   fetchStatus: () => Promise<void>;
@@ -279,6 +342,16 @@ export const useOmpStore = create<OmpState>((set, get) => ({
   activityLog: [],
   performance: null,
   throughputHistory: [],
+  cpuHistory: [],
+  memoryHistory: [],
+  sharpeHistory: [],
+  generationHistory: [],
+  candidatesHistory: [],
+  diversityHistory: [],
+  meanSharpeHistory: [],
+  paretoSizeHistory: [],
+  convergenceRateHistory: [],
+  stagnationHistory: [],
   
   // ==========================================================================
   // FETCH ACTIONS
@@ -389,11 +462,41 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       if (!response.ok) throw new Error('Failed to fetch performance');
       const data = await response.json();
       
-      // Update throughput history for sparkline
-      const currentThroughput = data.current_run?.throughput_genomes_per_min || 0;
-      const history = [...get().throughputHistory, currentThroughput].slice(-60); // Keep last 60 samples
+      const prev = get();
+      const maxHistory = 120; // 4 min at 2s interval
       
-      set({ performance: data, throughputHistory: history, lastError: null });
+      // Update all history arrays for real-time charts
+      // Use evaluations_per_second * 60 to get throughput per minute
+      const evalPerSec = data.current_run?.evaluations_per_second || 0;
+      const throughputHistory = [...prev.throughputHistory, evalPerSec * 60].slice(-maxHistory);
+      const cpuHistory = [...prev.cpuHistory, data.system?.cpu_usage || 0].slice(-maxHistory);
+      const memoryHistory = [...prev.memoryHistory, data.system?.memory_usage_pct || 0].slice(-maxHistory);
+      const sharpeHistory = [...prev.sharpeHistory, data.current_run?.best_sharpe || prev.sharpeHistory[prev.sharpeHistory.length - 1] || 0].slice(-maxHistory);
+      const generationHistory = [...prev.generationHistory, data.current_run?.current_generation || 0].slice(-maxHistory);
+      const candidatesHistory = [...prev.candidatesHistory, data.current_run?.candidates_evaluated || 0].slice(-maxHistory);
+      
+      // Evolution metrics history
+      const diversityHistory = [...prev.diversityHistory, data.current_run?.diversity || 0].slice(-maxHistory);
+      const meanSharpeHistory = [...prev.meanSharpeHistory, data.current_run?.mean_sharpe || 0].slice(-maxHistory);
+      const paretoSizeHistory = [...prev.paretoSizeHistory, data.current_run?.pareto_size || 0].slice(-maxHistory);
+      const convergenceRateHistory = [...prev.convergenceRateHistory, data.current_run?.convergence_rate || 0].slice(-maxHistory);
+      const stagnationHistory = [...prev.stagnationHistory, data.current_run?.stagnation || 0].slice(-maxHistory);
+      
+      set({ 
+        performance: data, 
+        throughputHistory,
+        cpuHistory,
+        memoryHistory,
+        sharpeHistory,
+        generationHistory,
+        candidatesHistory,
+        diversityHistory,
+        meanSharpeHistory,
+        paretoSizeHistory,
+        convergenceRateHistory,
+        stagnationHistory,
+        lastError: null 
+      });
     } catch (err) {
       set({ lastError: err instanceof Error ? err.message : 'Failed to fetch performance' });
     }
@@ -628,12 +731,12 @@ export const useOmpStore = create<OmpState>((set, get) => ({
       get().fetchActivityLog();
       get().fetchPerformance();
       
-      // Performance polling (every 5 seconds for live metrics)
+      // Performance polling (every 2 seconds for live metrics)
       const perfInterval = setInterval(() => {
         if (get().status === 'running') {
           get().fetchPerformance();
         }
-      }, 5000);
+      }, 2000);
       
       return () => {
         if (sse) sse.close();

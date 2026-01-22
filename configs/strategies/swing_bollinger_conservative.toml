@@ -1,0 +1,28 @@
+[strategy]
+id = "swing_bollinger_conservative"
+description = "Bollinger Bands reversao conservador"
+
+[[pipeline]]
+type = "selection"
+block_id = "low_vol"
+params = { max_annualized_vol = 0.40, lookback_days = 60, top_pct = 30 }
+
+[[pipeline]]
+type = "entry"
+block_id = "bollinger"
+params = { period = 20, num_std = 2.0 }
+
+[[pipeline]]
+type = "exit"
+block_id = "stop_loss"
+params = { threshold_pct = 0.08 }
+
+[[pipeline]]
+type = "exit"
+block_id = "trailing_stop"
+params = { trailing_pct = 0.12, activation_pct = 0.05 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "equal_weight"
+params = { max_weight = 0.15, min_weight = 0.02, max_positions = 12 }

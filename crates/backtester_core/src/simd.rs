@@ -329,9 +329,10 @@ pub fn simd_sortino(returns: &[f64], risk_free_rate: f64) -> f64 {
         }
     }
 
-    // No downside returns = perfect strategy
+    // No downside returns = undefined Sortino, return 0.0
+    // Previously returned 10.0 which caused false positives with 0 trades
     if downside_count_f < 1.0 {
-        return 10.0;
+        return 0.0;
     }
 
     let mean_return = total_sum / n as f64;
@@ -616,7 +617,8 @@ pub fn simd_sortino_avx512(returns: &[f64], risk_free_rate: f64) -> f64 {
     let downside_var = total_downside_sq / n_f64;
 
     if downside_var <= 1e-20 {
-        return if mean > 0.0 { 10.0 } else { 0.0 };
+        // No downside deviation = undefined Sortino, return 0.0
+        return 0.0;
     }
 
     let downside_vol = downside_var.sqrt() * 15.874_507_866_387_544;

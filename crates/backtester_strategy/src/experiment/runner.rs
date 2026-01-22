@@ -193,13 +193,33 @@ impl ExperimentRunner {
             } else {
                 // Load from CSV
                 config.market_data_csv_path.as_ref().and_then(|path| {
-                    super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
+                    tracing::info!("Loading market data from CSV: {}", path);
+                    match super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)) {
+                        Ok(data) => {
+                            tracing::info!("Loaded {} symbols, {} days from CSV", data.num_symbols(), data.num_trading_days());
+                            Some(data)
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to load CSV market data: {}", e);
+                            None
+                        }
+                    }
                 })
             }
         } else {
             // No data source specified, try CSV path
             config.market_data_csv_path.as_ref().and_then(|path| {
-                super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)).ok()
+                tracing::info!("Loading market data from CSV: {}", path);
+                match super::market_data::MarketDataProvider::from_csv(std::path::Path::new(path)) {
+                    Ok(data) => {
+                        tracing::info!("Loaded {} symbols, {} days from CSV", data.num_symbols(), data.num_trading_days());
+                        Some(data)
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load CSV market data: {}", e);
+                        None
+                    }
+                }
             })
         };
         
@@ -788,7 +808,7 @@ impl ExperimentRunner {
                     continue;
                 }
                 
-                let mut candidate = StrategyCandidate::new(symbol, backtester_intelligence::filters::Market::BR);
+                let mut candidate = StrategyCandidate::new(symbol, market);
                 
                 // Set current price (last bar)
                 if let Some(last_bar) = bars.last() {
@@ -1160,6 +1180,9 @@ impl ExperimentRunner {
     }
     
     /// Generate placeholder timeseries (fallback when no market data).
+    /// 
+    /// IMPORTANT: Returns FLAT equity curve (no artificial growth).
+    /// Previously this generated 25.1% fake return which caused Sharpe=10 bugs.
     fn generate_placeholder_timeseries(
         &self,
         result: &crate::compositor::CompositorResult,
@@ -1170,23 +1193,18 @@ impl ExperimentRunner {
         let total_weight: f64 = result.weights.values().sum();
         let exposure = if total_weight > 0.0 { total_weight } else { 0.0 };
 
+        // FIXED: Use constant equity (no fake growth)
+        // This ensures CAGR=0, Sharpe=0 for strategies with no real data
+        let flat_equity = self.config.initial_capital;
+
         (0..num_points)
             .map(|i| {
-                let equity = self.config.initial_capital 
-                    * (Decimal::ONE + Decimal::from(i) / Decimal::from(1000));
-                let peak = equity;
-                let drawdown = if peak.is_zero() {
-                    0.0
-                } else {
-                    ((equity - peak) / peak).to_f64().unwrap_or(0.0)
-                };
-
                 EquityPoint {
                     date: start + chrono::Duration::days(i),
-                    equity,
-                    drawdown,
+                    equity: flat_equity,
+                    drawdown: 0.0,
                     exposure,
-                    vol_exante: Some(0.20),
+                    vol_exante: Some(0.0),
                     vol_expost: None,
                     dividend_cashflow: None,
                     dividend_cumulative: None,

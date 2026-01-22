@@ -1052,6 +1052,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "backtester_execution",
+ "backtester_intelligence",
  "backtester_strategy",
  "bumpalo",
  "chrono",
@@ -1083,6 +1084,9 @@ dependencies = [
 name = "combiner_runner"
 version = "0.1.0"
 dependencies = [
+ "backtester_core",
+ "backtester_engine",
+ "backtester_intelligence",
  "backtester_strategy",
  "chrono",
  "combiner_core",
@@ -1090,6 +1094,7 @@ dependencies = [
  "memmap2",
  "obfs",
  "rayon",
+ "rust_decimal",
  "serde",
  "serde_json",
  "tempfile",

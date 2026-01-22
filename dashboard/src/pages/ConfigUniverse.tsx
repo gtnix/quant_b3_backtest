@@ -325,6 +325,84 @@ const TIMEFRAME_PROFILES = {
   adaptive: { label: 'Adaptativo', holding: 'Auto-detectar', icon: '🔄', tooltip: UNIVERSE_TOOLTIPS.timeframe.adaptive },
 };
 
+// =============================================================================
+// PRESETS - Configurações prontas para uso comum
+// =============================================================================
+
+interface UniversePreset {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  color: string;
+  config: {
+    robustnessProfile: string;
+    trainingStrategy: string;
+    trainingTech: string;
+    trainingModel: string[];
+    timeframeProfile: string;
+  };
+}
+
+const UNIVERSE_PRESETS: UniversePreset[] = [
+  {
+    id: 'swing-moderado',
+    label: 'Swing Moderado',
+    description: 'Operações de 2-10 dias com risco equilibrado',
+    icon: '📈',
+    color: 'cyan',
+    config: {
+      robustnessProfile: 'moderado',
+      trainingStrategy: 'walk_forward',
+      trainingTech: 'cpu_parallel',
+      trainingModel: ['swing', 'momentum', 'mean_reversion'],
+      timeframeProfile: 'swing',
+    },
+  },
+  {
+    id: 'position-conservador',
+    label: 'Position Conservador',
+    description: 'Operações de semanas com foco em preservação',
+    icon: '🎯',
+    color: 'emerald',
+    config: {
+      robustnessProfile: 'conservador',
+      trainingStrategy: 'purged_kfold',
+      trainingTech: 'cpu_parallel',
+      trainingModel: ['position', 'portfolio', 'factor'],
+      timeframeProfile: 'position',
+    },
+  },
+  {
+    id: 'intraday-arrojado',
+    label: 'Intraday Arrojado',
+    description: 'Day trade com alta tolerância a risco',
+    icon: '⚡',
+    color: 'amber',
+    config: {
+      robustnessProfile: 'arrojado',
+      trainingStrategy: 'walk_forward',
+      trainingTech: 'cpu_fast',
+      trainingModel: ['intraday', 'breakout', 'volatility'],
+      timeframeProfile: 'intraday',
+    },
+  },
+  {
+    id: 'diversificado',
+    label: 'Diversificado',
+    description: 'Mix de estratégias para portfólio completo',
+    icon: '🌐',
+    color: 'violet',
+    config: {
+      robustnessProfile: 'moderado',
+      trainingStrategy: 'purged_kfold',
+      trainingTech: 'cpu_intensive',
+      trainingModel: ['swing', 'position', 'momentum', 'mean_reversion', 'breakout'],
+      timeframeProfile: 'adaptive',
+    },
+  },
+];
+
 export function ConfigUniverse() {
   const { config, fetchConfig } = useOmpStore();
   
@@ -538,6 +616,52 @@ export function ConfigUniverse() {
             {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Salvar Configuração
           </button>
+        </div>
+
+        {/* Quick Presets */}
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span className="text-sm font-medium text-white">Configurações Rápidas</span>
+            <span className="text-xs text-slate-500">Selecione um preset ou configure manualmente abaixo</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {UNIVERSE_PRESETS.map(preset => {
+              const colorClasses: Record<string, string> = {
+                cyan: 'hover:border-cyan-500/50 hover:bg-cyan-500/10',
+                emerald: 'hover:border-emerald-500/50 hover:bg-emerald-500/10',
+                amber: 'hover:border-amber-500/50 hover:bg-amber-500/10',
+                violet: 'hover:border-violet-500/50 hover:bg-violet-500/10',
+              };
+              const activeClasses: Record<string, string> = {
+                cyan: 'border-cyan-500/50 bg-cyan-500/10',
+                emerald: 'border-emerald-500/50 bg-emerald-500/10',
+                amber: 'border-amber-500/50 bg-amber-500/10',
+                violet: 'border-violet-500/50 bg-violet-500/10',
+              };
+              const isActive = 
+                universeAxes.robustnessProfile === preset.config.robustnessProfile &&
+                universeAxes.timeframeProfile === preset.config.timeframeProfile;
+              
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => setUniverseAxes(preset.config)}
+                  className={`p-4 rounded-lg border text-left transition-all ${
+                    isActive 
+                      ? `${activeClasses[preset.color]} ring-1 ring-offset-1 ring-offset-slate-900` 
+                      : `border-slate-700 ${colorClasses[preset.color]}`
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xl">{preset.icon}</span>
+                    <span className="font-medium text-white text-sm">{preset.label}</span>
+                  </div>
+                  <p className="text-xs text-slate-500">{preset.description}</p>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* 4 Axes Section */}

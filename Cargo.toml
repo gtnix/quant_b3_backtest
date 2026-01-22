@@ -124,3 +124,14 @@ opt-level = 1          # Faster test execution
 incremental = true     # Leverage CI cache for faster rebuilds
 debug = 0              # No debug symbols (saves cache space)
 
+# SCG profile - optimized for Strategy Combiner (GA) with ultra-fast backtests
+# Target: < 20ms per backtest evaluation
+[profile.scg]
+inherits = "release"
+lto = "thin"           # Thin LTO for fast linking + good optimization
+codegen-units = 1      # Single codegen unit for best inline
+opt-level = 3          # Maximum optimization
+panic = "abort"        # No unwinding overhead
+debug = false          # No debug symbols
+strip = "symbols"      # Smaller binary
+

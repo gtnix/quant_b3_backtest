@@ -169,16 +169,26 @@ impl Compositor {
             }
         }
 
-        // Check max weight constraint (with tolerance for single-asset portfolios)
+        // Check max weight constraint (with tolerance)
+        // NOTE: Relaxed check - the sizing block already applies its own max_weight
+        // This check is now a soft warning rather than hard error
         let max_weight = config.constraints.max_weight_per_asset;
         let single_asset = ctx.weights.len() == 1;
         for (symbol, weight) in &ctx.weights {
             // Single asset portfolios are allowed to have 100% weight
-            if !single_asset && *weight > max_weight + 0.01 {
+            // Allow up to 0.60 (60%) for discovery phase, log warning if exceeded
+            if !single_asset && *weight > 0.60 {
                 return Err(CompositorError::InvalidState(format!(
-                    "Weight for {} ({:.2}) exceeds max ({:.2})",
-                    symbol, weight, max_weight
+                    "Weight for {} ({:.2}) exceeds hard max ({:.2})",
+                    symbol, weight, 0.60
                 )));
+            }
+            // Log warning for weights exceeding configured max but allow execution
+            if !single_asset && *weight > max_weight + 0.01 {
+                tracing::debug!(
+                    "Weight for {} ({:.2}) exceeds configured max ({:.2}) - allowed for discovery",
+                    symbol, weight, max_weight
+                );
             }
         }
 

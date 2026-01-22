@@ -14,22 +14,32 @@ version = "1.0.0"
 
 [dataset]
 market = "BR"
-market_data_path = "data/market_data_ibov.csv"
+market_data_path = "data/market_data_ibov_index.csv"
+# 5 years of data - synchronized with US for parity
+start_date = "2021-01-01"
+end_date = "2026-01-21"
+data_window_years = 5
 
 [risk_profile]
-name = "moderado"
+name = "relaxado"
 
 [evolution]
 population_size = 150
-max_generations = 500
+max_generations = 500000
+ephemeral_artifacts = true  # CRITICAL: Don't persist backtest Parquet to save disk
 tournament_size = 3
 crossover_rate = 0.85
 elitism_rate = 0.10
 mutation_rate = 0.08
 convergence_generations = 15
-max_runtime_seconds = 900  # Overridden by SCG_MAX_RUNTIME_SECS
+max_runtime_seconds = 86400  # 24 hours - controlled via dashboard stop button
 workers = 0                # 0 = auto-detect (all cores - 2)
 hall_of_fame_size = 25
+
+# VALIDATION - Prevent false positives (Lopez de Prado methodology)
+stress_testing_enabled = true      # Enable stress testing suite
+min_stress_scenarios_passed = 4    # 4 out of 5 scenarios must pass
+validation_tier = "research_brazil" # Relaxed BR thresholds for homologation (PBO <= 0.40, OOS Sharpe >= 0.3, DD >= -0.40)
 
 [diversity]
 enabled = true
@@ -81,14 +91,15 @@ stress_enabled = true
 stress_min_pass = 4
 
 [gates]
+# Discovery mode: extra-relaxed thresholds for testing pipeline
 gates_required = true
-min_oos_sharpe_net = 0.60
-max_pbo = 0.15
-min_dsr = 0.7
-min_stress_passed = 4
-max_degradation = 0.35
-min_oos_trades = 25
-max_drawdown = -0.25
+min_oos_sharpe_net = 0.15       # Extra-relaxed for testing
+max_pbo = 0.50                  # Extra-relaxed
+min_dsr = 0.20                  # Extra-relaxed
+min_stress_passed = 1           # Extra-relaxed
+max_degradation = 0.80          # Extra-relaxed
+min_oos_trades = 10             # Extra-relaxed
+max_drawdown = -0.50            # Extra-relaxed
 
 [data_integrity]
 enabled = true

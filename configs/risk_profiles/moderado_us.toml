@@ -1,0 +1,148 @@
+# =============================================================================
+# Moderado Risk Profile - US Markets
+# =============================================================================
+# Balanced growth for US equity markets with realistic institutional parameters
+#
+# Academic Sources:
+# - Thorp (2006): Kelly Criterion for portfolio allocation
+# - Chan (2013): ATR-based position sizing
+# - Frazzini et al. (2012): Transaction costs in factor strategies
+# - Ang (2014): Asset Management - Factor investing
+# - Harvey & Liu (2019): Lucky factors hypothesis (deflated Sharpe)
+#
+# US Market Characteristics vs B3:
+# - Lower volatility (VIX avg 15-20 vs VBRA avg 25-35)
+# - Tighter spreads (3-5 bps vs 10-30 bps)
+# - Better liquidity (10-100x B3 for same market cap)
+# - More efficient pricing (smaller alpha opportunities)
+# =============================================================================
+
+[profile]
+name = "Moderado_US"
+market = "US"
+market_adjustments = true
+
+# -----------------------------------------------------------------------------
+# Position Sizing
+# -----------------------------------------------------------------------------
+# US markets more efficient → lower Kelly fraction
+# Source: Thorp (2006), Poundstone "Fortune's Formula"
+[sizing]
+kelly_fraction = 0.35              # More conservative for efficient markets
+max_risk_per_trade_pct = 0.0100    # 1.0% per trade (lower than B3)
+max_exposure_per_asset_pct = 0.50  # 50% max per stock (relaxed for discovery)
+max_sector_concentration_pct = 0.30  # GICS sector limit
+max_positions = 25                 # More diversification
+min_position_weight = 0.02         # At least 2% position size
+
+# -----------------------------------------------------------------------------
+# Stop-Loss Configuration
+# -----------------------------------------------------------------------------
+# Tighter stops for US (lower volatility)
+# Source: Chan (2013) "Algorithmic Trading"
+[stops]
+stop_type = "ATR"
+atr_period = 14
+atr_multiplier = 2.10              # Tighter than B3 (2.5)
+fixed_stop_pct = 0.10              # 10% max loss per position
+enable_trailing = true
+trailing_activation_pct = 0.08     # Trail after 8% gain
+trailing_atr_multiplier = 1.80     # Closer trailing stop
+
+# -----------------------------------------------------------------------------
+# Portfolio Risk Constraints
+# -----------------------------------------------------------------------------
+# Based on institutional standards (AQR, Bridgewater, Two Sigma)
+[portfolio_risk]
+volatility_target = 0.12           # 12% annualized vol target
+max_drawdown_pct = -0.18           # 18% max DD (tighter than B3)
+max_leverage = 1.0                 # No leverage
+cvar_limit_95 = -0.030             # 3% daily CVaR limit
+correlation_limit = 0.60           # Max correlation between positions
+
+# -----------------------------------------------------------------------------
+# Circuit Breakers
+# -----------------------------------------------------------------------------
+# Faster stops for US (more liquid to exit)
+[circuit_breakers]
+daily_loss_limit_pct = -0.020      # -2.0%
+weekly_loss_limit_pct = -0.050     # -5.0%
+monthly_loss_limit_pct = -0.10     # -10.0%
+drawdown_action = "ReduceRisk"
+cooldown_days = 1
+
+# -----------------------------------------------------------------------------
+# Operational Constraints
+# -----------------------------------------------------------------------------
+# US market microstructure
+[operational]
+min_liquidity_usd = 50000000       # $50M ADV minimum
+max_spread_bps = 10                # Reject if spread > 10 bps
+slippage_cost_bps = 5              # 5 bps slippage assumption
+commission_rate = 0.0001           # 1 bp (SEC/FINRA fees)
+max_participation_rate = 0.02      # 2% of daily volume max
+
+# -----------------------------------------------------------------------------
+# Universe Filters
+# -----------------------------------------------------------------------------
+# S&P 500 / Large-cap focus
+[universe_filters]
+min_market_cap = 5000000000        # $5B minimum (large-cap)
+max_annualized_vol = 0.45          # Exclude >45% vol stocks
+min_price = 5.0                    # No penny stocks
+min_adv_shares = 500000            # 500K shares daily minimum
+exclude_adr = false                # Include ADRs
+exclude_reits = false              # Include REITs
+
+# -----------------------------------------------------------------------------
+# Validation Requirements (More Stringent for US)
+# -----------------------------------------------------------------------------
+# US markets are more efficient → require stronger evidence
+# Source: Harvey & Liu (2019) "A Census of the Factor Zoo"
+[validation]
+min_sharpe_ratio = 0.50            # Higher bar than B3
+min_cagr = 0.08                    # 8% CAGR minimum
+max_drawdown = -0.18               # 18% max DD
+min_trades = 30                    # More statistical significance
+min_profit_factor = 1.20           # Must be profitable after costs
+min_win_rate = 0.40                # At least 40% winners
+
+# Walk-Forward Analysis
+wfa_enabled = true
+wfa_num_folds = 6                  # More folds for US
+wfa_is_ratio = 0.65                # 65% in-sample
+wfa_purge_days = 5                 # 5 days purge
+
+# Probability of Backtest Overfitting
+pbo_enabled = true
+pbo_max_threshold = 0.18           # Stricter than B3 (0.20)
+pbo_permutations = 1000            # More permutations
+
+# Deflated Sharpe Ratio
+dsr_enabled = true
+dsr_min_threshold = 1.50           # DSR > 1.5
+
+# Stress Testing
+stress_enabled = true
+stress_min_pass = 5                # 5 of 6 scenarios
+stress_scenarios = ["costs_2x", "delay_plus1", "spread_widen_vol", "capacity_constraint", "flash_crash", "combined_adverse"]
+
+# -----------------------------------------------------------------------------
+# Universe Restrictions for Parameter Universe System
+# -----------------------------------------------------------------------------
+[universe_restrictions]
+allowed_strategy_families = [
+    "momentum",
+    "mean_reversion",
+    "factor",
+    "portfolio",
+    "volatility",
+    "sector_rotation",
+    "pair"
+]
+
+# Parameter optimization limits
+max_parameters_to_optimize = 12
+allowed_complexity_tiers = ["tier1_fast", "tier2_medium"]
+max_population_size = 150
+max_generations = 200

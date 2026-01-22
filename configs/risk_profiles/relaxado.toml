@@ -1,0 +1,83 @@
+# Relaxado Risk Profile (Testing/Discovery)
+# Maximum flexibility for testing the mining pipeline.
+#
+# Purpose: Test E2E flow without restrictive filters
+# Expected Max Drawdown: 35%
+# Daily Loss Limit: 5%
+# Weekly Loss Limit: 12%
+
+[profile]
+name = "Relaxado"
+market_adjustments = true
+
+[sizing]
+kelly_fraction = 0.50           # Full Half-Kelly
+max_risk_per_trade_pct = 0.02   # 2%
+max_exposure_per_asset_pct = 0.30
+max_sector_concentration_pct = 0.50
+max_positions = 25
+min_position_weight = 0.01
+
+[stops]
+stop_type = "Fixed"
+atr_period = 14
+atr_multiplier_br = 3.00
+atr_multiplier_us = 2.50
+fixed_stop_pct = 0.20           # 20% stop (relaxado)
+enable_trailing = false
+trailing_activation_pct = 0.15
+trailing_atr_multiplier = 2.50
+
+[portfolio_risk]
+volatility_target_br = 0.25     # 25% vol target (alto)
+volatility_target_us = 0.20
+max_drawdown_pct = -0.35        # 35% max DD (relaxado)
+max_leverage = 1.0
+cvar_limit_95 = -0.05
+
+[circuit_breakers]
+daily_loss_limit_pct = -0.05    # -5% (relaxado)
+weekly_loss_limit_pct = -0.12   # -12% (relaxado)
+monthly_loss_limit_pct = -0.20
+drawdown_action = "Continue"    # Nao reduz risco
+cooldown_days = 0
+
+[operational]
+min_liquidity_usd_br = 1000000
+min_liquidity_usd_us = 5000000
+max_spread_bps_br = 50
+max_spread_bps_us = 25
+slippage_cost_bps = 15
+commission_rate = 0.001
+max_participation_rate = 0.10
+
+[universe_filters]
+min_market_cap_br = 100000000   # R$ 100M (relaxado)
+min_market_cap_us = 500000000   # $500M (relaxado)
+max_annualized_vol = 0.80       # 80% vol max (relaxado)
+min_dividend_yield = -1.0       # No filter
+min_momentum_return = -1.0      # No filter
+use_quantile_thresholds = false
+top_quantile = 0.50
+
+# =============================================================================
+# Universe Restrictions for Parameter Universe System
+# =============================================================================
+[universe_restrictions]
+# All families allowed
+allowed_strategy_families = ["intraday", "swing", "position", "pair", "portfolio", "momentum", "mean_reversion", "breakout", "sector_rotation", "factor", "seasonal", "volatility", "event_driven", "buy_hold", "multi_strategy"]
+
+# Maximum parameters the GA can optimize
+max_parameters_to_optimize = 20
+
+# All complexity tiers
+allowed_complexity_tiers = ["tier1_fast", "tier2_medium", "tier3_slow"]
+
+# Evolution limits (higher for exploration)
+max_population_size = 300
+max_generations = 500
+
+# Validation (relaxed)
+min_wfa_folds = 3
+min_pbo_permutations = 100
+max_pbo_threshold = 0.50

@@ -4,6 +4,7 @@ pub mod entry;
 pub mod exit;
 pub mod selection;
 pub mod sizing;
+pub mod cache;
 
 use crate::context::StrategyContext;
 use serde::{Deserialize, Serialize};

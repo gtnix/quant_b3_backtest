@@ -1,0 +1,150 @@
+# =============================================================================
+# Execution Model Configuration - US Institutional
+# =============================================================================
+# Academic sources and realistic parameters for US equity markets
+#
+# Sources:
+# - Frazzini, Israel & Moskowitz (2012): "Trading Costs of Asset Pricing Anomalies"
+# - Harvey & Liu (2019): "A Census of the Factor Zoo"
+# - AQR Capital Research: Implementation costs in factor strategies
+# - SEC Rule 606 Reports / FINRA data on execution quality
+# - Almgren & Chriss (2000): Market impact model
+#
+# US Large-Cap (S&P 500) typical costs:
+# - Bid-ask spread: 1-5 bps
+# - Commission: 0-2 bps (IBKR, Fidelity, Schwab = $0 for retail)
+# - Slippage: 3-8 bps for $100K orders
+# - Market impact: 5-15 bps for $1M+ orders
+#
+# US Mid-Cap typical costs:
+# - Bid-ask spread: 5-15 bps
+# - Slippage: 10-25 bps
+#
+# US Small-Cap typical costs:
+# - Bid-ask spread: 15-50 bps
+# - Slippage: 25-75 bps
+# =============================================================================
+
+[execution]
+delay_bars = 1  # T+1 execution (signal on close, execute next bar)
+bypass_for_debug = false
+market = "US"
+
+# -----------------------------------------------------------------------------
+# Slippage Model
+# -----------------------------------------------------------------------------
+# Conservative estimate for large/mid-cap portfolio
+# Based on Frazzini et al. (2012) findings: 5-15 bps for liquid stocks
+[execution.slippage]
+type = "Constant"
+bps = 5.0  # 5 bps = 0.05% - conservative for S&P 500 universe
+
+# Alternative: Volume-proportional model
+# type = "VolumeProportional"
+# base_bps = 2.0
+# volume_impact_coefficient = 0.1
+
+# -----------------------------------------------------------------------------
+# Fee Structure - US Markets
+# -----------------------------------------------------------------------------
+# Modern US brokerage: zero-commission for most retail/institutional
+# SEC fee: ~$22.90 per $1M (0.00229%)
+# FINRA TAF: $0.000130 per share sold
+[execution.fees]
+tier = "USZero"
+# Effective all-in cost breakdown:
+fixed_per_trade = 0.0      # Zero commission (IBKR Lite, Schwab, Fidelity)
+commission_rate = 0.0001   # 1 bps for SEC/TAF fees
+emolument_rate = 0.0       # No emoluments in US
+
+# For institutional accounts with direct market access:
+# fixed_per_trade = 0.0035  # $0.0035 per share typical
+# commission_rate = 0.0002  # 2 bps all-in
+
+# -----------------------------------------------------------------------------
+# Fill Policy
+# -----------------------------------------------------------------------------
+[execution.fill_policy]
+allow_partial = true        # US markets allow partial fills
+max_participation = 0.02    # 2% of ADV max per trade (conservative)
+min_fill_ratio = 0.8        # At least 80% must fill
+
+[execution.fill_policy.gap_policy]
+type = "ExecuteAtOpen"      # Gap handling: execute at open if overnight gap
+
+[execution.fill_policy.reject_policy]
+type = "RequeuePriority"    # Requeue unfilled orders with priority
+
+# -----------------------------------------------------------------------------
+# Market Microstructure Parameters
+# -----------------------------------------------------------------------------
+[execution.microstructure]
+avg_bid_ask_spread_bps = 3.0    # S&P 500 average ~3 bps
+tick_size = 0.01                # $0.01 tick for stocks > $1
+min_order_size = 1              # 1 share minimum (fractional available)
+lot_size = 1                    # No round lot requirement in US
+
+# -----------------------------------------------------------------------------
+# Stress Suite - Realistic Adverse Scenarios
+# -----------------------------------------------------------------------------
+[execution.stress_suite]
+enabled = true
+scenarios = [
+    "costs_2x",              # Double all costs
+    "delay_plus1",           # +1 bar execution delay
+    "spread_widen_vol",      # Spread widens 3x in high vol
+    "capacity_constraint",   # 50% capacity reduction
+    "flash_crash",           # Extreme slippage (50 bps)
+    "combined_adverse"       # All adverse conditions
+]
+
+# -----------------------------------------------------------------------------
+# Institutional Gates (Hard Constraints)
+# -----------------------------------------------------------------------------
+# More lenient than B3 due to better liquidity
+[execution.gates]
+max_turnover_annual = 24.0       # 24x annual turnover allowed (US more liquid)
+max_slippage_pct_of_pnl = 25.0   # Costs can't exceed 25% of gross PnL
+min_capacity_usd = 1000000       # $1M minimum capacity
+max_avg_slippage_bps = 15.0      # Average slippage warning threshold
+
+# -----------------------------------------------------------------------------
+# Capacity Estimation
+# -----------------------------------------------------------------------------
+# Based on Almgren-Chriss market impact model
+[execution.capacity]
+estimation_model = "AlmgrenChriss"
+daily_volume_fraction = 0.01    # Trade up to 1% of ADV
+annual_volatility_assumption = 0.20  # 20% annual vol baseline
+temporary_impact_coefficient = 0.1
+permanent_impact_coefficient = 0.05
+
+# -----------------------------------------------------------------------------
+# Short Selling Parameters
+# -----------------------------------------------------------------------------
+[execution.short_selling]
+enabled = true
+borrow_cost_annual_bps = 25.0   # General collateral: ~25 bps/year
+hard_to_borrow_premium_bps = 100.0  # HTB stocks: +100 bps
+locate_requirement = true
+uptick_rule = false             # Disabled since 2007
+
+# =============================================================================
+# Validation Thresholds - US Market Specific
+# =============================================================================
+# Slightly more aggressive than B3 due to:
+# - Lower transaction costs
+# - Better liquidity
+# - More efficient price discovery
+[validation]
+min_oos_sharpe = 0.50           # Higher bar for US (more competition)
+max_pbo = 0.18                  # Lower PBO tolerance
+min_dsr = 1.5                   # Higher deflated Sharpe requirement
+max_degradation_pct = 35.0      # 35% max IS→OOS degradation
+min_split_pass_rate = 0.70      # 70% of WFA splits must pass
+max_oos_drawdown = -0.22        # -22% max OOS drawdown
+min_oos_trades = 25             # Minimum 25 OOS trades
+
+# Stress test requirements
+stress_min_pass = 4             # At least 4 of 6 stress scenarios
+stress_scenarios_total = 6

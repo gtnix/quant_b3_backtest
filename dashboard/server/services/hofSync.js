@@ -12,25 +12,16 @@ import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import pg from 'pg';
+import { pool as dbPool, DATABASE_URL } from '../db.js';
 
 const execAsync = promisify(exec);
-const { Pool } = pg;
 const HOF_LIMIT = 50;
 const PROJECT_ROOT = path.resolve(process.cwd(), '..');
 const OUTPUT_DIR = path.join(PROJECT_ROOT, 'output/scg');
 
-let pool = null;
-
+// Use centralized pool from db.js (has fallback DATABASE_URL)
 function getPool() {
-  if (!pool && process.env.DATABASE_URL) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 5
-    });
-  }
-  return pool;
+  return dbPool;
 }
 
 // =============================================================================
@@ -47,7 +38,7 @@ function getPool() {
 export async function fetchGlobalHallOfFame(market = 'BR', limit = HOF_LIMIT) {
   const p = getPool();
   if (!p) {
-    console.warn('[HoF] DATABASE_URL not configured, returning empty global HoF');
+    console.warn('[HoF] Database pool not available');
     return [];
   }
   
@@ -192,8 +183,8 @@ export function scanLocalStrategiesQuick() {
     const hofPath = path.join(OUTPUT_DIR, run, 'hall_of_fame');
     if (!fs.existsSync(hofPath)) continue;
     
-    // Only check strategy_000 to strategy_049 (top 50 per run)
-    for (let i = 0; i < 50; i++) {
+    // Only check strategy_001 to strategy_050 (top 50 per run)
+    for (let i = 1; i <= 50; i++) {
       const slot = `strategy_${String(i).padStart(3, '0')}`;
       const stratDir = path.join(hofPath, slot);
       // Try both naming conventions
@@ -302,7 +293,8 @@ async function loadFullStrategy(s) {
     rebalanceDay: dayMatch?.[1] || 'friday',
     pipelineBlocks: genome?.genes?.length || 0,
     stressPassed: stress?.passed || 0,
-    stressTotal: stress?.total || 5
+    stressTotal: stress?.total || 5,
+    identity: genome?.identity || null
   };
 }
 
@@ -316,7 +308,7 @@ async function ensureRunExists(client, runId) {
 
 async function syncToDatabase(strategies) {
   const p = getPool();
-  if (!p) throw new Error('DATABASE_URL not configured');
+  if (!p) throw new Error('Database pool not available');
   
   const client = await p.connect();
   let synced = 0;
@@ -396,29 +388,130 @@ async function syncToDatabase(strategies) {
 export async function runSync() {
   console.log('[HoF Sync] Scanning local strategies...');
   const strategies = await scanLocalStrategies();
-  console.log(`[HoF Sync] Found ${strategies.length} unique strategies`);
+  console.log(`[HoF Sync] Found ${strategies.length} unique local strategies`);
   
-  if (strategies.length === 0) return { synced: 0, total: 0, globalHof: 0 };
+  let synced = 0;
+  let globalSynced = { BR: 0, US: 0 };
   
-  const synced = await syncToDatabase(strategies);
+  if (strategies.length > 0) {
+    synced = await syncToDatabase(strategies);
+    // Sync local strategies to global hall_of_fame (BR)
+    globalSynced.BR = await syncToGlobalHallOfFame(strategies, 'BR');
+  }
   
-  // Also sync to global hall_of_fame table
-  const globalSynced = await syncToGlobalHallOfFame(strategies);
+  // Also sync validated candidates from database to hall_of_fame for BOTH markets
+  const dbSynced = await syncValidatedToHallOfFame();
+  globalSynced.BR += dbSynced.BR || 0;
+  globalSynced.US += dbSynced.US || 0;
   
+  console.log(`[HoF Sync] Complete: local=${synced}, global BR=${globalSynced.BR}, global US=${globalSynced.US}`);
   return { synced, total: strategies.length, globalHof: globalSynced };
+}
+
+/**
+ * Sync validated candidates from scg_candidates to hall_of_fame for both markets.
+ * This promotes Stage-B validated strategies that haven't been promoted yet.
+ */
+async function syncValidatedToHallOfFame() {
+  const p = getPool();
+  if (!p) return { BR: 0, US: 0 };
+  
+  const result = { BR: 0, US: 0 };
+  
+  for (const market of ['BR', 'US']) {
+    try {
+      // Find validated candidates not yet in hall_of_fame
+      const candidates = await p.query(`
+        SELECT 
+          c.candidate_id, c.genome_hash, c.oos_sharpe_net, c.oos_cagr_net,
+          c.max_drawdown_net, c.pbo, c.dsr, c.stress_passed, c.stress_total,
+          c.gates_passed, c.run_id, c.strategy_toml, c.genome_json,
+          camp.name as campaign_name
+        FROM scg_candidates c
+        JOIN scg_runs r ON c.run_id = r.run_id
+        LEFT JOIN scg_campaigns camp ON r.campaign_id = camp.campaign_id
+        WHERE c.source_stage = 'B' 
+          AND c.candidate_class = 'validated'
+          AND c.gates_passed = true
+          AND c.oos_sharpe_net IS NOT NULL
+          AND (
+            ($1 = 'US' AND (camp.name ILIKE '%us%' OR camp.name ILIKE '%_us'))
+            OR ($1 = 'BR' AND NOT (camp.name ILIKE '%us%' OR camp.name ILIKE '%_us'))
+          )
+          AND c.genome_hash NOT IN (SELECT genome_hash FROM hall_of_fame WHERE market = $1)
+        ORDER BY c.oos_sharpe_net DESC
+        LIMIT $2
+      `, [market, HOF_LIMIT]);
+      
+      if (candidates.rows.length === 0) continue;
+      
+      console.log(`[HoF Sync] Found ${candidates.rows.length} validated ${market} candidates to promote`);
+      
+      for (const c of candidates.rows) {
+        // Insert into hall_of_fame
+        await p.query(`
+          INSERT INTO hall_of_fame (
+            genome_hash, candidate_id, oos_sharpe_net, oos_cagr_net,
+            max_drawdown_net, pbo, dsr, stress_passed, stress_total,
+            gates_passed, run_id, market, strategy_toml, genome_json
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (genome_hash) DO UPDATE SET
+            oos_sharpe_net = GREATEST(hall_of_fame.oos_sharpe_net, EXCLUDED.oos_sharpe_net),
+            promoted_at = NOW()
+        `, [
+          c.genome_hash, c.candidate_id, c.oos_sharpe_net, c.oos_cagr_net,
+          c.max_drawdown_net, c.pbo, c.dsr, c.stress_passed || 0, c.stress_total || 5,
+          true, c.run_id, market, c.strategy_toml, c.genome_json
+        ]);
+        
+        // Also insert into scg_promotions if not exists
+        await p.query(`
+          INSERT INTO scg_promotions (
+            promotion_id, candidate_id, stage, promoted_by, promotion_class,
+            oos_sharpe_net, cagr_net, max_drawdown_net, pbo, dsr,
+            stress_passed, stress_total, gates_passed, market, strategy_name
+          ) VALUES ($1, $2, 'hall_of_fame', 'auto_sync', 'hall_of_fame', $3, $4, $5, $6, $7, $8, $9, true, $10, $11)
+          ON CONFLICT (candidate_id, stage) DO NOTHING
+        `, [
+          `promo_${c.genome_hash}_hof`, c.candidate_id,
+          c.oos_sharpe_net, c.oos_cagr_net, c.max_drawdown_net, c.pbo, c.dsr,
+          c.stress_passed || 0, c.stress_total || 5, market,
+          `${market} • Validated • #${c.genome_hash.slice(-6).toUpperCase()}`
+        ]);
+        
+        result[market]++;
+      }
+      
+      // Prune if over limit per market
+      await p.query(`
+        DELETE FROM hall_of_fame
+        WHERE id IN (
+          SELECT id FROM hall_of_fame
+          WHERE market = $1
+          ORDER BY oos_sharpe_net ASC
+          LIMIT GREATEST(0, (SELECT COUNT(*) FROM hall_of_fame WHERE market = $1) - $2)
+        )
+      `, [market, HOF_LIMIT]);
+      
+    } catch (err) {
+      console.error(`[HoF Sync] Failed to sync ${market} validated:`, err.message);
+    }
+  }
+  
+  return result;
 }
 
 /**
  * Sync strategies to the GLOBAL hall_of_fame table.
  * Only inserts if strategy beats current threshold or HoF is not full.
  * @param {Array} strategies - Local strategies to potentially promote
+ * @param {string} market - Market ('BR' or 'US')
  * @returns {Promise<number>} Number of strategies promoted
  */
-async function syncToGlobalHallOfFame(strategies) {
+async function syncToGlobalHallOfFame(strategies, market = 'BR') {
   const p = getPool();
   if (!p) return 0;
   
-  const market = 'BR'; // Default market
   let promoted = 0;
   
   try {

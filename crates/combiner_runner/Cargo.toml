@@ -16,6 +16,9 @@ test-utils = []
 # Workspace dependencies
 combiner_core = { path = "../combiner_core" }
 backtester_strategy = { path = "../backtester_strategy" }
+backtester_engine = { path = "../backtester_engine" }
+backtester_intelligence = { path = "../backtester_intelligence" }
+backtester_core = { path = "../backtester_core", features = ["decimal"] }
 obfs = { path = "../obfs" }
 rayon = { workspace = true }
 serde = { workspace = true }
@@ -23,6 +26,7 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true }
 uuid = "1.0"
+rust_decimal = { version = "1.33", features = ["serde"] }
 
 # Local dependencies
 dashmap = "6.0"

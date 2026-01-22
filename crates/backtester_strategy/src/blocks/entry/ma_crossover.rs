@@ -47,20 +47,40 @@ impl StrategyBlock for MaCrossoverBlock {
 
         let mut signals = Vec::new();
         let mut long_count = 0;
+        let mut skipped_insufficient_data = 0;
 
         for candidate in &ctx.candidates {
-            if candidate.prices.len() < slow_period + 1 {
-                continue;
-            }
+            // Adaptive fallback: use available data if periods are too long
+            // Minimum 20 days for slow MA to be meaningful
+            let available = candidate.prices.len();
+            let effective_slow = if available >= slow_period + 1 {
+                slow_period
+            } else if available >= 20 {
+                // Fallback to available data minus 1 (for prev calculation)
+                available.saturating_sub(1)
+            } else {
+                skipped_insufficient_data += 1;
+                continue; // Skip if less than 20 days (unreliable)
+            };
+            
+            // Maintain fast/slow ratio for fallback periods
+            let effective_fast = if effective_slow < slow_period {
+                // Scale fast period proportionally
+                (((fast_period as f64 / slow_period as f64) * effective_slow as f64)
+                    .round() as usize)
+                    .max(5) // Minimum 5 days for fast MA
+            } else {
+                fast_period
+            };
 
             // Calculate current and previous MAs
-            let fast_ma = Self::calculate_sma(&candidate.prices, fast_period);
-            let slow_ma = Self::calculate_sma(&candidate.prices, slow_period);
+            let fast_ma = Self::calculate_sma(&candidate.prices, effective_fast);
+            let slow_ma = Self::calculate_sma(&candidate.prices, effective_slow);
 
             // Calculate previous MAs (exclude last price)
             let prev_prices: Vec<f64> = candidate.prices[..candidate.prices.len() - 1].to_vec();
-            let prev_fast_ma = Self::calculate_sma(&prev_prices, fast_period);
-            let prev_slow_ma = Self::calculate_sma(&prev_prices, slow_period);
+            let prev_fast_ma = Self::calculate_sma(&prev_prices, effective_fast);
+            let prev_slow_ma = Self::calculate_sma(&prev_prices, effective_slow);
 
             if let (Some(fast), Some(slow), Some(prev_fast), Some(prev_slow)) =
                 (fast_ma, slow_ma, prev_fast_ma, prev_slow_ma)
@@ -97,10 +117,16 @@ impl StrategyBlock for MaCrossoverBlock {
             }
         }
 
-        ctx.trace_step(
-            self.block_id(),
-            &format!("{} long signals from {} candidates", long_count, ctx.candidates.len()),
-        );
+        let msg = if skipped_insufficient_data > 0 {
+            format!(
+                "{} long signals from {} candidates ({} skipped: insufficient data)",
+                long_count, ctx.candidates.len(), skipped_insufficient_data
+            )
+        } else {
+            format!("{} long signals from {} candidates", long_count, ctx.candidates.len())
+        };
+        
+        ctx.trace_step(self.block_id(), &msg);
 
         BlockResult::success(format!(
             "MA Crossover: {} long signals, {} candidates",

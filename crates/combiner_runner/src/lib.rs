@@ -31,6 +31,8 @@ pub mod executor;
 pub mod cache;
 pub mod metrics;
 pub mod data_loader;
+pub mod data_cache;
+pub mod in_process;
 
 pub use executor::{BacktestExecutor, LibraryExecutor, CliExecutor, BacktestOutput, ExecutionError};
 pub use cache::{
@@ -41,5 +43,6 @@ pub use cache::{
 };
 pub use metrics::MetricsParser;
 pub use data_loader::{MmapOhlcv, SharedMmapOhlcv, load_shared};
-// MockOhlcv removido - PROIBIDO mock em producao
+pub use data_cache::{InMemoryMarketData, SharedMarketData, DataCacheError};
+pub use in_process::InProcessExecutor;
 

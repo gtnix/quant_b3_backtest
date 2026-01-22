@@ -1,13 +1,8 @@
 /**
- * FolderSelector Component
- * 
- * Unified folder selection that works in both Tauri and Browser modes.
- * - Tauri: Uses native file dialog
- * - Browser: Text input with path validation
+ * FolderSelector Component - Web Mode
  */
 
 import { useState, useEffect } from 'react';
-import { platform, capabilities } from '../lib/platform';
 import { cmd } from '../lib/commands';
 import type { PathInfo } from '../lib/commands';
 import { 
@@ -67,27 +62,7 @@ export function FolderSelector({
   };
 
   const handleNativeSelect = async () => {
-    if (!capabilities.nativeDialog) {
-      setShowInput(true);
-      return;
-    }
-
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: `Select ${label}`,
-      });
-
-      if (selected && typeof selected === 'string') {
-        await setPath(selected);
-      }
-    } catch (err) {
-      setError(`Failed to open folder dialog: ${err}`);
-      // Fallback to input mode
-      setShowInput(true);
-    }
+    setShowInput(true);
   };
 
   const setPath = async (path: string) => {
@@ -313,7 +288,7 @@ export function FolderSelector({
       {/* Platform indicator */}
       <div className="mt-3 pt-3 border-t border-terminal-border/50 flex items-center justify-between text-xs text-terminal-muted">
         <span>
-          {platform.isTauri ? '🖥️ Desktop Mode' : '🌐 Browser Mode'}
+          🌐 Web Mode
         </span>
         <button
           onClick={loadCurrentPath}

@@ -9,6 +9,8 @@ use crate::param_ranges::ParamRanges;
 pub struct GenomeValidator {
     param_ranges: ParamRanges,
     strict: bool,
+    /// Minimum data days available for validation (0 = skip data validation)
+    min_data_days: usize,
 }
 
 impl Default for GenomeValidator {
@@ -23,6 +25,7 @@ impl GenomeValidator {
         Self {
             param_ranges: ParamRanges::new(),
             strict: false,
+            min_data_days: 0, // Skip data validation by default
         }
     }
 
@@ -31,12 +34,20 @@ impl GenomeValidator {
         Self {
             param_ranges,
             strict: false,
+            min_data_days: 0,
         }
     }
 
     /// Enable strict mode (fails on warnings).
     pub fn strict(mut self) -> Self {
         self.strict = true;
+        self
+    }
+
+    /// Set minimum data days for validation.
+    /// When set, genomes requiring more data than available will fail validation.
+    pub fn with_data_days(mut self, days: usize) -> Self {
+        self.min_data_days = days;
         self
     }
 
@@ -64,6 +75,11 @@ impl GenomeValidator {
 
         // Validate weight constraints (P0 fix: detect incompatible max_weight/max_positions)
         Self::validate_weight_constraints(genome)?;
+
+        // Validate data requirements (if min_data_days is set)
+        if self.min_data_days > 0 {
+            self.validate_data_requirements(genome)?;
+        }
 
         // Validate each gene
         for gene in &genome.genes {
@@ -172,6 +188,82 @@ impl GenomeValidator {
     /// Check if a genome is valid (returns bool).
     pub fn is_valid(&self, genome: &StrategyGenome) -> bool {
         self.validate(genome).is_ok()
+    }
+
+    /// Validate that genome data requirements are compatible with available data.
+    ///
+    /// Checks Entry blocks for lookback period requirements and ensures they
+    /// don't exceed the available data days.
+    fn validate_data_requirements(&self, genome: &StrategyGenome) -> Result<(), ValidationError> {
+        for gene in &genome.genes {
+            let required_days = match gene.block_id.as_str() {
+                "ma_crossover" => {
+                    // MA Crossover requires slow_period + 1 days for calculation
+                    let slow = gene.get_param("slow_period")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(200);
+                    slow + 1
+                }
+                "rsi" => {
+                    // RSI requires period + 1 days
+                    let period = gene.get_param("period")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(14);
+                    period + 1
+                }
+                "macd" => {
+                    // MACD requires slow_ema + signal days for convergence
+                    let slow = gene.get_param("slow_ema")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(26);
+                    let signal = gene.get_param("signal")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(9);
+                    slow + signal
+                }
+                "bollinger" => {
+                    // Bollinger requires period days
+                    let period = gene.get_param("period")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(20);
+                    period
+                }
+                "zscore" => {
+                    // Z-score requires period days
+                    let period = gene.get_param("period")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(20);
+                    period
+                }
+                "momentum" => {
+                    // Momentum requires lookback_days + skip_last_days
+                    let lookback = gene.get_param("lookback_days")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(126);
+                    let skip = gene.get_param("skip_last_days")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(21);
+                    lookback + skip
+                }
+                "low_vol" => {
+                    // Low vol requires lookback_days
+                    let lookback = gene.get_param("lookback_days")
+                        .map(|p| p.as_i64() as usize)
+                        .unwrap_or(60);
+                    lookback
+                }
+                _ => 0, // Other blocks don't have data requirements
+            };
+
+            if required_days > self.min_data_days {
+                return Err(ValidationError::InsufficientData {
+                    block: gene.block_id.clone(),
+                    required: required_days,
+                    available: self.min_data_days,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Validate weight constraints are compatible.

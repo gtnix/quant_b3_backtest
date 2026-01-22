@@ -13,6 +13,60 @@ This document defines the performance gates and measurement methodology for the 
 | Hot path allocs | 0 per event | `process_day` loop | Cache efficiency |
 | Max regression | <= 5% | vs previous baseline | CI gate |
 | P99 latency | <= 10x mean | single `process_day` | Tail latency control |
+| **GA Backtest** | **< 20ms** | 10 assets, 252 days | GA population evaluation |
+
+## GA Backtest Performance Gate
+
+**Added**: 2026-01-21
+
+The Genetic Algorithm (GA) backtest evaluation is a critical performance gate for the Strategy Combiner (SCG). Each genome in the population requires a full backtest evaluation.
+
+### Requirements
+
+| Mode | Threshold | Executor | Notes |
+|------|-----------|----------|-------|
+| Production | < 20ms | `InProcessExecutor` | **Mandatory for SCG runs** |
+| CI Gate | < 30ms | `InProcessExecutor` | Allows CI variance |
+| Legacy | ~1000ms | `CliExecutor` | External process, not for production |
+
+### Enabling Fast GA Backtests
+
+Use the `--in-process` flag with the `combiner run` command:
+
+```bash
+# Fast mode (recommended for production)
+cargo run --release --bin combiner -- run --config config.toml --in-process
+
+# Legacy mode (slow, external process)
+cargo run --release --bin combiner -- run --config config.toml
+```
+
+### Prerequisites
+
+1. `dataset.market_data_path` must be set in the config file
+2. Market data CSV must be pre-generated (see `scripts/export_market_data.py`)
+
+### CI Test
+
+A performance gate test exists in `combiner_runner::in_process::tests`:
+
+```rust
+#[test]
+fn test_performance_gate_ga_backtest_under_30ms()
+```
+
+This test:
+- Creates a 10 asset x 252 day dataset
+- Executes 5 backtests and measures median time
+- **Fails if median > 30ms**
+
+### Implementation Details
+
+The `InProcessExecutor`:
+- Pre-loads market data once from CSV
+- Reuses data across all backtest evaluations (via `Arc`)
+- Uses SIMD-optimized metrics calculation
+- Zero file I/O in the hot path
 
 ## Benchmark Scenarios
 

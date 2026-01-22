@@ -1,34 +1,20 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
-import { pool, PROJECT_ROOT, getArtifactsRoot } from '../db.js';
-import { scgRuns, broadcastSSE } from '../state.js';
-import { DATABASE_URL } from '../db.js';
+import { pool, PROJECT_ROOT } from '../db.js';
+import { scgRuns } from '../state.js';
 
 const router = Router();
 
-router.post('/scg/start', (req, res) => {
-  const { maxRuntimeSeconds = 30, campaignConfig } = req.body;
-  const runId = `run_${Date.now().toString(36)}`;
-  const configPath = campaignConfig || path.join(PROJECT_ROOT, 'configs', 'campaigns', 'scg_quick_test.toml');
-  const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
-  
-  if (!fs.existsSync(combinerPath)) return res.status(500).json({ error: 'Combiner binary not found. Run: cargo build --release -p combiner_cli' });
-  if (!fs.existsSync(configPath)) return res.status(400).json({ error: `Config not found: ${configPath}` });
-  
-  const scgProcess = spawn(combinerPath, ['factory', 'run', '--campaign', configPath], { cwd: PROJECT_ROOT, env: { ...process.env, RUST_LOG: 'combiner=info', NEON_DATABASE_URL: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require', BACKTEST_CLI_PATH: process.env.BACKTEST_CLI_PATH || path.join(PROJECT_ROOT, 'target/release/backtest') } });
-  const runState = { runId, status: 'running', startTime: Date.now(), maxRuntimeSeconds, output: [], error: null, process: scgProcess };
-  scgRuns.set(runId, runState);
-  
-  scgProcess.stdout.on('data', (data) => { runState.output.push(data.toString()); broadcastSSE('scg-progress', { run_id: runId, status: 'running', elapsed_secs: Math.floor((Date.now() - runState.startTime) / 1000), latest_log: runState.output.slice(-1)[0] }); });
-  scgProcess.stderr.on('data', (data) => { runState.output.push(data.toString()); });
-  scgProcess.on('close', (code) => { runState.status = code === 0 ? 'completed' : 'failed'; runState.exitCode = code; runState.endTime = Date.now(); broadcastSSE('scg-progress', { run_id: runId, status: runState.status, percent_complete: 100, exit_code: code }); });
-  scgProcess.on('error', (err) => { runState.status = 'failed'; runState.error = err.message; broadcastSSE('scg-progress', { run_id: runId, status: 'failed', error_message: err.message }); });
-  
-  res.json({ runId, status: 'started' });
-});
+// =============================================================================
+// DEPRECATED CONTROL ROUTES - Use /api/omp/quick-start instead
+// =============================================================================
+// POST /scg/start - REMOVED (use POST /api/omp/quick-start)
+// POST /scg/overnight-start - REMOVED (use POST /api/omp/quick-start)
+// POST /scg/overnight-stop - REMOVED (use POST /api/omp/stop)
+// GET /scg/overnight-status - REMOVED (use GET /api/omp/status)
 
+// Legacy progress endpoint (read-only, kept for backward compatibility)
 router.get('/scg/progress/:runId', (req, res) => {
   const runState = scgRuns.get(req.params.runId);
   if (!runState) return res.status(404).json({ error: `Run ${req.params.runId} not found` });
@@ -52,204 +38,6 @@ router.get('/scg/active-runs', (req, res) => {
   const runs = [];
   for (const [id, state] of scgRuns) { if (state.status === 'running') runs.push({ run_id: id, started_at: new Date(state.startTime).toISOString(), elapsed_secs: Math.floor((Date.now() - state.startTime) / 1000) }); }
   res.json({ runs, count: runs.length });
-});
-
-// Status do SCG overnight (roda fora do dashboard)
-router.get('/scg/overnight-status', async (req, res) => {
-  const { execSync, spawnSync } = await import('child_process');
-  const pidFile = path.join(PROJECT_ROOT, 'logs', 'scg', 'scg.pid');
-  const logDir = path.join(PROJECT_ROOT, 'logs', 'scg');
-  const pendingDir = path.join(PROJECT_ROOT, 'output', 'scg', 'backtests', 'pending');
-  
-  let status = { running: false, pid: null, startTime: null, cpu: null, mem: null, lastGeneration: null, cleanups: 0, pendingFiles: 0, pendingSize: '0', errors: 0, latestLog: null };
-  
-  try {
-    // Check PID file
-    if (fs.existsSync(pidFile)) {
-      const pid = fs.readFileSync(pidFile, 'utf8').trim();
-      try {
-        // Check if process is running
-        process.kill(parseInt(pid), 0);
-        status.running = true;
-        status.pid = parseInt(pid);
-        
-        // Get CPU/MEM
-        try {
-          const ps = execSync(`ps -o %cpu,%mem,lstart -p ${pid} 2>/dev/null | tail -1`, { encoding: 'utf8' });
-          const parts = ps.trim().split(/\s+/);
-          status.cpu = parseFloat(parts[0]) || 0;
-          status.mem = parseFloat(parts[1]) || 0;
-          status.startTime = parts.slice(2).join(' ');
-        } catch (e) {}
-      } catch (e) {
-        // Process not running
-        status.running = false;
-      }
-    }
-    
-    // Check for any combiner process
-    if (!status.running) {
-      try {
-        const pgrep = execSync('pgrep -f "combiner run" 2>/dev/null', { encoding: 'utf8' });
-        const pids = pgrep.trim().split('\n').filter(p => p);
-        if (pids.length > 0) {
-          status.running = true;
-          status.pid = parseInt(pids[0]);
-        }
-      } catch (e) {}
-    }
-    
-    // Get latest log file
-    if (fs.existsSync(logDir)) {
-      const logs = fs.readdirSync(logDir).filter(f => f.startsWith('scg_') && f.endsWith('.log')).sort().reverse();
-      if (logs.length > 0) {
-        status.latestLog = logs[0];
-        const logPath = path.join(logDir, logs[0]);
-        const logContent = fs.readFileSync(logPath, 'utf8');
-        
-        // Parse last generation
-        const genMatches = logContent.match(/Gen (\d+) ULTRA/g);
-        if (genMatches && genMatches.length > 0) {
-          const lastMatch = genMatches[genMatches.length - 1].match(/Gen (\d+)/);
-          status.lastGeneration = parseInt(lastMatch[1]);
-        }
-        
-        // Count cleanups
-        status.cleanups = (logContent.match(/Incremental cleanup/g) || []).length;
-        
-        // Count errors
-        status.errors = (logContent.match(/ERROR/g) || []).length;
-      }
-    }
-    
-    // Pending files
-    if (fs.existsSync(pendingDir)) {
-      try {
-        const files = fs.readdirSync(pendingDir).filter(f => f.endsWith('.obfs'));
-        status.pendingFiles = files.length;
-        const du = execSync(`du -sh "${pendingDir}" 2>/dev/null`, { encoding: 'utf8' });
-        status.pendingSize = du.split('\t')[0];
-      } catch (e) {}
-    }
-    
-    res.json(status);
-  } catch (e) {
-    res.status(500).json({ error: e.message, ...status });
-  }
-});
-
-// Processo SCG persistente (sobrevive ao restart do server)
-let scgOvernightProcess = null;
-let scgOvernightRunId = null;
-
-// Start SCG overnight from dashboard (direto via Node.js, sem scripts)
-router.post('/scg/overnight-start', async (req, res) => {
-  const { execSync } = await import('child_process');
-  const { config = 'maxpower', ultra = true } = req.body;
-  
-  // Mapear config para arquivo
-  const configMap = {
-    'maxpower': 'scg_maxpower.toml',
-    '1h_moderado': 'scg_1h_moderado.toml',
-    '4h_agressivo': 'scg_4h_agressivo.toml',
-  };
-  const configFile = configMap[config] || `scg_${config}.toml`;
-  const configPath = path.join(PROJECT_ROOT, 'configs', configFile);
-  const combinerPath = path.join(PROJECT_ROOT, 'target', 'release', 'combiner');
-  const logDir = path.join(PROJECT_ROOT, 'logs', 'scg');
-  const pidFile = path.join(logDir, 'scg.pid');
-  
-  // Verificar binário
-  if (!fs.existsSync(combinerPath)) {
-    return res.status(500).json({ error: 'Combiner not found. Run: cargo build --release --bin combiner' });
-  }
-  if (!fs.existsSync(configPath)) {
-    return res.status(400).json({ error: `Config not found: ${configPath}` });
-  }
-  
-  // Verificar se já está rodando
-  try {
-    const pgrep = execSync('pgrep -f "combiner run"', { encoding: 'utf8' });
-    if (pgrep.trim()) {
-      return res.status(400).json({ error: 'SCG already running', pids: pgrep.trim().split('\n') });
-    }
-  } catch (e) { /* não está rodando */ }
-  
-  // Criar diretório de logs
-  fs.mkdirSync(logDir, { recursive: true });
-  
-  // Timestamp para log
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const logFile = path.join(logDir, `scg_${timestamp}.log`);
-  
-  // Args do combiner
-  const args = ['run', '--config', configPath];
-  if (ultra) args.push('--ultra');
-  
-  // Iniciar processo detached
-  const logFd = fs.openSync(logFile, 'a');
-  const proc = spawn(combinerPath, args, {
-    cwd: PROJECT_ROOT,
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-    env: {
-      ...process.env,
-      RUST_LOG: 'combiner_engine=info,combiner_runner=info',
-      BACKTEST_CLI_PATH: path.join(PROJECT_ROOT, 'target/release/backtest'),
-    }
-  });
-  
-  // Salvar PID
-  fs.writeFileSync(pidFile, proc.pid.toString());
-  proc.unref();
-  fs.closeSync(logFd);
-  
-  scgOvernightProcess = proc;
-  scgOvernightRunId = `overnight_${timestamp}`;
-  
-  res.json({ 
-    status: 'started', 
-    pid: proc.pid, 
-    config: configFile,
-    ultra,
-    logFile: `logs/scg/scg_${timestamp}.log`,
-    message: 'SCG started in background. Close browser/terminal - it will keep running.'
-  });
-});
-
-// Stop SCG overnight (direto via Node.js)
-router.post('/scg/overnight-stop', async (req, res) => {
-  const { execSync } = await import('child_process');
-  const pidFile = path.join(PROJECT_ROOT, 'logs', 'scg', 'scg.pid');
-  
-  let killed = [];
-  
-  // Tentar pelo PID file
-  if (fs.existsSync(pidFile)) {
-    const pid = fs.readFileSync(pidFile, 'utf8').trim();
-    try {
-      process.kill(parseInt(pid), 'SIGTERM');
-      killed.push(parseInt(pid));
-      fs.unlinkSync(pidFile);
-    } catch (e) {}
-  }
-  
-  // Matar qualquer combiner run
-  try {
-    const pgrep = execSync('pgrep -f "combiner run"', { encoding: 'utf8' });
-    const pids = pgrep.trim().split('\n').filter(p => p);
-    for (const pid of pids) {
-      try {
-        process.kill(parseInt(pid), 'SIGTERM');
-        killed.push(parseInt(pid));
-      } catch (e) {}
-    }
-  } catch (e) {}
-  
-  scgOvernightProcess = null;
-  scgOvernightRunId = null;
-  
-  res.json({ status: 'stopped', killed, message: `Stopped ${killed.length} process(es)` });
 });
 
 router.get('/cockpit-candidates/:runId', async (req, res) => {
@@ -492,6 +280,7 @@ router.get('/scg/hall-of-fame/:genomeHash', async (req, res) => {
     }
     
     const r = result.rows[0];
+    const genome = typeof r.genome_json === 'string' ? JSON.parse(r.genome_json) : r.genome_json;
     res.json({
       rank: r.global_rank,
       genome_hash: r.genome_hash,
@@ -510,7 +299,8 @@ router.get('/scg/hall-of-fame/:genomeHash', async (req, res) => {
       git_sha: r.git_sha,
       market: r.market,
       strategy_toml: r.strategy_toml,
-      genome_json: r.genome_json
+      genome_json: r.genome_json,
+      identity: genome?.identity || null
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

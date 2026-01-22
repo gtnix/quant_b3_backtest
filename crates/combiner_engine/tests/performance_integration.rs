@@ -57,12 +57,25 @@ impl BacktestExecutor for FastMockExecutor {
     }
 }
 
-/// Helper to create random genomes for testing.
-fn create_test_genomes(count: usize, seed: u64) -> Vec<StrategyGenome> {
-    let param_ranges = ParamRanges::new();
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let pop = Population::random(count, &mut rng, &param_ranges);
-    pop.genomes
+/// Helper to create test genomes manually (no catalog dependency for tests).
+fn create_test_genomes(count: usize, _seed: u64) -> Vec<StrategyGenome> {
+    (0..count)
+        .map(|i| {
+            StrategyGenome::new(vec![
+                BlockGene::new(
+                    BlockType::Selection,
+                    "momentum",
+                    vec![("lookback_days", ParamValue::int(21 + (i as i64 * 7), 21, 252, 21))],
+                ),
+                BlockGene::new(
+                    BlockType::Sizing,
+                    "equal_weight",
+                    vec![("max_weight", ParamValue::float(0.25, 0.10, 0.40, 0.05))],
+                ),
+            ])
+            .with_template_slug("test_template".to_string())
+        })
+        .collect()
 }
 
 /// Helper to create PopulationFitnessSoA with mock fitness values.

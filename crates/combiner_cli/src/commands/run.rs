@@ -18,7 +18,7 @@ use combiner_engine::{
     ExperimentStatus, Population, generate_experiment_id, UltraEvolutionResult,
     FinalReportGenerator, ArtifactFormat,
 };
-use combiner_runner::{BacktestExecutor, CliExecutor, ValidationCache};
+use combiner_runner::{BacktestExecutor, CliExecutor, InProcessExecutor, ValidationCache};
 
 use crate::ExecutionOverrides;
 
@@ -105,6 +105,7 @@ pub fn execute(
     ultra: bool,
     top_k: usize,
     exec_overrides: ExecutionOverrides,
+    in_process: bool,
 ) -> Result<()> {
     // Load configuration
     let config = load_config(config_path)?;
@@ -114,6 +115,32 @@ pub fn execute(
     let mut evo_config = config.evolution.clone();
     if let Some(s) = seed {
         evo_config.seed = Some(s);
+    }
+
+    // Apply market-specific fee defaults from dataset
+    if let Some(ref market) = config.dataset.market {
+        // Note: market is now passed via dataset, not stored in evo_config
+        
+        // Apply market-specific defaults if no fee tier override
+        if exec_overrides.fee_tier.is_none() {
+            let default_tier = if market.to_uppercase() == "US" {
+                info!("US market detected - using USRetail fee tier");
+                FeeTier::USRetail
+            } else {
+                FeeTier::B3Retail
+            };
+            evo_config.execution.fees = FeeModelConfig::from_tier(default_tier);
+        }
+        
+        // Apply market-specific slippage if no override
+        if exec_overrides.slippage_bps.is_none() {
+            let default_slippage_bps = if market.to_uppercase() == "US" {
+                5.0 // US has lower slippage
+            } else {
+                10.0 // BR has higher slippage
+            };
+            evo_config.execution.slippage = SlippageModelConfig::Constant { bps: default_slippage_bps };
+        }
     }
 
     // Apply execution overrides
@@ -130,37 +157,8 @@ pub fn execute(
     let output_path = Path::new(output_dir);
     fs::create_dir_all(output_path)?;
 
-    // Create executor with validation (fail-fast if backtester not found)
-    let mut executor = CliExecutor::try_new()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize backtester: {}. \
-            Build with `cargo build --release --bin backtest` or set BACKTEST_CLI_PATH.", e))?
-        .with_output_dir(output_path.join("backtests"));
-
-    // Configure executor with dataset settings
-    if let Some(ref path) = config.dataset.market_data_path {
-        info!("Using market data from: {}", path);
-        executor = executor.with_market_data(path);
-    }
-    if let Some(ref source) = config.dataset.data_source {
-        info!("Using data source: {}", source);
-        executor = executor.with_data_source(source);
-    }
-    if let Some(ref profile) = config.dataset.risk_profile {
-        info!("Using risk profile: {}", profile);
-        executor = executor.with_risk_profile(profile);
-    }
-
-    // Enable OBFS if configured (90% storage reduction)
-    if config.output.artifact_format == "obfs" {
-        info!("OBFS artifact format enabled for backtests");
-        executor = executor.with_obfs(true);
-    }
-
     // Track start time
     let start_time = std::time::Instant::now();
-
-    // Create evolution engine
-    let mut engine = EvolutionEngine::new(evo_config.clone(), executor);
 
     // Progress bar
     let pb = ProgressBar::new(evo_config.max_generations as u64);
@@ -171,6 +169,106 @@ pub fn execute(
             .progress_chars("#>-"),
     );
 
+    // Branch based on executor type
+    if in_process {
+        // ============================================================
+        // IN-PROCESS EXECUTOR: Ultra-fast (<20ms/backtest)
+        // ============================================================
+        let market_data_path = config.dataset.market_data_path.as_ref()
+            .ok_or_else(|| anyhow::anyhow!(
+                "--in-process requires dataset.market_data_path in config file"
+            ))?;
+        
+        info!("Executor: InProcessExecutor (in-process <20ms/backtest)");
+        info!("Loading market data from: {}", market_data_path);
+        
+        let executor = InProcessExecutor::from_csv(Path::new(market_data_path))
+            .map_err(|e| anyhow::anyhow!("Failed to load market data: {}", e))?;
+        
+        info!(
+            "Market data loaded: {} days, {} symbols",
+            executor.market_data().num_days(),
+            executor.market_data().num_symbols()
+        );
+        
+        let mut engine = EvolutionEngine::new(evo_config.clone(), executor);
+        
+        run_evolution(
+            &mut engine,
+            ultra,
+            top_k,
+            &pb,
+            output_path,
+            &evo_config,
+            start_time,
+            &config,
+        )?;
+    } else {
+        // ============================================================
+        // CLI EXECUTOR: Spawns external process (~1000ms/backtest)
+        // ============================================================
+        info!("Executor: CliExecutor (external process ~1000ms/backtest)");
+        warn!("Consider using --in-process for 50x faster backtests");
+        
+        let mut executor = CliExecutor::try_new()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize backtester: {}. \
+                Build with `cargo build --release --bin backtest` or set BACKTEST_CLI_PATH.", e))?
+            .with_output_dir(output_path.join("backtests"));
+
+        // Configure executor with dataset settings
+        if let Some(ref path) = config.dataset.market_data_path {
+            info!("Using market data from: {}", path);
+            executor = executor.with_market_data(path);
+        }
+        if let Some(ref source) = config.dataset.data_source {
+            info!("Using data source: {}", source);
+            executor = executor.with_data_source(source);
+        }
+        if let Some(ref profile) = config.dataset.risk_profile {
+            info!("Using risk profile: {}", profile);
+            executor = executor.with_risk_profile(profile);
+        }
+        if let Some(ref market) = config.dataset.market {
+            info!("Using market: {}", market);
+            executor = executor.with_market(market);
+        }
+
+        // Enable OBFS if configured (90% storage reduction)
+        if config.output.artifact_format == "obfs" {
+            info!("OBFS artifact format enabled for backtests");
+            executor = executor.with_obfs(true);
+        }
+        
+        let mut engine = EvolutionEngine::new(evo_config.clone(), executor);
+        
+        run_evolution(
+            &mut engine,
+            ultra,
+            top_k,
+            &pb,
+            output_path,
+            &evo_config,
+            start_time,
+            &config,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Run evolution with the given engine (generic over executor type).
+fn run_evolution<E: BacktestExecutor>(
+    engine: &mut EvolutionEngine<E>,
+    ultra: bool,
+    top_k: usize,
+    pb: &ProgressBar,
+    output_path: &Path,
+    evo_config: &EvolutionConfig,
+    start_time: std::time::Instant,
+    config: &ScgConfig,
+) -> Result<()> {
+    let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);
+    
     if ultra {
         info!(
             "Starting ULTRA evolution: {} generations, {} population, top-k={}",
@@ -212,8 +310,7 @@ pub fn execute(
         }
 
         // Save ultra results
-        let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);
-        save_ultra_results(&engine, &result, output_path, &evo_config, start_time, artifact_format)?;
+        save_ultra_results(engine, &result, output_path, evo_config, start_time, artifact_format)?;
 
         // Print ultra summary
         print_ultra_summary(&result);
@@ -229,13 +326,12 @@ pub fn execute(
         pb.finish_with_message("Evolution complete");
 
         // Save results
-        let artifact_format = ArtifactFormat::from_str(&config.output.artifact_format);
-        save_results(&engine, output_path, &evo_config, start_time, artifact_format)?;
+        save_results(engine, output_path, evo_config, start_time, artifact_format)?;
 
         // Print summary
-        print_summary(&engine);
+        print_summary(engine);
     }
-
+    
     Ok(())
 }
 
@@ -314,10 +410,22 @@ fn execute_dry_run(config: &EvolutionConfig) -> Result<()> {
     let param_ranges = ParamRanges::new();
     let validator = GenomeValidator::new();
 
-    // Generate sample population
+    // Load Strategy Catalog
+    let catalog = combiner_engine::StrategyCatalog::from_toml_dir(&config.catalog_path)
+        .map_err(|e| anyhow::anyhow!("Failed to load catalog: {}", e))?;
+    
+    info!("Loaded {} templates from catalog", catalog.len());
+
+    // Generate sample population from catalog
     let seed = config.seed.unwrap_or(42);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let population = Population::random(config.population_size.min(10), &mut rng, &param_ranges);
+    let population = Population::from_catalog(
+        &catalog,
+        config.population_size.min(10),
+        &mut rng,
+        &param_ranges,
+        0, // generation
+    );
 
     info!("Generated {} sample genomes", population.len());
 
@@ -488,6 +596,14 @@ fn save_ultra_results<E: BacktestExecutor>(
 
     // Write Hall of Fame
     persistence.write_hall_of_fame(engine.hall_of_fame())?;
+    
+    // Write failed candidates for diagnostics (pursuit-to-completion data)
+    if !ultra_result.failed_candidates.is_empty() {
+        let failed_path = output_path.join(&experiment_id).join("failed_candidates.json");
+        let failed_json = serde_json::to_string_pretty(&ultra_result.failed_candidates)?;
+        std::fs::write(&failed_path, failed_json)?;
+        info!("Saved {} failed candidates for diagnostics", ultra_result.failed_candidates.len());
+    }
 
     // Generate and save final report
     let report_generator = FinalReportGenerator::new(

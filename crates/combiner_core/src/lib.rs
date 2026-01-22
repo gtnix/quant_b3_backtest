@@ -34,6 +34,7 @@ pub mod validator;
 pub mod param_ranges;
 pub mod error;
 pub mod genome_repair;
+pub mod identity;
 
 pub use genome::{StrategyGenome, BlockGene, BlockType, ParamValue};
 pub use fitness::{MultiObjectiveFitness, FitnessConfig, ObjectiveSpec, Direction};
@@ -48,7 +49,8 @@ pub use simd_metrics::{
 };
 pub use converter::GenomeConverter;
 pub use validator::GenomeValidator;
-pub use param_ranges::ParamRanges;
+pub use param_ranges::{ParamRanges, ParamSpec, BlockSpec, DataColumn};
 pub use error::{CombinerError, ConversionError, ValidationError};
 pub use genome_repair::{repair_genome, validate_genome_weights, GenomeRepairStats, RepairConfig};
+pub use identity::{StrategyIdentity, BlockSummary};
 

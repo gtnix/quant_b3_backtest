@@ -1,0 +1,18 @@
+[strategy]
+id = "position_momentum_risk_parity"
+description = "Momentum position com risk parity sizing"
+
+[[pipeline]]
+type = "selection"
+block_id = "momentum"
+params = { lookback_days = 252, top_pct = 20, min_return = 0.0, skip_last_days = 21 }
+
+[[pipeline]]
+type = "exit"
+block_id = "trailing_stop"
+params = { trailing_pct = 0.20, activation_pct = 0.10 }
+
+[[pipeline]]
+type = "sizing"
+block_id = "risk_parity"
+params = { max_weight = 0.15, min_weight = 0.02, max_positions = 15, fallback_vol = 0.25 }

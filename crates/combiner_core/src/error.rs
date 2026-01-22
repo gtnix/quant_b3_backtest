@@ -67,5 +67,12 @@ pub enum ValidationError {
 
     #[error("Invalid weight constraints: {0}")]
     InvalidConstraints(String),
+
+    #[error("Insufficient data for block '{block}': requires {required} days but only {available} available")]
+    InsufficientData {
+        block: String,
+        required: usize,
+        available: usize,
+    },
 }
 

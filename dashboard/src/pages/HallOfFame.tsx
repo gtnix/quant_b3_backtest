@@ -4,9 +4,10 @@
 
 import { useEffect, useState } from 'react';
 import { 
-  Trophy, TrendingUp, Shield, BarChart3, Clock, 
-  GitBranch, Hash, Globe, ChevronDown, RefreshCw,
-  CheckCircle2, XCircle, Filter, LineChart, Boxes
+  Trophy, Shield, BarChart3, Clock, 
+  GitBranch, ChevronDown, RefreshCw,
+  CheckCircle2, XCircle, Filter, LineChart, Boxes,
+  AlertTriangle, Info, Fingerprint, FolderOpen
 } from 'lucide-react';
 import { useOmpStore } from '../stores/ompStore';
 import { useStrategyStore } from '../stores/strategyStore';
@@ -107,35 +108,111 @@ function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: 
 }
 
 // =============================================================================
-// ENTRY CARD COMPONENT
+// VALIDATION BADGE COMPONENT
 // =============================================================================
 
+interface ValidationIssue {
+  metric: string;
+  problem: string;
+  severity: 'warning' | 'error';
+}
+
 // Verifica se as métricas estão dentro de intervalos válidos (sanity check quant)
-function validateMetrics(m: HallOfFameEntry['metrics']) {
-  const issues: string[] = [];
+function validateMetrics(m: HallOfFameEntry['metrics']): { valid: boolean; issues: ValidationIssue[] } {
+  const issues: ValidationIssue[] = [];
   
   // Sharpe ratio sanity: intervalo realista é -3 a +5 para maioria das estratégias
   if (m.oosSharpeNet != null && (m.oosSharpeNet > 10 || m.oosSharpeNet < -3)) {
-    issues.push(`Sharpe ${m.oosSharpeNet.toFixed(1)} é irreal`);
+    issues.push({ 
+      metric: 'Sharpe', 
+      problem: `Valor ${m.oosSharpeNet.toFixed(1)} está fora do intervalo realista (-3 a +5)`,
+      severity: 'error'
+    });
   }
   
   // PBO deve estar entre 0 e 1, tipicamente 0.05-0.50
   if (m.pbo === 0 || m.pbo == null) {
-    issues.push('PBO não calculado');
+    issues.push({ 
+      metric: 'PBO', 
+      problem: 'Probability of Backtest Overfitting não foi calculado',
+      severity: 'warning'
+    });
   }
   
   // DSR deve ser positivo e tipicamente 60-80% do Sharpe bruto
   if (m.dsr === 0 || m.dsr == null) {
-    issues.push('DSR não calculado');
+    issues.push({ 
+      metric: 'DSR', 
+      problem: 'Deflated Sharpe Ratio não foi calculado',
+      severity: 'warning'
+    });
   }
   
   // MaxDD deve ser negativo e entre 0 e -1
   if (m.maxDrawdownNet == null) {
-    issues.push('MaxDD ausente');
+    issues.push({ 
+      metric: 'MaxDD', 
+      problem: 'Drawdown máximo não foi registrado',
+      severity: 'warning'
+    });
   }
   
   return { valid: issues.length === 0, issues };
 }
+
+// Badge com tooltip explicativo para métricas incompletas
+function ValidationBadge({ issues }: { issues: ValidationIssue[] }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const hasErrors = issues.some(i => i.severity === 'error');
+  
+  if (issues.length === 0) return null;
+  
+  return (
+    <div 
+      className="relative inline-flex"
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <span className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-full cursor-help transition-colors ${
+        hasErrors 
+          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+      }`}>
+        <AlertTriangle className="w-3 h-3" />
+        {issues.length} {issues.length === 1 ? 'alerta' : 'alertas'}
+      </span>
+      
+      {showTooltip && (
+        <div className="absolute left-0 top-full mt-2 w-72 p-3 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50 animate-fade-in">
+          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-700">
+            <Info className="w-4 h-4 text-slate-400" />
+            <span className="text-xs font-medium text-white">Métricas Incompletas</span>
+          </div>
+          <ul className="space-y-2">
+            {issues.map((issue, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className={`mt-0.5 ${issue.severity === 'error' ? 'text-rose-400' : 'text-amber-400'}`}>
+                  {issue.severity === 'error' ? <XCircle className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                </span>
+                <div className="flex-1">
+                  <span className="text-xs font-medium text-white">{issue.metric}:</span>
+                  <p className="text-xs text-slate-400 mt-0.5">{issue.problem}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[10px] text-slate-500 mt-2 pt-2 border-t border-slate-700">
+            Estratégias com alertas ainda podem ser válidas, mas métricas completas aumentam a confiança.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// ENTRY CARD COMPONENT
+// =============================================================================
 
 function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -176,14 +253,7 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
             }`}>
               {entry.market?.toUpperCase() || 'BR'}
             </span>
-                    {!metricsCheck.valid && (
-                      <span 
-                        className="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-400 cursor-help"
-                        title={metricsCheck.issues.join(', ')}
-                      >
-                        ⚠ Incompleto
-                      </span>
-                    )}
+            <ValidationBadge issues={metricsCheck.issues} />
           </div>
           <div className="text-xs text-slate-500 mt-0.5 font-mono">
             {entry.candidateId.slice(-12)}
@@ -276,15 +346,15 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Git SHA</span>
-                  <span className="text-white font-mono text-xs">{entry.provenance.gitSha?.slice(0, 7) || '—'}</span>
+                  <span className="text-white font-mono text-xs">{entry.provenance?.gitSha?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Hash Config</span>
-                  <span className="text-white font-mono text-xs">{entry.provenance.configHash?.slice(0, 7) || '—'}</span>
+                  <span className="text-white font-mono text-xs">{entry.provenance?.configHash?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Hash Dataset</span>
-                  <span className="text-white font-mono text-xs">{entry.provenance.datasetHash?.slice(0, 7) || '—'}</span>
+                  <span className="text-white font-mono text-xs">{entry.provenance?.datasetHash?.slice(0, 7) || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Hash Genoma</span>
@@ -305,7 +375,25 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">ID Execução</span>
-                  <span className="text-white font-mono text-xs">{entry.runId?.slice(0, 8)}</span>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Navigate to Runs page - extract experiment ID from runId if it looks like scg_*
+                      const experimentId = entry.runId?.startsWith('scg_') 
+                        ? entry.runId 
+                        : entry.campaignId?.startsWith('scg_') 
+                          ? entry.campaignId 
+                          : null;
+                      if (experimentId) {
+                        window.dispatchEvent(new CustomEvent('navigate', { detail: 'runs' }));
+                      }
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 hover:underline font-mono text-xs flex items-center gap-1"
+                    title="View run details"
+                  >
+                    <FolderOpen className="w-3 h-3" />
+                    {entry.runId?.slice(0, 12) || '—'}
+                  </button>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Campanha</span>
@@ -314,6 +402,76 @@ function EntryCard({ entry, rank }: { entry: HallOfFameEntry; rank: number }) {
               </div>
             </div>
           </div>
+          
+          {/* Strategy Catalog */}
+          {(entry.strategyFamily || entry.strategyVariant || entry.strategyHypothesis) && (
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Boxes className="w-3 h-3" /> Strategy Catalog
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                {entry.strategyFamily && (
+                  <div>
+                    <span className="text-slate-500">Família:</span>
+                    <span className="ml-2 text-amber-400 font-medium">{entry.strategyFamily}</span>
+                  </div>
+                )}
+                {entry.strategyVariant && (
+                  <div>
+                    <span className="text-slate-500">Variante:</span>
+                    <span className="ml-2 text-white">{entry.strategyVariant}</span>
+                  </div>
+                )}
+                {entry.strategyId && (
+                  <div>
+                    <span className="text-slate-500">ID:</span>
+                    <span className="ml-2 text-white font-mono text-xs">{entry.strategyId}</span>
+                  </div>
+                )}
+              </div>
+              {entry.strategyHypothesis && (
+                <p className="text-xs text-slate-400 mt-2 italic">
+                  "{entry.strategyHypothesis}"
+                </p>
+              )}
+            </div>
+          )}
+          
+          {/* Strategy Identity */}
+          {entry.identity && (
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <h4 className="text-xs text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Fingerprint className="w-3 h-3" /> Strategy Identity
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                <div><span className="text-slate-500">Type:</span><span className="ml-2 text-white">{entry.identity.strategy_type}</span></div>
+                <div><span className="text-slate-500">Market:</span><span className="ml-2 text-white">{entry.identity.market}/{entry.identity.universe}</span></div>
+                <div><span className="text-slate-500">Timeframe:</span><span className="ml-2 text-white">{entry.identity.timeframe}</span></div>
+              </div>
+              {entry.identity.blocks && entry.identity.blocks.length > 0 && (
+                <div className="mt-2">
+                  <span className="text-xs text-slate-500">Blocks:</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {entry.identity.blocks.map((b, i) => (
+                      <span key={i} className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-300">{b.block_id}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {entry.identity.entry_rules && entry.identity.entry_rules !== 'No explicit entry rules' && (
+                <div className="mt-2 text-xs">
+                  <p className="text-slate-500">Entry Rules:</p>
+                  <p className="text-white">{entry.identity.entry_rules}</p>
+                </div>
+              )}
+              {entry.identity.exit_rules && entry.identity.exit_rules !== 'No explicit exit rules (rebalance-based)' && (
+                <div className="mt-2 text-xs">
+                  <p className="text-slate-500">Exit Rules:</p>
+                  <p className="text-white">{entry.identity.exit_rules}</p>
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Notas */}
           {entry.notes && (

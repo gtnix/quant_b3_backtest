@@ -1,8 +1,9 @@
 //! Genetic operators: selection, crossover, mutation.
+//!
+//! Template-First GA: Structure is FIXED (from Strategy Catalog).
+//! Operators evolve ONLY parameters.
 
-use combiner_core::{
-    BlockGene, BlockType, ParamRanges, ParamValue, StrategyGenome,
-};
+use combiner_core::{ParamRanges, ParamValue, StrategyGenome};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -74,7 +75,10 @@ impl Selection {
     }
 }
 
-/// Crossover operator.
+/// Crossover operator for Template-First GA.
+///
+/// IMPORTANT: Only crosses over PARAMETERS, not structure.
+/// Parents must have the same template for crossover to occur.
 pub struct Crossover {
     rate: f64,
 }
@@ -86,7 +90,10 @@ impl Crossover {
         }
     }
 
-    /// Perform crossover between two parents.
+    /// Perform parameter crossover between two parents.
+    ///
+    /// If parents have different templates, returns clones (no crossover).
+    /// Structure is NEVER modified - only parameter values are exchanged.
     pub fn crossover(
         &self,
         parent1: &StrategyGenome,
@@ -94,6 +101,14 @@ impl Crossover {
         rng: &mut ChaCha8Rng,
         generation: u32,
     ) -> (StrategyGenome, StrategyGenome) {
+        // Only crossover if same template
+        if parent1.template_slug != parent2.template_slug {
+            return (
+                parent1.clone_with_new_id().with_generation(generation),
+                parent2.clone_with_new_id().with_generation(generation),
+            );
+        }
+
         if !rng.gen_bool(self.rate) {
             // No crossover, return clones
             return (
@@ -102,49 +117,27 @@ impl Crossover {
             );
         }
 
-        // Uniform crossover at gene level
-        let max_len = parent1.genes.len().max(parent2.genes.len());
-        let mut child1_genes = Vec::new();
-        let mut child2_genes = Vec::new();
+        // Clone parent genes (preserving structure)
+        let mut child1_genes = parent1.genes.clone();
+        let mut child2_genes = parent2.genes.clone();
 
-        for i in 0..max_len {
-            let (g1, g2) = if rng.gen_bool(0.5) {
-                (
-                    parent1.genes.get(i).cloned(),
-                    parent2.genes.get(i).cloned(),
-                )
-            } else {
-                (
-                    parent2.genes.get(i).cloned(),
-                    parent1.genes.get(i).cloned(),
-                )
-            };
+        // Crossover parameters at each gene position
+        let min_len = child1_genes.len().min(child2_genes.len());
+        for i in 0..min_len {
+            // For each parameter, 50% chance to swap between parents
+            let param_names: Vec<_> = child1_genes[i].params.keys().cloned().collect();
 
-            if let Some(gene) = g1 {
-                child1_genes.push(gene);
-            }
-            if let Some(gene) = g2 {
-                child2_genes.push(gene);
-            }
-        }
-
-        // Ensure sizing block exists
-        if !child1_genes.iter().any(|g| g.block_type == BlockType::Sizing) {
-            if let Some(sizing) = parent1
-                .genes
-                .iter()
-                .find(|g| g.block_type == BlockType::Sizing)
-            {
-                child1_genes.push(sizing.clone());
-            }
-        }
-        if !child2_genes.iter().any(|g| g.block_type == BlockType::Sizing) {
-            if let Some(sizing) = parent2
-                .genes
-                .iter()
-                .find(|g| g.block_type == BlockType::Sizing)
-            {
-                child2_genes.push(sizing.clone());
+            for param_name in param_names {
+                if rng.gen_bool(0.5) {
+                    // Swap parameter values
+                    if let (Some(v1), Some(v2)) = (
+                        parent1.genes.get(i).and_then(|g| g.params.get(&param_name)),
+                        parent2.genes.get(i).and_then(|g| g.params.get(&param_name)),
+                    ) {
+                        child1_genes[i].params.insert(param_name.clone(), v2.clone());
+                        child2_genes[i].params.insert(param_name, v1.clone());
+                    }
+                }
             }
         }
 
@@ -156,9 +149,15 @@ impl Crossover {
             .with_generation(generation)
             .with_parents(vec![parent1.id, parent2.id]);
 
-        // Deduplicate blocks and sanitize params to avoid clones
-        child1.deduplicate_blocks();
-        child2.deduplicate_blocks();
+        // Preserve template_slug from parents
+        if let Some(slug) = &parent1.template_slug {
+            child1 = child1.with_template_slug(slug.clone());
+        }
+        if let Some(slug) = &parent2.template_slug {
+            child2 = child2.with_template_slug(slug.clone());
+        }
+
+        // Sanitize params to avoid floating-point noise
         child1.sanitize();
         child2.sanitize();
 
@@ -166,58 +165,60 @@ impl Crossover {
     }
 }
 
-/// Mutation operator.
+/// Mutation operator for Template-First GA.
+///
+/// IMPORTANT: Only mutates PARAMETERS, never structure.
+/// Block IDs and block types are IMMUTABLE.
+#[derive(Clone)]
 pub struct Mutation {
     rate: f64,
-    param_ranges: ParamRanges,
 }
 
 impl Mutation {
-    pub fn new(rate: f64, param_ranges: ParamRanges) -> Self {
+    /// Create a new mutation operator.
+    /// Note: param_ranges is no longer needed - mutation uses ranges from ParamValue itself.
+    pub fn new(rate: f64) -> Self {
         Self {
             rate: rate.clamp(0.0, 1.0),
-            param_ranges,
         }
     }
     
+    /// Legacy constructor for backwards compatibility (ignores param_ranges).
+    #[inline]
+    pub fn with_ranges(rate: f64, _param_ranges: ParamRanges) -> Self {
+        Self::new(rate)
+    }
+
     /// Get the current mutation rate.
     pub fn rate(&self) -> f64 {
         self.rate
     }
-    
+
     /// Set the mutation rate (for adaptive mutation).
     pub fn set_rate(&mut self, rate: f64) {
         self.rate = rate.clamp(0.0, 1.0);
     }
 
     /// Mutate a genome in place.
+    ///
+    /// ONLY parameter values are mutated.
+    /// Structure (block IDs, block types, gene count) is NEVER changed.
     pub fn mutate(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
         for gene in &mut genome.genes {
-            // Parameter mutation
-            for (_param_name, param_value) in &mut gene.params {
+            // Parameter mutation only
+            for (_, param_value) in gene.params.iter_mut() {
                 if rng.gen_bool(self.rate) {
-                    self.mutate_param(param_value, rng);
+                    Self::mutate_param(param_value, rng);
                 }
             }
-
-            // Block swap mutation (lower probability)
-            if rng.gen_bool(self.rate * 0.3) {
-                self.mutate_block(gene, rng);
-            }
         }
 
-        // Structural mutation: add/remove gene (very low probability)
-        if rng.gen_bool(self.rate * 0.1) {
-            self.mutate_structure(genome, rng);
-        }
-        
-        // Post-mutation cleanup: remove duplicate blocks and sanitize floats
-        genome.deduplicate_blocks();
+        // Post-mutation cleanup: sanitize floats
         genome.sanitize();
     }
 
     /// Mutate a parameter value.
-    fn mutate_param(&self, param: &mut ParamValue, rng: &mut ChaCha8Rng) {
+    fn mutate_param(param: &mut ParamValue, rng: &mut ChaCha8Rng) {
         match param {
             ParamValue::Float {
                 value,
@@ -250,69 +251,6 @@ impl Mutation {
             }
         }
     }
-
-    /// Swap a block for another of the same type.
-    fn mutate_block(&self, gene: &mut BlockGene, rng: &mut ChaCha8Rng) {
-        let block_ids = self.param_ranges.block_ids_by_type(gene.block_type);
-        if block_ids.len() <= 1 {
-            return;
-        }
-
-        // Choose a different block
-        let available: Vec<_> = block_ids
-            .iter()
-            .filter(|id| **id != gene.block_id)
-            .collect();
-
-        if !available.is_empty() {
-            let new_id = *available[rng.gen_range(0..available.len())];
-            gene.block_id = new_id.to_string();
-
-            // Reset params to defaults for new block
-            if let Some(block_spec) = self.param_ranges.get_block(new_id) {
-                gene.params = block_spec.default_params();
-            }
-        }
-    }
-
-    /// Add or remove a gene.
-    fn mutate_structure(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
-        if rng.gen_bool(0.5) && genome.genes.len() > 2 {
-            // Remove a non-required gene
-            let removable: Vec<usize> = genome
-                .genes
-                .iter()
-                .enumerate()
-                .filter(|(_, g)| {
-                    g.block_type != BlockType::Sizing
-                        && genome.count_block_type(g.block_type) > 1
-                })
-                .map(|(i, _)| i)
-                .collect();
-
-            if !removable.is_empty() {
-                let idx = removable[rng.gen_range(0..removable.len())];
-                genome.remove_gene(idx);
-            }
-        } else {
-            // Add a random gene
-            let block_types = [
-                BlockType::Selection,
-                BlockType::Entry,
-                BlockType::Exit,
-            ];
-            let block_type = block_types[rng.gen_range(0..block_types.len())];
-            let block_ids = self.param_ranges.block_ids_by_type(block_type);
-
-            if !block_ids.is_empty() {
-                let block_id = block_ids[rng.gen_range(0..block_ids.len())];
-                if let Some(block_spec) = self.param_ranges.get_block(block_id) {
-                    let gene = BlockGene::new(block_type, block_id, block_spec.default_params());
-                    genome.add_gene(gene);
-                }
-            }
-        }
-    }
 }
 
 // =============================================================================
@@ -326,8 +264,6 @@ impl Mutation {
 /// When diversity is high, mutation rate decreases to exploit good solutions.
 ///
 /// Formula: rate(t) = base_rate × (1 + k × (1 - diversity))
-///
-/// Reference: Eiben, A.E. & Smith, J.E. (2003)
 #[derive(Debug, Clone)]
 pub struct AdaptiveMutation {
     /// Base mutation rate
@@ -340,8 +276,6 @@ pub struct AdaptiveMutation {
     amplification: f64,
     /// Current effective rate
     current_rate: f64,
-    /// Parameter ranges for creating new genes
-    param_ranges: ParamRanges,
     /// Generations since last improvement
     stagnation_generations: u32,
     /// Boost rate after restart
@@ -352,27 +286,30 @@ pub struct AdaptiveMutation {
 
 impl AdaptiveMutation {
     /// Create a new AdaptiveMutation with default parameters.
-    pub fn new(param_ranges: ParamRanges) -> Self {
+    pub fn new() -> Self {
         Self {
             base_rate: 0.05,
             min_rate: 0.01,
             max_rate: 0.30,
             amplification: 2.0,
             current_rate: 0.05,
-            param_ranges,
             stagnation_generations: 0,
             boost_active: false,
             boost_generations_remaining: 0,
         }
     }
     
+    /// Legacy constructor for backwards compatibility.
+    pub fn with_param_ranges(_param_ranges: ParamRanges) -> Self {
+        Self::new()
+    }
+
     /// Create with custom parameters.
     pub fn with_params(
         base_rate: f64,
         min_rate: f64,
         max_rate: f64,
         amplification: f64,
-        param_ranges: ParamRanges,
     ) -> Self {
         Self {
             base_rate: base_rate.clamp(0.0, 1.0),
@@ -380,18 +317,13 @@ impl AdaptiveMutation {
             max_rate: max_rate.clamp(0.0, 1.0),
             amplification,
             current_rate: base_rate,
-            param_ranges,
             stagnation_generations: 0,
             boost_active: false,
             boost_generations_remaining: 0,
         }
     }
-    
+
     /// Update mutation rate based on current diversity.
-    ///
-    /// # Arguments
-    /// * `diversity` - Population diversity score [0, 1]
-    /// * `improved` - Whether the best fitness improved this generation
     pub fn update(&mut self, diversity: f64, improved: bool) {
         // Track stagnation
         if improved {
@@ -399,7 +331,7 @@ impl AdaptiveMutation {
         } else {
             self.stagnation_generations += 1;
         }
-        
+
         // Handle boost mode (after restart)
         if self.boost_active {
             if self.boost_generations_remaining > 0 {
@@ -410,53 +342,52 @@ impl AdaptiveMutation {
                 self.boost_active = false;
             }
         }
-        
+
         // Adaptive rate based on diversity
-        // rate = base_rate × (1 + k × (1 - diversity))
         let adjustment = 1.0 + self.amplification * (1.0 - diversity);
         let mut rate = self.base_rate * adjustment;
-        
+
         // Extra boost for severe stagnation
         if self.stagnation_generations > 10 {
             let stagnation_boost = (self.stagnation_generations as f64 / 20.0).min(1.0);
             rate *= 1.0 + stagnation_boost;
         }
-        
+
         self.current_rate = rate.clamp(self.min_rate, self.max_rate);
     }
-    
+
     /// Activate boost mode (typically after a restart).
     pub fn activate_boost(&mut self, generations: u32) {
         self.boost_active = true;
         self.boost_generations_remaining = generations;
         self.current_rate = self.max_rate;
     }
-    
+
     /// Get the current effective mutation rate.
     pub fn current_rate(&self) -> f64 {
         self.current_rate
     }
-    
+
     /// Get the number of stagnation generations.
     pub fn stagnation_generations(&self) -> u32 {
         self.stagnation_generations
     }
-    
+
     /// Check if boost mode is active.
     pub fn is_boosted(&self) -> bool {
         self.boost_active
     }
-    
+
     /// Convert to a standard Mutation operator with current rate.
     pub fn to_mutation(&self) -> Mutation {
-        Mutation::new(self.current_rate, self.param_ranges.clone())
+        Mutation::new(self.current_rate)
     }
-    
+
     /// Mutate a genome using the current adaptive rate.
     pub fn mutate(&self, genome: &mut StrategyGenome, rng: &mut ChaCha8Rng) {
         self.to_mutation().mutate(genome, rng)
     }
-    
+
     /// Reset stagnation tracking.
     pub fn reset(&mut self) {
         self.stagnation_generations = 0;
@@ -468,13 +399,15 @@ impl AdaptiveMutation {
 
 impl Default for AdaptiveMutation {
     fn default() -> Self {
-        Self::new(ParamRanges::new())
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use combiner_core::BlockGene;
+    use combiner_core::BlockType;
 
     fn create_test_genome() -> StrategyGenome {
         StrategyGenome::new(vec![
@@ -489,12 +422,108 @@ mod tests {
                 vec![("max_weight", ParamValue::float(0.25, 0.10, 0.40, 0.05))],
             ),
         ])
+        .with_template_slug("test_template".to_string())
+    }
+
+    #[test]
+    fn test_mutation_only_params() {
+        let mutation = Mutation::new(1.0); // 100% mutation rate
+
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let mut genome = create_test_genome();
+
+        // Record original structure
+        let original_blocks: Vec<_> = genome
+            .genes
+            .iter()
+            .map(|g| (g.block_type, g.block_id.clone()))
+            .collect();
+
+        // Mutate many times
+        for _ in 0..50 {
+            mutation.mutate(&mut genome, &mut rng);
+        }
+
+        // Structure should be IDENTICAL
+        let after_blocks: Vec<_> = genome
+            .genes
+            .iter()
+            .map(|g| (g.block_type, g.block_id.clone()))
+            .collect();
+
+        assert_eq!(
+            original_blocks, after_blocks,
+            "Mutation should NEVER change structure"
+        );
+    }
+
+    #[test]
+    fn test_crossover_preserves_template() {
+        let crossover = Crossover::new(1.0); // Always crossover
+
+        let parent1 = create_test_genome();
+        let parent2 = create_test_genome();
+
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
+
+        // Template slug should be preserved
+        assert_eq!(child1.template_slug, parent1.template_slug);
+        assert_eq!(child2.template_slug, parent2.template_slug);
+    }
+
+    #[test]
+    fn test_crossover_different_templates_no_crossover() {
+        let crossover = Crossover::new(1.0);
+
+        let parent1 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Selection,
+            "momentum",
+            vec![("lookback", ParamValue::int(126, 21, 252, 21))],
+        )])
+        .with_template_slug("template_a".to_string());
+
+        let parent2 = StrategyGenome::new(vec![BlockGene::new(
+            BlockType::Selection,
+            "low_vol",
+            vec![("window", ParamValue::int(60, 20, 120, 10))],
+        )])
+        .with_template_slug("template_b".to_string());
+
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
+
+        // With different templates, children should be clones
+        assert_eq!(child1.genes.len(), parent1.genes.len());
+        assert_eq!(child2.genes.len(), parent2.genes.len());
+        assert_eq!(child1.template_slug, parent1.template_slug);
+        assert_eq!(child2.template_slug, parent2.template_slug);
+    }
+
+    #[test]
+    fn test_crossover_preserves_structure() {
+        let crossover = Crossover::new(1.0);
+
+        let parent1 = create_test_genome();
+        let parent2 = create_test_genome();
+
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
+
+        // Same number of genes
+        assert_eq!(child1.genes.len(), parent1.genes.len());
+        assert_eq!(child2.genes.len(), parent2.genes.len());
+
+        // Same block IDs (structure preserved)
+        for (c1, p1) in child1.genes.iter().zip(parent1.genes.iter()) {
+            assert_eq!(c1.block_id, p1.block_id);
+            assert_eq!(c1.block_type, p1.block_type);
+        }
     }
 
     #[test]
     fn test_mutation_determinism() {
-        let param_ranges = ParamRanges::new();
-        let mutation = Mutation::new(0.5, param_ranges);
+        let mutation = Mutation::new(0.5);
 
         let mut rng1 = ChaCha8Rng::seed_from_u64(42);
         let mut genome1 = create_test_genome();
@@ -509,64 +538,39 @@ mod tests {
     }
 
     #[test]
-    fn test_crossover() {
-        let crossover = Crossover::new(1.0); // Always crossover
-
-        let parent1 = create_test_genome();
-        let parent2 = StrategyGenome::new(vec![
-            BlockGene::with_defaults(BlockType::Selection, "quality"),
-            BlockGene::with_defaults(BlockType::Exit, "stop_loss"),
-            BlockGene::with_defaults(BlockType::Sizing, "risk_parity"),
-        ]);
+    fn test_mutation_bounds() {
+        let mutation = Mutation::new(1.0);
 
         let mut rng = ChaCha8Rng::seed_from_u64(42);
-        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
+        let mut genome = create_test_genome();
 
-        // Children should have sizing blocks
-        assert!(child1.has_block_type(BlockType::Sizing));
-        assert!(child2.has_block_type(BlockType::Sizing));
-    }
-
-    // =========================================================================
-    // Phase 4.1: Comprehensive Genetic Operator Validation
-    // =========================================================================
-
-    #[test]
-    fn test_mutation_bounds_float() {
-        let param_ranges = ParamRanges::new();
-        let mutation = Mutation::new(1.0, param_ranges); // Always mutate
-        
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-        
-        // Create genome with known parameter bounds
-        let mut genome = StrategyGenome::new(vec![
-            BlockGene::new(
-                BlockType::Selection,
-                "momentum",
-                vec![("lookback_days", ParamValue::float(126.0, 21.0, 252.0, 21.0))],
-            ),
-            BlockGene::new(
-                BlockType::Sizing,
-                "equal_weight",
-                vec![("max_weight", ParamValue::float(0.25, 0.10, 0.40, 0.05))],
-            ),
-        ]);
-        
-        // Mutate many times
         for _ in 0..100 {
             mutation.mutate(&mut genome, &mut rng);
-            
-            // Check all parameters are within bounds
+
             for gene in &genome.genes {
                 for (_, param) in &gene.params {
                     match param {
-                        ParamValue::Float { value, min, max, .. } => {
-                            assert!(*value >= *min && *value <= *max,
-                                "Float param {} should be in [{}, {}]", value, min, max);
+                        ParamValue::Float {
+                            value, min, max, ..
+                        } => {
+                            assert!(
+                                *value >= *min && *value <= *max,
+                                "Float param {} should be in [{}, {}]",
+                                value,
+                                min,
+                                max
+                            );
                         }
-                        ParamValue::Int { value, min, max, .. } => {
-                            assert!(*value >= *min && *value <= *max,
-                                "Int param {} should be in [{}, {}]", value, min, max);
+                        ParamValue::Int {
+                            value, min, max, ..
+                        } => {
+                            assert!(
+                                *value >= *min && *value <= *max,
+                                "Int param {} should be in [{}, {}]",
+                                value,
+                                min,
+                                max
+                            );
                         }
                         ParamValue::Bool { .. } => {}
                     }
@@ -576,86 +580,10 @@ mod tests {
     }
 
     #[test]
-    fn test_mutation_preserves_sizing() {
-        let param_ranges = ParamRanges::new();
-        let mutation = Mutation::new(0.5, param_ranges);
-        
-        let mut rng = ChaCha8Rng::seed_from_u64(12345);
-        let mut genome = create_test_genome();
-        
-        // Mutate many times
-        for _ in 0..50 {
-            mutation.mutate(&mut genome, &mut rng);
-            assert!(genome.has_block_type(BlockType::Sizing),
-                "Sizing block should never be removed");
-        }
-    }
-
-    #[test]
-    fn test_crossover_determinism() {
-        let crossover = Crossover::new(1.0);
-        let parent1 = create_test_genome();
-        let parent2 = StrategyGenome::new(vec![
-            BlockGene::with_defaults(BlockType::Selection, "quality"),
-            BlockGene::with_defaults(BlockType::Sizing, "risk_parity"),
-        ]);
-        
-        // Same seed should produce same offspring
-        let mut rng1 = ChaCha8Rng::seed_from_u64(42);
-        let (child1a, child2a) = crossover.crossover(&parent1, &parent2, &mut rng1, 1);
-        
-        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
-        let (child1b, child2b) = crossover.crossover(&parent1, &parent2, &mut rng2, 1);
-        
-        assert_eq!(child1a.genes.len(), child1b.genes.len());
-        assert_eq!(child2a.genes.len(), child2b.genes.len());
-    }
-
-    #[test]
-    fn test_crossover_no_crossover() {
-        let crossover = Crossover::new(0.0); // Never crossover
-        let parent1 = create_test_genome();
-        let parent2 = StrategyGenome::new(vec![
-            BlockGene::with_defaults(BlockType::Selection, "quality"),
-            BlockGene::with_defaults(BlockType::Sizing, "risk_parity"),
-        ]);
-        
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-        let (child1, child2) = crossover.crossover(&parent1, &parent2, &mut rng, 1);
-        
-        // With rate=0, children should be clones of parents
-        assert_eq!(child1.genes.len(), parent1.genes.len());
-        assert_eq!(child2.genes.len(), parent2.genes.len());
-    }
-
-    #[test]
-    fn test_crossover_rate_bounds() {
-        // Rate should be clamped to [0, 1]
-        let c1 = Crossover::new(-0.5);
-        assert_eq!(c1.rate, 0.0);
-        
-        let c2 = Crossover::new(1.5);
-        assert_eq!(c2.rate, 1.0);
-        
-        let c3 = Crossover::new(0.7);
-        assert!((c3.rate - 0.7).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mutation_rate_bounds() {
-        let m1 = Mutation::new(-0.5, ParamRanges::new());
-        assert_eq!(m1.rate, 0.0);
-        
-        let m2 = Mutation::new(1.5, ParamRanges::new());
-        assert_eq!(m2.rate, 1.0);
-    }
-
-    #[test]
     fn test_selection_tournament_size() {
-        // Tournament size should be at least 2
         let s1 = Selection::new(1);
         assert!(s1.tournament_size >= 2);
-        
+
         let s2 = Selection::new(5);
         assert_eq!(s2.tournament_size, 5);
     }
@@ -665,54 +593,26 @@ mod tests {
         let selection = Selection::new(3);
         let population: Vec<StrategyGenome> = vec![];
         let mut rng = ChaCha8Rng::seed_from_u64(42);
-        
+
         let selected = selection.select(&population, 5, &mut rng);
         assert!(selected.is_empty());
     }
 
     #[test]
-    fn test_selection_no_evaluated() {
-        let selection = Selection::new(3);
-        
-        // Population with no fitness values
-        let population = vec![create_test_genome(), create_test_genome()];
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-        
-        let selected = selection.select(&population, 5, &mut rng);
-        assert!(selected.is_empty(), "No evaluated genomes should return empty");
+    fn test_crossover_rate_bounds() {
+        let c1 = Crossover::new(-0.5);
+        assert_eq!(c1.rate, 0.0);
+
+        let c2 = Crossover::new(1.5);
+        assert_eq!(c2.rate, 1.0);
     }
 
     #[test]
-    fn test_param_value_mutation_int() {
-        // Test that integer mutation works correctly
-        let param_ranges = ParamRanges::new();
-        let mutation = Mutation::new(1.0, param_ranges);
-        
-        let mut param = ParamValue::int(10, 0, 20, 2);
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-        
-        for _ in 0..20 {
-            mutation.mutate_param(&mut param, &mut rng);
-            if let ParamValue::Int { value, min, max, step } = param {
-                assert!(value >= min && value <= max);
-                assert_eq!((value - min) % step, 0, "Value should be on step grid");
-            }
-        }
-    }
+    fn test_mutation_rate_bounds() {
+        let m1 = Mutation::new(-0.5);
+        assert_eq!(m1.rate, 0.0);
 
-    #[test]
-    fn test_param_value_mutation_bool() {
-        let param_ranges = ParamRanges::new();
-        let mutation = Mutation::new(1.0, param_ranges);
-        
-        let mut param = ParamValue::Bool { value: true };
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
-        
-        mutation.mutate_param(&mut param, &mut rng);
-        
-        if let ParamValue::Bool { value } = param {
-            assert!(!value, "Bool should be flipped");
-        }
+        let m2 = Mutation::new(1.5);
+        assert_eq!(m2.rate, 1.0);
     }
 }
-

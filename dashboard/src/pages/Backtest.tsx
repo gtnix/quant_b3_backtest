@@ -16,7 +16,7 @@ import { StressAnalysis } from '../components/StressAnalysis';
 import { RiskDecomposition } from '../components/RiskDecomposition';
 import { TradeBlotter } from '../components/TradeBlotter';
 import { useDataStore } from '../stores/dataStore';
-import { config, platform } from '../lib/platform';
+import { config } from '../lib/platform';
 import type { MonthlyReturn, RollingPoint, CandidateSummary } from '../stores/dataStore';
 import { 
   Play, 
@@ -604,10 +604,8 @@ export function Backtest() {
     if (selectedCandidate) {
       loadBacktest(selectedCandidate.candidate_id);
       
-      // Risk metrics only available in Tauri mode
-      if (platform.isTauri) {
-        loadRiskMetrics(selectedCandidate.candidate_id);
-      }
+      // Risk metrics from API
+      loadRiskMetrics(selectedCandidate.candidate_id);
       
       // Always load simulated equity as fallback (loads in parallel)
       loadSimulatedEquity(selectedCandidate.candidate_id);

@@ -1,0 +1,141 @@
+# =============================================================================
+# Default SCG Configuration
+# =============================================================================
+# Configuração universal que funciona para qualquer cenário.
+# Runtime e workers são controlados via variáveis de ambiente:
+#   SCG_MAX_RUNTIME_SECS - tempo máximo (default: 900 = 15min)
+#   SCG_WORKERS - número de workers (default: 0 = auto-detect)
+# =============================================================================
+
+[campaign]
+name = "default"
+description = "Configuração padrão com gates de integridade ativos"
+version = "1.0.0"
+
+[dataset]
+market = "BR"
+market_data_path = "data/market_data_ibov_index.csv"
+# 5 years of data - synchronized with US for parity
+start_date = "2021-01-01"
+end_date = "2026-01-21"
+data_window_years = 5
+
+[risk_profile]
+name = "relaxado"
+
+[evolution]
+population_size = 150
+max_generations = 500000
+ephemeral_artifacts = true  # CRITICAL: Don't persist backtest Parquet to save disk
+tournament_size = 3
+crossover_rate = 0.85
+elitism_rate = 0.10
+mutation_rate = 0.08
+convergence_generations = 15
+max_runtime_seconds = 86400  # 24 hours - controlled via dashboard stop button
+workers = 0                # 0 = auto-detect (all cores - 2)
+hall_of_fame_size = 25
+
+# VALIDATION - Prevent false positives (Lopez de Prado methodology)
+stress_testing_enabled = true      # Enable stress testing suite
+min_stress_scenarios_passed = 4    # 4 out of 5 scenarios must pass
+validation_tier = "research_brazil" # Relaxed BR thresholds for homologation (PBO <= 0.40, OOS Sharpe >= 0.3, DD >= -0.40)
+
+[diversity]
+enabled = true
+sigma_share = 0.20
+sharing_alpha = 2.0
+fitness_sharing = true
+phenotypic_distance = true
+critical_threshold = 0.25
+crowding_factor = 3
+
+[genome_limits]
+max_blocks = 4
+max_dof_total = 35
+
+[adaptation]
+enabled = true
+base_mutation_rate = 0.05
+min_mutation_rate = 0.01
+max_mutation_rate = 0.30
+amplification_factor = 2.0
+
+[stagnation]
+detection_enabled = true
+window_size = 10
+improvement_threshold = 0.005
+restart_enabled = true
+restart_elite_ratio = 0.20
+post_restart_boost_generations = 3
+max_restarts = 5
+
+[execution]
+mode = "compiled"
+has_costs = true
+slippage_bps = 10.0
+commission_bps = 5.0
+emolument_bps = 2.5
+market_impact_model = "linear"
+
+[validation]
+enabled = true
+top_k = 15
+wfa_enabled = true
+wfa_num_folds = 5
+wfa_is_ratio = 0.6
+wfa_purge_days = 5
+pbo_enabled = true
+pbo_significance_level = 0.05
+stress_enabled = true
+stress_min_pass = 4
+
+[gates]
+# Discovery mode: extra-relaxed thresholds for testing pipeline
+gates_required = true
+min_oos_sharpe_net = 0.15       # Extra-relaxed for testing
+max_pbo = 0.50                  # Extra-relaxed
+min_dsr = 0.20                  # Extra-relaxed
+min_stress_passed = 1           # Extra-relaxed
+max_degradation = 0.80          # Extra-relaxed
+min_oos_trades = 10             # Extra-relaxed
+max_drawdown = -0.50            # Extra-relaxed
+
+[data_integrity]
+enabled = true
+lookback_requirements = true
+survivorship_bias_check = true
+freshness_check = true
+coverage_check = true
+watermark_check = true
+nulls_check = true
+outliers_check = true
+schema_check = true
+dividends_check = true
+interest_rates_check = true
+fail_on_blocker = true
+
+[metrics]
+objectives = ["sharpe_ratio", "cagr", "max_drawdown"]
+sharpe_weight = 1.5
+cagr_weight = 1.0
+drawdown_weight = 3.0
+calmar_weight = 1.2
+sortino_weight = 0.5
+low_trades_penalty = true
+min_trades = 25
+extreme_turnover_penalty = true
+max_turnover_annual = 400.0
+high_volatility_penalty = true
+max_volatility = 0.35
+drawdown_penalty_threshold = -0.15
+
+[output]
+artifact_format = "obfs"
+save_generations = true
+save_all_genomes = false
+save_diversity_metrics = true
+save_restart_events = true
+
+# Runtime template filter (auto-generated)
+template_slugs = ["intraday_momentum_adx_moderate","intraday_mean_reversion_bb_conservative","intraday_mean_reversion_bb_moderate","gap_continuation_aggressive","gap_continuation_moderate","gap_fill_conservative","gap_fill_moderate","intraday_momentum_macd_aggressive","intraday_momentum_macd_moderate","news_based_volatility_moderate","orb_breakout_aggressive","orb_breakout_conservative","orb_breakout_moderate","intraday_mean_reversion_rsi_conservative","intraday_mean_reversion_rsi_moderate","vwap_mean_reversion_conservative","vwap_mean_reversion_moderate","vwap_trend_following_aggressive","vwap_trend_following_moderate","volume_profile_poc_moderate","volume_profile_vah_val_moderate","swing_mean_reversion_bb_conservative","swing_mean_reversion_bb_moderate","swing_breakout_channel_aggressive","swing_breakout_channel_moderate","swing_momentum_ma_crossover_conservative","swing_momentum_ma_crossover_moderate","swing_momentum_macd_aggressive","swing_momentum_macd_moderate","swing_mean_reversion_rsi_conservative","swing_mean_reversion_rsi_moderate","swing_breakout_volume_aggressive","swing_breakout_volume_moderate","position_fundamental_quality_moderate","position_trend_following_adx_moderate","position_trend_following_ma_conservative","position_trend_following_ma_moderate","position_fundamental_value_conservative","position_fundamental_value_moderate","pair_trading_cointegration_aggressive","pair_trading_cointegration_conservative","pair_trading_cointegration_short_term","pair_trading_cointegration_moderate","pair_trading_distance_aggressive","pair_trading_distance_conservative","pair_trading_distance_short_term","pair_trading_distance_moderate","stat_arb_multi_pair_aggressive","stat_arb_multi_pair_conservative","stat_arb_multi_pair_diversified","stat_arb_multi_pair_moderate","portfolio_equal_weight_30_assets","portfolio_equal_weight_5_assets","portfolio_max_sharpe_aggressive","portfolio_max_sharpe_conservative","portfolio_max_sharpe_moderate","portfolio_min_variance_conservative","portfolio_min_variance_long_short","portfolio_min_variance_moderate","portfolio_risk_parity_aggressive","portfolio_risk_parity_leveraged","portfolio_risk_parity_conservative","portfolio_risk_parity_moderate","momentum_time_series_adaptive","momentum_cross_sectional_12m","momentum_cross_sectional_3m","momentum_cross_sectional_6m","momentum_cross_sectional_multi_period","momentum_time_series_dual_ma","momentum_time_series_200d","momentum_time_series_50d","mean_reversion_bb_aggressive","mean_reversion_bb_conservative","mean_reversion_bb_moderate","mean_reversion_bb_trend_filtered","mean_reversion_rsi_aggressive","mean_reversion_rsi_conservative","mean_reversion_rsi_moderate","mean_reversion_rsi_trend_filtered","breakout_donchian_20d","breakout_donchian_55d","breakout_donchian_dual_channel","breakout_volatility_expansion_aggressive","breakout_volatility_expansion_conservative","breakout_volatility_expansion_moderate","sector_rotation_business_cycle","sector_rotation_business_cycle_defensive","sector_rotation_relative_strength_top3","sector_rotation_relative_strength_top5","factor_low_volatility_conservative","factor_low_volatility_moderate","factor_multi_factor_aggressive","factor_multi_factor_balanced","factor_quality_multi_metric_moderate","factor_quality_roe_conservative","factor_value_pe_conservative","factor_value_pb_moderate","seasonal_commodity_grains","seasonal_calendar_effects_january","seasonal_commodity_natural_gas","seasonal_calendar_effects_sell_in_may","volatility_breakout_atr_moderate","volatility_breakout_bb_width_moderate","volatility_vix_mean_reversion_conservative","volatility_vix_mean_reversion_moderate","event_driven_ma_arbitrage_conservative","event_driven_ma_arbitrage_moderate","event_driven_earnings_post_surprise","event_driven_earnings_pre_announcement","buy_hold_index_ibov","buy_hold_index_sp500","buy_hold_dividend_growth_conservative","buy_hold_dividend_growth_moderate","intraday_momentum_adx_aggressive"]

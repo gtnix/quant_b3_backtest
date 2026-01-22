@@ -83,8 +83,9 @@ pub fn calculate_kurtosis(values: &[f64]) -> f64 {
 
 /// Standard normal CDF (cumulative distribution function).
 /// Uses the approximation by Abramowitz and Stegun (1964).
+/// Exposed for use in validation and PBO estimation.
 #[inline]
-fn normal_cdf(x: f64) -> f64 {
+pub fn normal_cdf_approx(x: f64) -> f64 {
     // Approximation constants
     const A1: f64 = 0.254829592;
     const A2: f64 = -0.284496736;
@@ -151,7 +152,7 @@ pub fn calculate_psr(
     }
     
     let z = numerator / denominator;
-    normal_cdf(z).clamp(0.0, 1.0)
+    normal_cdf_approx(z).clamp(0.0, 1.0)
 }
 
 /// Calculate the expected maximum Sharpe ratio under the null hypothesis.
@@ -448,7 +449,7 @@ mod tests {
         ];
         
         for (x, expected) in test_cases {
-            let actual = normal_cdf(x);
+            let actual = normal_cdf_approx(x);
             // Use 0.03 tolerance for Abramowitz-Stegun approximation
             assert!((actual - expected).abs() < 0.03, 
                 "Phi({}) = {}, expected {} (within 0.03)", x, actual, expected);
@@ -456,8 +457,8 @@ mod tests {
         
         // Verify symmetry property: Phi(-x) = 1 - Phi(x)
         for x in [0.5, 1.0, 1.5, 2.0, 2.5] {
-            let phi_x = normal_cdf(x);
-            let phi_neg_x = normal_cdf(-x);
+            let phi_x = normal_cdf_approx(x);
+            let phi_neg_x = normal_cdf_approx(-x);
             assert!((phi_x + phi_neg_x - 1.0).abs() < 0.001, 
                 "Symmetry: Phi({}) + Phi({}) should = 1, got {}", x, -x, phi_x + phi_neg_x);
         }

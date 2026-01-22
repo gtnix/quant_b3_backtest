@@ -3,6 +3,9 @@
  * Modular Express server with route separation
  */
 
+// MUST be first import - loads .env before any other code runs
+import 'dotenv/config';
+
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';

@@ -305,7 +305,14 @@ impl ExperimentPersistence {
                         let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
                         fs::create_dir_all(&strategy_dir)?;
 
-                        let genome_bytes = serde_json::to_vec(&entry.genome)?;
+                        // Combine genome with identity for full traceability
+                        let genome_with_identity = serde_json::json!({
+                            "id": entry.genome.id,
+                            "genes": entry.genome.genes,
+                            "fitness": entry.genome.fitness,
+                            "identity": entry.identity,
+                        });
+                        let genome_bytes = serde_json::to_vec(&genome_with_identity)?;
                         let genome_compressed = pipeline.compress(&genome_bytes)
                             .map_err(|e| PersistenceError::Conversion(e.to_string()))?;
                         fs::write(strategy_dir.join("genome.obfs"), genome_compressed)?;
@@ -329,7 +336,14 @@ impl ExperimentPersistence {
                     for (i, entry) in hof.entries().iter().enumerate() {
                         let strategy_dir = hof_dir.join(format!("strategy_{:03}", i + 1));
                         fs::create_dir_all(&strategy_dir)?;
-                        let genome_json = serde_json::to_string_pretty(&entry.genome)?;
+                        // Combine genome with identity for full traceability
+                        let genome_with_identity = serde_json::json!({
+                            "id": entry.genome.id,
+                            "genes": entry.genome.genes,
+                            "fitness": entry.genome.fitness,
+                            "identity": entry.identity,
+                        });
+                        let genome_json = serde_json::to_string_pretty(&genome_with_identity)?;
                         fs::write(strategy_dir.join("genome.json"), genome_json)?;
                         if let Ok(toml_str) = entry.genome.to_toml() {
                             fs::write(strategy_dir.join("config.toml"), toml_str)?;

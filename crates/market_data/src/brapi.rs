@@ -1128,7 +1128,8 @@ pub struct TickerCapabilities {
 // ============================================================================
 
 /// Tickers that can be accessed without authentication (for testing).
-pub const TEST_TICKERS: &[&str] = &["PETR4", "MGLU3", "VALE3", "ITUB4"];
+/// Uses the same symbols as symbol_dictionary::TEST_SYMBOLS_BR for consistency.
+pub const TEST_TICKERS: &[&str] = &["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3"];
 
 /// All supported intervals.
 pub const ALL_INTERVALS: &[&str] = &[

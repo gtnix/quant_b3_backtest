@@ -160,6 +160,13 @@ Expert in data correctness, pipeline integrity, and auditable market data for ba
     - Schema changes require migration
     - New fields require docs update
 
+13. **NEVER use Wikipedia as a data source**
+    - Index composition MUST come from official sources (B3, NASDAQ, NYSE, S&P Global)
+    - Wikipedia and non-auditable sources are PROHIBITED for market data
+    - Official sources: NASDAQ API, NYSE listings, B3 API, S&P Global
+    - Hardcoded fallbacks are acceptable ONLY if dated and versioned
+    - This applies to: symbol lists, index components, sector classifications
+
 ---
 
 ## Repo Anchors

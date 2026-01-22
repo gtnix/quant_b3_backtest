@@ -26,6 +26,7 @@ pub mod operators;
 pub mod pareto_unified;
 pub mod hall_of_fame_unified;
 pub mod engine;
+pub mod strategy_catalog;
 
 // Legacy module aliases (deprecated, use hall_of_fame_unified)
 #[doc(hidden)]
@@ -67,6 +68,13 @@ pub mod audit_framework;
 pub mod audit_checks;
 pub mod diversity;
 pub mod stagnation;
+pub mod wfa;
+pub mod cpcv;
+pub mod diagnostics;
+
+pub use wfa::{WfaValidator, WfaConfig, WfaResult as WfaValidatorResult, WfaFoldResult};
+pub use cpcv::{CpcvValidator, CpcvConfig, CpcvResult};
+pub use diagnostics::{StageComparison, MarketDiagnosticReport, GapDiagnosis, Histogram};
 
 pub use config::EvolutionConfig;
 pub use population::Population;
@@ -79,11 +87,11 @@ pub use hall_of_fame_unified::{
     // Legacy aliases
     HallOfFame, HofEntry,
 };
-pub use engine::{EvolutionEngine, GenerationStats, UltraEvolutionResult};
+pub use engine::{EvolutionEngine, GenerationStats, UltraEvolutionResult, FailedCandidate};
 pub use persistence::{ExperimentPersistence, ExperimentManifest, ExperimentStatus, ArtifactFormat, generate_experiment_id};
 pub use validation::{
     GenomeValidatorAntiOverfit, ValidationConfig, ValidationReport,
-    WfaResult, CpcvResult, PboDsrResult,
+    WfaResult, CpcvResult as ValidationCpcvResult, PboDsrResult,
 };
 pub use evaluation::{
     StageABatchEvaluator, StageBParallelValidator, StageBConfig, StageBStats, ValidationResult,
@@ -110,4 +118,5 @@ pub use stagnation::{
     StagnationDetector, StagnationConfig, StagnationStatus,
     RestartResult,
 };
+pub use strategy_catalog::{StrategyCatalog, StrategyTemplate, TemplateBlock, CatalogError};
 

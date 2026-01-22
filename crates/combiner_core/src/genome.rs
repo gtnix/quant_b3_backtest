@@ -295,6 +295,9 @@ pub struct StrategyGenome {
     /// Parent genome IDs (for lineage tracking).
     #[serde(default)]
     pub parent_ids: Vec<Uuid>,
+    /// Slug do template que originou este genoma (Template-First GA).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_slug: Option<String>,
     /// Cached hash for deduplication.
     #[serde(skip)]
     cached_hash: Option<u64>,
@@ -309,6 +312,7 @@ impl StrategyGenome {
             fitness: None,
             generation: 0,
             parent_ids: Vec::new(),
+            template_slug: None,
             cached_hash: None,
         }
     }
@@ -321,6 +325,7 @@ impl StrategyGenome {
             fitness: None,
             generation: 0,
             parent_ids: Vec::new(),
+            template_slug: None,
             cached_hash: None,
         }
     }
@@ -334,6 +339,12 @@ impl StrategyGenome {
     /// Set parent IDs for lineage tracking.
     pub fn with_parents(mut self, parent_ids: Vec<Uuid>) -> Self {
         self.parent_ids = parent_ids;
+        self
+    }
+
+    /// Set the template slug (Template-First GA).
+    pub fn with_template_slug(mut self, slug: String) -> Self {
+        self.template_slug = Some(slug);
         self
     }
 
@@ -470,6 +481,7 @@ impl StrategyGenome {
             fitness: None, // Reset fitness for new individual
             generation: self.generation,
             parent_ids: vec![self.id],
+            template_slug: self.template_slug.clone(),
             cached_hash: None,
         }
     }
@@ -510,13 +522,20 @@ impl StrategyGenome {
             }
         }
         
-        // Join with bullet separator, limit to 48 chars
-        let name = parts.join(" • ");
-        if name.len() > 48 {
-            format!("{}…", &name[..47])
+        // Join with bullet separator, limit to 48 chars (safe Unicode truncation)
+        let name = parts.join(" | ");
+        if name.chars().count() > 48 {
+            let truncated: String = name.chars().take(47).collect();
+            format!("{}…", truncated)
         } else {
             name
         }
+    }
+    
+    /// Alias for `generate_name()` for API consistency.
+    #[inline]
+    pub fn human_readable_name(&self) -> String {
+        self.generate_name()
     }
 }
 

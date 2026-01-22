@@ -1,23 +1,11 @@
 #!/bin/bash
-# =============================================================================
-# Stop Alpha Forge Dashboard
-# =============================================================================
+# Stop all Alpha Forge processes
 
-echo "Parando servicos..."
+echo "Stopping Alpha Forge..."
 
-# Parar combiner se estiver rodando
-pkill -f "combiner run" 2>/dev/null && echo "  Combiner parado"
+pkill -f "combiner run" 2>/dev/null
+pkill -f "node server.js" 2>/dev/null
+pkill -f "vite" 2>/dev/null
 
-# Parar API Server
-pkill -f "node server.js" 2>/dev/null && echo "  API Server parado"
-
-# Parar Frontend
-pkill -f "vite" 2>/dev/null && echo "  Frontend parado"
-
-echo ""
-echo "Todos os servicos foram parados."
-
-
-
-
-
+sleep 1
+echo "✅ All processes stopped"

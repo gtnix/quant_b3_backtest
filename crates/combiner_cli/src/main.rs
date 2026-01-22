@@ -101,6 +101,11 @@ enum Commands {
         /// Bypass all costs for debugging (NOT for production).
         #[arg(long)]
         bypass_costs: bool,
+
+        /// Use in-process executor for ultra-fast backtests (<20ms vs ~1000ms).
+        /// Requires market data CSV path in config. RECOMMENDED for production.
+        #[arg(long)]
+        in_process: bool,
     },
 
     /// List available strategy templates (TPM catalog)
@@ -219,6 +224,42 @@ enum Commands {
         #[arg(long)]
         full: bool,
     },
+
+    /// Revalidate existing Hall of Fame strategies with production thresholds
+    Revalidate {
+        /// Output directory containing HoF directories (default: output/scg)
+        #[arg(short, long, default_value = "output/scg")]
+        output: String,
+
+        /// Validation tier: production, research, strict, lenient
+        #[arg(short, long, default_value = "production")]
+        tier: String,
+
+        /// Dry run - show what would be done without modifying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Preflight validation - check data and config before mining
+    Preflight {
+        /// Path to SCG configuration file
+        #[arg(short, long)]
+        config: String,
+    },
+
+    /// Reset Hall of Fame and outputs (dangerous!)
+    Reset {
+        /// Market to reset: BR, US, or all
+        #[arg(short, long, default_value = "all")]
+        market: String,
+
+        /// Confirm reset (required to actually delete)
+        #[arg(long)]
+        yes_really: bool,
+    },
+    
+    /// Diagnose Stage A vs Stage B gap (for homologation)
+    Diagnose(commands::diagnose::DiagnoseArgs),
 }
 
 /// Factory subcommands for campaign management.
@@ -433,6 +474,7 @@ fn main() -> Result<()> {
             stress_enabled,
             min_stress_pass,
             bypass_costs,
+            in_process,
         } => {
             // Log strategy selection if provided
             if let Some(ref s) = strategy {
@@ -461,6 +503,7 @@ fn main() -> Result<()> {
                 ultra,
                 top_k,
                 exec_overrides,
+                in_process,
             )
         }
 
@@ -623,6 +666,17 @@ fn main() -> Result<()> {
                 commands::extract::execute(&pending_dir, &run_ids, &output, top)
             }
         }
+
+        Commands::Revalidate {
+            output,
+            tier,
+            dry_run,
+        } => commands::revalidate::execute(&output, &tier, dry_run),
+
+        Commands::Preflight { config } => commands::preflight::execute(&config),
+
+        Commands::Reset { market, yes_really } => commands::reset::execute(&market, yes_really),
+        Commands::Diagnose(args) => commands::diagnose::run(args),
     }
 }
 

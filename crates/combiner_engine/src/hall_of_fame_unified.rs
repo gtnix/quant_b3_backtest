@@ -34,7 +34,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use combiner_core::StrategyGenome;
+use combiner_core::{StrategyGenome, StrategyIdentity};
 use crate::evaluation::stage_b::ValidationResult;
 use crate::institutional_thresholds::InstitutionalThresholds;
 
@@ -176,6 +176,23 @@ impl HofStrategy for InstitutionalStrategy {
 impl ValidatedHofStrategy for InstitutionalStrategy {
     fn accepts_validation(&self, result: &ValidationResult) -> bool {
         if !result.passed { return false; }
+        
+        // CRITICAL: Reject entries with invalid/missing validation data
+        // PBO should be in [0, 1], DSR should be in [0, ~3]
+        if result.pbo < 0.0 || result.pbo > 1.0 {
+            tracing::warn!("Rejecting genome with invalid PBO: {}", result.pbo);
+            return false;
+        }
+        if result.dsr < 0.0 || result.dsr > 5.0 {
+            tracing::warn!("Rejecting genome with invalid DSR: {}", result.dsr);
+            return false;
+        }
+        if result.splits_evaluated == 0 {
+            tracing::warn!("Rejecting genome with no splits evaluated");
+            return false;
+        }
+        
+        // Check thresholds
         if result.oos_sharpe_median < self.criteria.min_oos_sharpe { return false; }
         if result.pbo > self.criteria.max_pbo { return false; }
         if result.dsr < self.criteria.min_dsr { return false; }
@@ -216,6 +233,21 @@ pub struct UnifiedHofEntry {
     /// Optional validation summary (for institutional mode)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation: Option<ValidationSummary>,
+    /// Strategy catalog reference (e.g., "momentum_001")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_id: Option<String>,
+    /// Strategy family from catalog (e.g., "momentum", "mean_reversion")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_family: Option<String>,
+    /// Strategy variant (e.g., "rsi_cross", "macd_divergence")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_variant: Option<String>,
+    /// Scientific hypothesis from catalog
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_hypothesis: Option<String>,
+    /// Comprehensive strategy identity for traceability (homologation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<StrategyIdentity>,
 }
 
 impl UnifiedHofEntry {
@@ -229,6 +261,53 @@ impl UnifiedHofEntry {
     #[inline]
     pub fn validation_ref(&self) -> &ValidationSummary {
         self.validation.as_ref().expect("Entry requires validation")
+    }
+    
+    /// Set strategy catalog information
+    pub fn with_strategy_catalog(
+        mut self,
+        strategy_id: impl Into<String>,
+        family: impl Into<String>,
+        variant: impl Into<String>,
+        hypothesis: impl Into<String>,
+    ) -> Self {
+        self.strategy_id = Some(strategy_id.into());
+        self.strategy_family = Some(family.into());
+        self.strategy_variant = Some(variant.into());
+        self.strategy_hypothesis = Some(hypothesis.into());
+        self
+    }
+    
+    /// Set strategy catalog from optional values
+    pub fn set_strategy_catalog(
+        &mut self,
+        strategy_id: Option<String>,
+        family: Option<String>,
+        variant: Option<String>,
+        hypothesis: Option<String>,
+    ) {
+        self.strategy_id = strategy_id;
+        self.strategy_family = family;
+        self.strategy_variant = variant;
+        self.strategy_hypothesis = hypothesis;
+    }
+    
+    /// Set full strategy identity for traceability
+    pub fn with_identity(mut self, identity: StrategyIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+    
+    /// Set identity from reference
+    pub fn set_identity(&mut self, identity: StrategyIdentity) {
+        self.identity = Some(identity);
+    }
+    
+    /// Generate identity from genome if not already set
+    pub fn ensure_identity(&mut self, market: &str, universe: &str) {
+        if self.identity.is_none() {
+            self.identity = Some(StrategyIdentity::from_genome(&self.genome, market, universe));
+        }
     }
 }
 
@@ -398,6 +477,11 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
             rank: 0,
             score,
             validation: validation.map(ValidationSummary::from),
+            strategy_id: None,
+            strategy_family: None,
+            strategy_variant: None,
+            strategy_hypothesis: None,
+            identity: None,
         });
         
         self.rerank();
@@ -411,6 +495,7 @@ impl<S: HofStrategy> UnifiedHallOfFame<S> {
     }
     
     pub fn entries(&self) -> &[UnifiedHofEntry] { &self.entries }
+    pub fn entries_mut(&mut self) -> &mut [UnifiedHofEntry] { &mut self.entries }
     pub fn top(&self, n: usize) -> Vec<&UnifiedHofEntry> { self.entries.iter().take(n).collect() }
     pub fn best(&self) -> Option<&UnifiedHofEntry> { self.entries.first() }
     pub fn len(&self) -> usize { self.entries.len() }
@@ -489,6 +574,11 @@ impl<S: ValidatedHofStrategy> UnifiedHallOfFame<S> {
             rank: 0,
             score,
             validation: Some(ValidationSummary::from(result)),
+            strategy_id: None,
+            strategy_family: None,
+            strategy_variant: None,
+            strategy_hypothesis: None,
+            identity: None,
         });
         
         self.rerank();
@@ -727,6 +817,9 @@ mod tests {
             passed: true,
             early_exit: false,
             discard_reason: None,
+            stress_scenarios_passed: Some(5),
+            stress_scenarios_total: Some(5),
+            stress_test_passed: Some(true),
         };
         
         let result2 = ValidationResult {
@@ -745,6 +838,9 @@ mod tests {
             passed: true,
             early_exit: false,
             discard_reason: None,
+            stress_scenarios_passed: Some(5),
+            stress_scenarios_total: Some(5),
+            stress_test_passed: Some(true),
         };
         
         // First genome should be added
@@ -789,6 +885,9 @@ mod tests {
             passed: true,
             early_exit: false,
             discard_reason: None,
+            stress_scenarios_passed: Some(5),
+            stress_scenarios_total: Some(5),
+            stress_test_passed: Some(true),
         };
         
         let result2 = ValidationResult {
@@ -807,6 +906,9 @@ mod tests {
             passed: true,
             early_exit: false,
             discard_reason: None,
+            stress_scenarios_passed: Some(5),
+            stress_scenarios_total: Some(5),
+            stress_test_passed: Some(true),
         };
         
         let added1 = hof.try_add_validated(&g1, &result1, 0);
