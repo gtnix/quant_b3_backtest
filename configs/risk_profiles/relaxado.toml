@@ -81,3 +81,17 @@ max_generations = 500
 min_wfa_folds = 3
 min_pbo_permutations = 100
 max_pbo_threshold = 0.50
+
+# =============================================================================
+# Stress Testing (enabled but relaxed thresholds)
+# =============================================================================
+[stress]
+enabled = true                      # SEMPRE executar stress tests
+min_pass = 2                        # Apenas 2 de 5 cenários (relaxado)
+scenarios = ["costs_2x", "delay_plus1", "spread_widen_vol", "capacity_constraint", "flash_crash"]
+
+# Relaxed scenario thresholds
+[stress.thresholds]
+max_sharpe_degradation = 0.70       # Permite até 70% de degradação (normal: 50%)
+max_dd_increase = 0.50              # Permite até 50% de aumento no DD (normal: 30%)
+min_survival_rate = 0.50            # 50% sobrevivência mínima (normal: 80%)

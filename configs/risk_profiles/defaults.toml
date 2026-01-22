@@ -74,9 +74,19 @@ min_momentum_return = 0.0
 use_quantile_thresholds = true
 top_quantile = 0.20              # Top 20%
 
+# =============================================================================
+# Stress Testing Defaults
+# All profiles MUST run stress tests, only thresholds vary
+# =============================================================================
+[stress]
+enabled = true
+min_pass = 3                        # Default: 3 de 5 cenários
+scenarios = ["costs_2x", "delay_plus1", "spread_widen_vol", "capacity_constraint", "flash_crash"]
 
-
-
+[stress.thresholds]
+max_sharpe_degradation = 0.50       # Default: 50% degradação máxima
+max_dd_increase = 0.30              # Default: 30% aumento no DD
+min_survival_rate = 0.70            # Default: 70% sobrevivência
 
 
 
