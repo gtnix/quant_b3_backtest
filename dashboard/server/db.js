@@ -6,11 +6,15 @@ import toml from 'toml';
 
 const { Pool } = pg;
 
-export const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HyU68iqJScrQ@ep-wild-cell-af18q8jx-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require';
-export const pool = new Pool({
+export const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.warn('[DB] WARNING: DATABASE_URL not configured. Database features will be unavailable.');
+}
+export const pool = DATABASE_URL ? new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
-});
+}) : null;
 
 export const PROJECT_ROOT = path.resolve(process.cwd(), '..');
 export let ARTIFACTS_ROOT = path.join(PROJECT_ROOT, 'artifacts');
